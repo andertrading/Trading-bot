@@ -2,3 +2,5 @@ requests
 pandas
 yfinance
 python-dotenv
+flask
+gunicorn
