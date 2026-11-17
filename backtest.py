@@ -23,7 +23,7 @@ ASSETS = {
 INITIAL_CAPITAL = 10000.0
 RISK_PER_TRADE = 0.01
 
-# Hipótesis configurables, no costes reales de eToro.
+# Hipótesis de costes configurables.
 COMMISSION_RATE = 0.001
 SLIPPAGE_RATE = 0.0005
 
@@ -34,30 +34,39 @@ ATR_TARGET = 3.0
 def get_data(ticker, interval):
     period = "60d" if interval == "15m" else "2y"
 
-    df = yf.download(
-        ticker,
-        period=period,
-        interval=interval,
-        auto_adjust=True,
-        progress=False,
-        threads=False
-    )
+    try:
+        df = yf.download(
+            ticker,
+            period=period,
+            interval=interval,
+            auto_adjust=True,
+            progress=False,
+            threads=False
+        )
 
-    if df is None or df.empty:
+        if df is None or df.empty:
+            return None
+
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.get_level_values(0)
+
+        required = ["Open", "High", "Low", "Close"]
+
+        if not all(col in df.columns for col in required):
+            return None
+
+        df = df.dropna(subset=required).copy()
+
+        return df
+
+    except Exception as error:
+        print(f"Error descargando {ticker}: {error}")
         return None
-
-    if isinstance(df.columns, pd.MultiIndex):
-        df.columns = df.columns.get_level_values(0)
-
-    required = ["Open", "High", "Low", "Close"]
-    if not all(column in df.columns for column in required):
-        return None
-
-    return df.dropna(subset=required).copy()
 
 
 def prepare_indicators(df):
     df = df.copy()
+
     close = df["Close"]
 
     df["EMA20"] = close.ewm(
@@ -71,14 +80,15 @@ def prepare_indicators(df):
     delta = close.diff()
 
     gain = delta.clip(lower=0).ewm(
-        alpha=1/14, adjust=False
+        alpha=1 / 14, adjust=False
     ).mean()
 
     loss = (-delta.clip(upper=0)).ewm(
-        alpha=1/14, adjust=False
+        alpha=1 / 14, adjust=False
     ).mean()
 
     rs = gain / loss.replace(0, np.nan)
+
     df["RSI"] = 100 - (100 / (1 + rs))
 
     macd = (
@@ -87,49 +97,88 @@ def prepare_indicators(df):
     )
 
     df["MACD"] = macd
+
     df["MACD_SIGNAL"] = macd.ewm(
         span=9, adjust=False
     ).mean()
 
     previous_close = close.shift(1)
 
-    tr = pd.concat([
+    true_range = pd.concat([
         df["High"] - df["Low"],
         (df["High"] - previous_close).abs(),
         (df["Low"] - previous_close).abs()
     ], axis=1).max(axis=1)
 
-    df["ATR"] = tr.rolling(14).mean()
+    df["ATR"] = true_range.rolling(14).mean()
 
     return df
 
 
-def get_daily_trend(ticker):
+def get_historical_daily_trends(ticker, intraday_index):
     daily = get_data(ticker, "1d")
 
     if daily is None or len(daily) < 60:
-        return None
+        return pd.Series(
+            [None] * len(intraday_index),
+            index=intraday_index,
+            dtype=object
+        )
 
     daily = prepare_indicators(daily)
 
-    row = daily.iloc[-1]
+    bullish = (
+        (daily["EMA50"] > daily["EMA50"].shift(5))
+        & (daily["EMA20"] > daily["EMA50"])
+    )
 
-    if (
-        row["EMA50"] > daily["EMA50"].iloc[-5]
-        and row["EMA20"] > row["EMA50"]
-    ):
-        return "LONG"
+    bearish = (
+        (daily["EMA50"] < daily["EMA50"].shift(5))
+        & (daily["EMA20"] < daily["EMA50"])
+    )
 
-    if (
-        row["EMA50"] < daily["EMA50"].iloc[-5]
-        and row["EMA20"] < row["EMA50"]
-    ):
-        return "SHORT"
+    trends = pd.Series(
+        None,
+        index=daily.index,
+        dtype=object
+    )
 
-    return None
+    trends.loc[bullish] = "LONG"
+    trends.loc[bearish] = "SHORT"
+
+    daily_dates = [
+        pd.Timestamp(x).date()
+        for x in daily.index
+    ]
+
+    historical_trends = []
+
+    for timestamp in intraday_index:
+
+        current_date = pd.Timestamp(timestamp).date()
+
+        # Utilizar únicamente una sesión diaria anterior.
+        position = np.searchsorted(
+            daily_dates,
+            current_date,
+            side="left"
+        ) - 1
+
+        if position < 0:
+            historical_trends.append(None)
+        else:
+            historical_trends.append(
+                trends.iloc[position]
+            )
+
+    return pd.Series(
+        historical_trends,
+        index=intraday_index
+    )
 
 
 def get_signal(df, i, daily_trend=None, interval="1d"):
+
     row = df.iloc[i]
 
     bullish = (
@@ -163,61 +212,102 @@ def get_signal(df, i, daily_trend=None, interval="1d"):
     return None
 
 
-def apply_cost(price, direction, is_entry):
-    if direction == "LONG":
-        adverse = 1 if is_entry else -1
-    else:
-        adverse = -1 if is_entry else 1
+def apply_slippage(price, direction, is_entry):
 
-    return price * (1 + adverse * SLIPPAGE_RATE)
+    if direction == "LONG":
+        adjustment = 1 if is_entry else -1
+    else:
+        adjustment = -1 if is_entry else 1
+
+    return price * (
+        1 + adjustment * SLIPPAGE_RATE
+    )
+
+
+def calculate_exit(position, bar):
+
+    direction = position["direction"]
+
+    open_price = float(bar["Open"])
+    high = float(bar["High"])
+    low = float(bar["Low"])
+
+    stop = position["stop"]
+    target = position["target"]
+
+    if direction == "LONG":
+
+        stop_hit = low <= stop
+        target_hit = high >= target
+
+        if stop_hit:
+            # Si hay hueco bajista, asumir peor ejecución.
+            return min(stop, open_price), "STOP"
+
+        if target_hit:
+            return target, "TARGET"
+
+    else:
+
+        stop_hit = high >= stop
+        target_hit = low <= target
+
+        if stop_hit:
+            # Si hay hueco alcista, asumir peor ejecución.
+            return max(stop, open_price), "STOP"
+
+        if target_hit:
+            return target, "TARGET"
+
+    return None, None
 
 
 def close_trade(position, raw_exit, reason, capital, timestamp):
+
     direction = position["direction"]
 
-    exit_price = apply_cost(
+    exit_price = apply_slippage(
         raw_exit,
         direction,
         is_entry=False
     )
 
+    entry = position["entry"]
+    quantity = position["quantity"]
+
     if direction == "LONG":
-        gross = (
-            exit_price - position["entry"]
-        ) * position["quantity"]
+        gross = (exit_price - entry) * quantity
     else:
-        gross = (
-            position["entry"] - exit_price
-        ) * position["quantity"]
+        gross = (entry - exit_price) * quantity
 
     entry_cost = (
-        position["entry"]
-        * position["quantity"]
-        * COMMISSION_RATE
+        abs(entry * quantity) * COMMISSION_RATE
     )
 
     exit_cost = (
-        abs(exit_price)
-        * position["quantity"]
-        * COMMISSION_RATE
+        abs(exit_price * quantity) * COMMISSION_RATE
     )
 
     pnl = gross - entry_cost - exit_cost
+
     new_capital = capital + pnl
 
-    return {
+    trade = {
         "fecha_entrada": str(position["timestamp"]),
         "fecha_salida": str(timestamp),
         "direccion": direction,
-        "entrada": position["entry"],
+        "entrada": entry,
         "salida": exit_price,
         "resultado": pnl,
         "motivo": reason,
         "capital": new_capital
     }
 
+    return trade, new_capital
+
 
 def run_backtest(name, ticker, interval):
+
     df = get_data(ticker, interval)
 
     if df is None or len(df) < 100:
@@ -225,120 +315,155 @@ def run_backtest(name, ticker, interval):
 
     df = prepare_indicators(df)
 
-    daily_trend = None
-    if interval == "15m":
-        daily_trend = get_daily_trend(ticker)
+    daily_trends = None
 
-        if daily_trend is None:
+    if interval == "15m":
+
+        daily_trends = get_historical_daily_trends(
+            ticker,
+            df.index
+        )
+
+        if daily_trends.isna().all():
             return None, []
 
     capital = INITIAL_CAPITAL
+
     position = None
     trades = []
 
-    for i in range(55, len(df) - 1):
-        row = df.iloc[i]
-        next_row = df.iloc[i + 1]
+    for i in range(56, len(df)):
 
-        if position is None:
-            signal = get_signal(
-                df, i, daily_trend, interval
+        bar = df.iloc[i]
+
+        # Gestionar primero cualquier operación abierta.
+        if position is not None:
+
+            exit_price, reason = calculate_exit(
+                position,
+                bar
             )
 
-            if signal is None:
-                continue
+            if exit_price is not None:
 
-            raw_entry = float(next_row["Open"])
+                trade, capital = close_trade(
+                    position,
+                    exit_price,
+                    reason,
+                    capital,
+                    bar.name
+                )
 
-            entry = apply_cost(
-                raw_entry, signal, is_entry=True
-            )
+                trades.append(trade)
+                position = None
 
-            atr = float(row["ATR"])
-
-            if not np.isfinite(atr) or atr <= 0:
-                continue
-
-            if signal == "LONG":
-                stop = entry - ATR_STOP * atr
-                target = entry + ATR_TARGET * atr
-                risk_per_unit = entry - stop
-            else:
-                stop = entry + ATR_STOP * atr
-                target = entry - ATR_TARGET * atr
-                risk_per_unit = stop - entry
-
-            if risk_per_unit <= 0:
-                continue
-
-            risk_amount = capital * RISK_PER_TRADE
-            quantity = risk_amount / risk_per_unit
-
-            position = {
-                "direction": signal,
-                "entry": entry,
-                "stop": stop,
-                "target": target,
-                "quantity": quantity,
-                "timestamp": next_row.name
-            }
-
-            # No se comprueba stop/objetivo en la misma
-            # vela de entrada: la entrada ocurre en su apertura.
             continue
 
-        direction = position["direction"]
+        # La señal utiliza la vela anterior ya cerrada.
+        signal_index = i - 1
 
-        if direction == "LONG":
-            stop_hit = float(next_row["Low"]) <= position["stop"]
-            target_hit = float(next_row["High"]) >= position["target"]
+        daily_trend = None
+
+        if interval == "15m":
+            daily_trend = daily_trends.iloc[signal_index]
+
+        signal = get_signal(
+            df,
+            signal_index,
+            daily_trend,
+            interval
+        )
+
+        if signal is None:
+            continue
+
+        raw_entry = float(bar["Open"])
+
+        entry = apply_slippage(
+            raw_entry,
+            signal,
+            is_entry=True
+        )
+
+        atr = float(
+            df["ATR"].iloc[signal_index]
+        )
+
+        if not np.isfinite(atr) or atr <= 0:
+            continue
+
+        if signal == "LONG":
+
+            stop = entry - ATR_STOP * atr
+            target = entry + ATR_TARGET * atr
+
+            risk_per_unit = entry - stop
+
         else:
-            stop_hit = float(next_row["High"]) >= position["stop"]
-            target_hit = float(next_row["Low"]) <= position["target"]
 
-        exit_price = None
-        reason = None
+            stop = entry + ATR_STOP * atr
+            target = entry - ATR_TARGET * atr
 
-        if stop_hit:
-            exit_price = position["stop"]
-            reason = "STOP"
-        elif target_hit:
-            exit_price = position["target"]
-            reason = "TARGET"
+            risk_per_unit = stop - entry
+
+        if risk_per_unit <= 0:
+            continue
+
+        risk_amount = capital * RISK_PER_TRADE
+
+        quantity = risk_amount / risk_per_unit
+
+        position = {
+            "direction": signal,
+            "entry": entry,
+            "stop": stop,
+            "target": target,
+            "quantity": quantity,
+            "timestamp": bar.name
+        }
+
+        # Comprobar también la vela de entrada.
+        exit_price, reason = calculate_exit(
+            position,
+            bar
+        )
 
         if exit_price is not None:
-            trade = close_trade(
+
+            trade, capital = close_trade(
                 position,
                 exit_price,
                 reason,
                 capital,
-                next_row.name
+                bar.name
             )
 
-            capital = trade["capital"]
             trades.append(trade)
             position = None
 
-    # Cierre al final del histórico.
+    # Cerrar cualquier posición pendiente.
     if position is not None:
-        last = df.iloc[-1]
 
-        trade = close_trade(
+        last_bar = df.iloc[-1]
+
+        trade, capital = close_trade(
             position,
-            float(last["Close"]),
+            float(last_bar["Close"]),
             "FIN_HISTORICO",
             capital,
-            last.name
+            last_bar.name
         )
 
-        capital = trade["capital"]
         trades.append(trade)
 
     if not trades:
+
         return {
             "activo": name,
             "temporalidad": interval,
             "operaciones": 0,
+            "ganadoras": 0,
+            "perdedoras": 0,
             "acierto_%": 0,
             "rentabilidad_%": 0,
             "drawdown_%": 0
@@ -346,15 +471,23 @@ def run_backtest(name, ticker, interval):
 
     results = pd.DataFrame(trades)
 
-    wins = int((results["resultado"] > 0).sum())
-    losses = int((results["resultado"] <= 0).sum())
+    wins = int(
+        (results["resultado"] > 0).sum()
+    )
+
+    losses = int(
+        (results["resultado"] <= 0).sum()
+    )
 
     equity = pd.Series(
         [INITIAL_CAPITAL] + results["capital"].tolist()
     )
 
     peak = equity.cummax()
-    drawdown = (equity / peak - 1) * 100
+
+    drawdown = (
+        (equity / peak - 1) * 100
+    )
 
     summary = {
         "activo": name,
@@ -366,7 +499,8 @@ def run_backtest(name, ticker, interval):
             wins / len(results) * 100, 2
         ),
         "rentabilidad_%": round(
-            (capital / INITIAL_CAPITAL - 1) * 100, 2
+            (capital / INITIAL_CAPITAL - 1) * 100,
+            2
         ),
         "drawdown_%": round(
             abs(drawdown.min()), 2
@@ -377,19 +511,28 @@ def run_backtest(name, ticker, interval):
 
 
 def main():
+
     summaries = []
     all_trades = []
 
     for name, ticker in ASSETS.items():
+
         for interval in ["15m", "1d"]:
-            print(f"Analizando {name} - {interval}")
+
+            print(
+                f"Analizando {name} - {interval}"
+            )
 
             try:
+
                 summary, trades = run_backtest(
-                    name, ticker, interval
+                    name,
+                    ticker,
+                    interval
                 )
 
                 if summary is not None:
+
                     summaries.append(summary)
 
                     for trade in trades:
@@ -399,11 +542,13 @@ def main():
                     all_trades.extend(trades)
 
             except Exception as error:
+
                 print(
                     f"Error en {name} {interval}: {error}"
                 )
 
     if not summaries:
+
         print("No hay resultados disponibles")
         return
 
@@ -412,33 +557,20 @@ def main():
         index=False
     )
 
-    pd.DataFrame(all_trades).to_csv(
-        "operaciones_backtest.csv",
-        index=False
-    )
+    if all_trades:
+
+        pd.DataFrame(all_trades).to_csv(
+            "operaciones_backtest.csv",
+            index=False
+        )
 
     print("\n===== RESULTADOS BACKTEST =====")
-    print(pd.DataFrame(summaries).to_string(index=False))
+
+    print(
+        pd.DataFrame(summaries).to_string(index=False)
+    )
 
     print("\nArchivos CSV generados.")
-
-
-ASSETS = {
-    "S&P 500": "^GSPC",
-    "Nasdaq 100": "^NDX",
-    "Tesla": "TSLA",
-    "Nvidia": "NVDA",
-    "Apple": "AAPL",
-    "Microsoft": "MSFT",
-    "EUR/USD": "EURUSD=X",
-    "GBP/USD": "GBPUSD=X",
-    "Oro": "GC=F",
-    "Petróleo": "CL=F",
-    "Bitcoin": "BTC-USD",
-    "Ethereum": "ETH-USD",
-    "Solana": "SOL-USD",
-    "XLM": "XLM-USD"
-}
 
 
 if __name__ == "__main__":
