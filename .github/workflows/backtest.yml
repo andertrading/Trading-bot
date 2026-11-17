@@ -1,5 +1,5 @@
 
-name: Trading Bot Backtesting
+name: Trading Bot Backtesting 
 
 on:
   workflow_dispatch:
