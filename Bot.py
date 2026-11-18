@@ -9,9 +9,7 @@ from config import (
     SWING_INTERVAL,
 )
 from data_engine import download_data
-from indicators import add_indicators
 from strategies import evaluate_signal
-from notifier import send_telegram, format_signal
 
 app = Flask(__name__)
 
@@ -20,8 +18,6 @@ logger = logging.getLogger(__name__)
 
 
 def analyze_asset(asset, timeframe):
-    """Descarga datos y evalúa un activo."""
-
     try:
         df = download_data(asset, timeframe)
 
@@ -30,12 +26,12 @@ def analyze_asset(asset, timeframe):
                 "action": "NO TRADE",
                 "asset": asset,
                 "timeframe": timeframe,
-                "reason": "Datos no disponibles o insuficientes",
+                "reason": "Datos no disponibles",
             }
 
         return evaluate_signal(df, asset, timeframe)
 
-    except Exception as exc:
+    except Exception:
         logger.exception("Error analizando %s", asset)
 
         return {
@@ -46,9 +42,7 @@ def analyze_asset(asset, timeframe):
         }
 
 
-def run_scan(send_alerts=False):
-    """Analiza todos los activos habilitados."""
-
+def run_scan():
     results = []
 
     for asset, settings in ASSETS.items():
@@ -62,14 +56,6 @@ def run_scan(send_alerts=False):
             result = analyze_asset(asset, timeframe)
             results.append(result)
 
-            # Las alertas son únicamente candidatos informativos.
-            # No son órdenes ni recomendaciones validadas.
-            if (
-                send_alerts
-                and result.get("action") == "BUY CANDIDATE"
-            ):
-                send_telegram(format_signal(result))
-
     candidates = [
         result for result in results
         if result.get("action") == "BUY CANDIDATE"
@@ -78,18 +64,13 @@ def run_scan(send_alerts=False):
     return {
         "version": BOT_VERSION,
         "status": "analysis_completed",
-        "assets_analyzed": len(
-            [
-                asset for asset in ASSETS.values()
-                if asset.get("enabled", False)
-            ]
-        ),
         "analyses_completed": len(results),
         "candidates_found": len(candidates),
         "results": results,
-        "trading_mode": "PAPER_ONLY",
-        "execution_enabled": False,
-        "validated_for_real_trading": False,
+        "mode": "PAPER_ONLY",
+        "telegram_alerts_enabled": False,
+        "automatic_execution": False,
+        "real_trading_authorized": False,
     }
 
 
@@ -100,7 +81,6 @@ def home():
         "version": BOT_VERSION,
         "status": "running",
         "mode": "PAPER_ONLY",
-        "automatic_execution": False,
     })
 
 
@@ -115,12 +95,9 @@ def health():
 @app.route("/scan", methods=["GET"])
 def scan():
     try:
-        results = run_scan(send_alerts=True)
-        return jsonify(results)
-
+        return jsonify(run_scan())
     except Exception:
         logger.exception("Error general durante el análisis")
-
         return jsonify({
             "status": "error",
             "message": "No se pudo completar el análisis",
