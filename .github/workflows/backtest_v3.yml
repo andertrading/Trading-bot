@@ -1,0 +1,44 @@
+
+name: Trading Bot 3.0 - Backtest
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - "backtest_v3.py"
+      - "config.py"
+      - ".github/workflows/backtest_v3.yml"
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Descargar repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Instalar dependencias
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Ejecutar backtest 3.0
+        run: python backtest_v3.py
+
+      - name: Guardar resultados
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: resultados-backtest-v3
+          path: |
+            operaciones_backtest_v3.csv
+            resultados_backtest_v3.csv
+            errores_backtest_v3.csv
+          if-no-files-found: warn
