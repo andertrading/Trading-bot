@@ -50,6 +50,7 @@ jobs:
           test -f operaciones_backtest_v3.csv
           test -f resultados_backtest_v3.csv
           test -f errores_backtest_v3.csv
+          test -f resumen_operaciones_v3.csv
 
       - name: Guardar resultados
         if: always()
@@ -60,5 +61,6 @@ jobs:
             operaciones_backtest_v3.csv
             resultados_backtest_v3.csv
             errores_backtest_v3.csv
+            resumen_operaciones_v3.csv
           if-no-files-found: warn
           retention-days: 30
