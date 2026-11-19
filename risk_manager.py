@@ -229,9 +229,9 @@ def calculate_position_size(
             "El límite configurado de cartera no es válido."
         )
 
-    risk_pct = risk_pct_for_score(score)
+    requested_risk_pct = risk_pct_for_score(score)
 
-    if risk_pct <= 0:
+    if requested_risk_pct <= 0:
         return _blocked_status(
             "La calidad de la señal no alcanza el nivel mínimo."
         )
@@ -262,20 +262,30 @@ def calculate_position_size(
         max_portfolio_risk_usd - portfolio_risk_usd
     )
 
-    risk_amount_usd = capital_usd * risk_pct
+    requested_risk_amount_usd = (
+        capital_usd * requested_risk_pct
+    )
 
     if (
-        not _is_finite_number(risk_amount_usd)
-        or risk_amount_usd <= 0
+        not _is_finite_number(requested_risk_amount_usd)
+        or requested_risk_amount_usd <= 0
     ):
         return _blocked_status(
             "El importe de riesgo calculado no es válido."
         )
 
     risk_amount_usd = min(
-        risk_amount_usd,
+        requested_risk_amount_usd,
         remaining_portfolio_risk_usd,
     )
+
+    # Porcentaje efectivo después de aplicar el límite de cartera.
+    risk_pct = risk_amount_usd / capital_usd
+
+    if not _is_finite_number(risk_pct) or risk_pct <= 0:
+        return _blocked_status(
+            "El porcentaje de riesgo efectivo no es válido."
+        )
 
     price_risk_quote = entry - stop
 
@@ -325,6 +335,7 @@ def calculate_position_size(
             "hasta completar la validación del sistema."
         ),
         "risk_tier": risk_tier,
+        "requested_risk_pct": requested_risk_pct,
         "risk_pct": risk_pct,
         "risk_amount_usd": risk_amount_usd,
         "max_portfolio_risk_usd": max_portfolio_risk_usd,
