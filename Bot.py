@@ -1,5 +1,7 @@
 
 import logging
+import faulthandler
+faulthandler.enable(all_threads=True)
 import threading
 from datetime import datetime, timezone
 from uuid import uuid4
