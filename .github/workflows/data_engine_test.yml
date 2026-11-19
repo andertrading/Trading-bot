@@ -1,0 +1,69 @@
+
+name: Trading Bot 3.0 - Data Engine Test
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test-data-engine:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Descargar repositorio
+        uses: actions/checkout@v4
+
+      - name: Preparar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Instalar dependencias
+        run: pip install -r requirements.txt
+
+      - name: Probar proveedores de datos
+        env:
+          TWELVE_DATA_API_KEY: ${{ secrets.TWELVE_DATA_API_KEY }}
+        run: |
+          python - <<'PY'
+          import time
+          from data_engine import download_data, get_data_timestamp, is_data_fresh
+
+          tests = [
+              ("TSLA", "15m"),
+              ("BTC", "15m"),
+              ("TSLA", "1d"),
+              ("BTC", "1d"),
+              ("CSPX", "15m"),
+              ("CNDX", "15m"),
+              ("CSPX", "1d"),
+              ("CNDX", "1d"),
+          ]
+
+          failures = []
+
+          for asset, interval in tests:
+              print(f"\nProbando {asset} - {interval}")
+
+              df = download_data(asset, interval)
+
+              if df is None or df.empty:
+                  print("ERROR: No se han recibido datos válidos")
+                  failures.append(f"{asset} {interval}")
+              else:
+                  timestamp = get_data_timestamp(df)
+                  print(f"OK: {len(df)} velas")
+                  print(f"Última vela: {timestamp}")
+                  print(f"Datos recientes: {is_data_fresh(df)}")
+
+              if asset in ("TSLA", "BTC"):
+                  time.sleep(9)
+
+          print("\n------------------------------")
+          print(f"Pruebas fallidas: {len(failures)}")
+
+          if failures:
+              print("Fallos:", ", ".join(failures))
+              raise SystemExit(1)
+
+          print("TODAS LAS PRUEBAS SUPERADAS")
+          PY
