@@ -44,6 +44,14 @@ COLUMNS = ["Open", "High", "Low", "Close", "Volume"]
 
 CRYPTO_ASSETS = {"BTC", "ETH", "SOL", "XLM", "XRP"}
 
+CRYPTO_SYMBOLS = {
+    "BTC": "BTC/USD",
+    "ETH": "ETH/USD",
+    "SOL": "SOL/USD",
+    "XLM": "XLM/USD",
+    "XRP": "XRP/USD",
+}
+
 TWELVE_DATA_MIN_INTERVAL = 8.5
 
 CACHE_TTL = {
@@ -183,9 +191,6 @@ def _remove_incomplete_candle(df, interval):
     now = datetime.now(timezone.utc)
 
     if interval == "15m":
-        # Las velas llevan como timestamp su hora de inicio.
-        # Conservamos únicamente velas cuyo periodo de 15m
-        # ya ha terminado.
         current_period_start = now.replace(
             minute=(now.minute // 15) * 15,
             second=0,
@@ -199,12 +204,39 @@ def _remove_incomplete_candle(df, interval):
         return df[df.index <= last_completed_start]
 
     if interval == "1d":
-        # Las velas diarias están etiquetadas a las 00:00 UTC.
-        # Excluimos la vela del día que todavía está en curso.
         today = now.date()
         return df[df.index.date < today]
 
     return df
+
+
+def _log_dataframe_timestamps(provider, asset, interval, df):
+    if df is None or df.empty:
+        logger.warning(
+            "DATA TIMESTAMPS | %s | %s | %s | sin datos",
+            provider,
+            asset,
+            interval,
+        )
+        return
+
+    first_timestamp = df.index[0]
+    last_timestamp = df.index[-1]
+
+    age_minutes = (
+        pd.Timestamp.now(tz="UTC") - last_timestamp
+    ).total_seconds() / 60
+
+    logger.info(
+        "DATA TIMESTAMPS | %s | %s | %s | first=%s | last=%s | age=%.1f min | rows=%s",
+        provider,
+        asset,
+        interval,
+        first_timestamp.isoformat(),
+        last_timestamp.isoformat(),
+        age_minutes,
+        len(df),
+    )
 
 
 def _twelvedata_request(params):
@@ -237,8 +269,13 @@ def _download_twelvedata(asset, config, interval):
         logger.error("Falta TWELVE_DATA_API_KEY")
         return None
 
+    symbol = (
+        config.get("twelvedata_symbol")
+        or CRYPTO_SYMBOLS.get(asset, asset)
+    )
+
     params = {
-        "symbol": asset,
+        "symbol": symbol,
         "interval": INTERVAL_MAP[interval],
         "outputsize": 5000,
         "timezone": "UTC",
@@ -253,18 +290,30 @@ def _download_twelvedata(asset, config, interval):
 
         if "values" not in payload:
             logger.error(
-                "Twelve Data rechazó %s: %s",
+                "Twelve Data rechazó %s (%s): %s",
                 asset,
+                symbol,
                 payload.get("message", payload.get("code", payload)),
             )
             return None
 
-        df = pd.DataFrame(payload["values"])
+        values = payload["values"]
 
-        if df.empty or "datetime" not in df.columns:
-            logger.error(
-                "Twelve Data devolvió datos vacíos o sin fechas para %s",
+        if not values:
+            logger.warning(
+                "Twelve Data devolvió una lista vacía para %s (%s)",
                 asset,
+                symbol,
+            )
+            return None
+
+        df = pd.DataFrame(values)
+
+        if "datetime" not in df.columns:
+            logger.error(
+                "Twelve Data no devolvió fechas para %s (%s)",
+                asset,
+                symbol,
             )
             return None
 
@@ -288,6 +337,22 @@ def _download_twelvedata(asset, config, interval):
         df = df.set_index("datetime")
 
         df = _normalise_dataframe(df)
+
+        if df is None:
+            logger.warning(
+                "No se pudieron normalizar los datos de %s",
+                asset,
+            )
+            return None
+
+        # Registramos las fechas antes de eliminar la vela en curso.
+        _log_dataframe_timestamps(
+            "Twelve Data RAW",
+            asset,
+            interval,
+            df,
+        )
+
         df = _remove_incomplete_candle(df, interval)
 
         if df is None or len(df) < 220:
@@ -298,9 +363,17 @@ def _download_twelvedata(asset, config, interval):
             )
             return None
 
-        logger.info(
-            "Twelve Data OK: %s %s, %s velas",
+        _log_dataframe_timestamps(
+            "Twelve Data FINAL",
             asset,
+            interval,
+            df,
+        )
+
+        logger.info(
+            "Twelve Data OK: %s (%s) %s, %s velas",
+            asset,
+            symbol,
             interval,
             len(df),
         )
@@ -403,19 +476,37 @@ def _download_yahoo(asset, config, interval):
 
         quote = quotes[0]
 
-        df = pd.DataFrame({
-            "Open": quote.get("open", []),
-            "High": quote.get("high", []),
-            "Low": quote.get("low", []),
-            "Close": quote.get("close", []),
-            "Volume": quote.get("volume", []),
-        }, index=pd.to_datetime(
-            timestamps,
-            unit="s",
-            utc=True,
-        ))
+        df = pd.DataFrame(
+            {
+                "Open": quote.get("open", []),
+                "High": quote.get("high", []),
+                "Low": quote.get("low", []),
+                "Close": quote.get("close", []),
+                "Volume": quote.get("volume", []),
+            },
+            index=pd.to_datetime(
+                timestamps,
+                unit="s",
+                utc=True,
+            ),
+        )
 
         df = _normalise_dataframe(df)
+
+        if df is None:
+            logger.warning(
+                "Yahoo no devolvió datos válidos para %s",
+                ticker,
+            )
+            return None
+
+        _log_dataframe_timestamps(
+            "Yahoo RAW",
+            asset,
+            interval,
+            df,
+        )
+
         df = _remove_incomplete_candle(df, interval)
 
         if df is None or len(df) < 220:
@@ -425,6 +516,13 @@ def _download_yahoo(asset, config, interval):
                 interval,
             )
             return None
+
+        _log_dataframe_timestamps(
+            "Yahoo FINAL",
+            asset,
+            interval,
+            df,
+        )
 
         logger.info(
             "Yahoo OK: %s %s, %s velas",
@@ -552,11 +650,11 @@ def is_data_fresh(
         return False
 
     if asset in CRYPTO_ASSETS:
-        # El timestamp representa el inicio de la vela.
-        # Damos margen para el cierre y la publicación del proveedor.
         limit = 45 if interval == "15m" else 48 * 60
     else:
-        # Los mercados tradicionales pueden estar cerrados.
+        # Se conserva temporalmente el margen anterior para mercados
+        # tradicionales. La validación por horario de mercado debe
+        # añadirse antes de utilizar señales intradía como operables.
         limit = max(max_age_minutes, 72 * 60)
 
     is_fresh = age_minutes <= limit
