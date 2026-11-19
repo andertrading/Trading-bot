@@ -207,6 +207,121 @@ class TestBacktestV3(unittest.TestCase):
 
         self.assertTrue(result.empty)
 
+    def test_operations_summary_calculates_losing_streak(self):
+        trades = [
+            {
+                "asset": "AAPL",
+                "timeframe": "1d",
+                "exit_time": "2025-01-10",
+                "exit_reason": "STOP",
+                "result_R": -1.0,
+            },
+            {
+                "asset": "AAPL",
+                "timeframe": "1d",
+                "exit_time": "2025-01-11",
+                "exit_reason": "STOP",
+                "result_R": -1.0,
+            },
+            {
+                "asset": "AAPL",
+                "timeframe": "1d",
+                "exit_time": "2025-01-12",
+                "exit_reason": "TARGET",
+                "result_R": 2.0,
+            },
+        ]
+
+        result = backtest_v3.generate_operations_summary(trades)
+
+        total = result[
+            result["tipo"] == "ACTIVO_TEMPORALIDAD"
+        ].iloc[0]
+
+        self.assertEqual(total["racha_perdedora_max"], 2)
+
+    def test_operations_summary_separates_months(self):
+        trades = [
+            {
+                "asset": "AAPL",
+                "timeframe": "1d",
+                "exit_time": "2025-01-10",
+                "exit_reason": "TARGET",
+                "result_R": 1.0,
+            },
+            {
+                "asset": "AAPL",
+                "timeframe": "1d",
+                "exit_time": "2025-02-10",
+                "exit_reason": "STOP",
+                "result_R": -1.0,
+            },
+        ]
+
+        result = backtest_v3.generate_operations_summary(trades)
+
+        monthly = result[result["tipo"] == "MENSUAL"]
+
+        self.assertEqual(len(monthly), 2)
+        self.assertEqual(
+            set(monthly["periodo"]),
+            {"2025-01", "2025-02"},
+        )
+
+    def test_operations_summary_accepts_dataframe(self):
+        trades = pd.DataFrame([
+            {
+                "asset": "AAPL",
+                "timeframe": "1d",
+                "exit_time": "2025-01-10",
+                "exit_reason": "TARGET",
+                "result_R": 1.5,
+            },
+            {
+                "asset": "AAPL",
+                "timeframe": "1d",
+                "exit_time": "2025-01-11",
+                "exit_reason": "STOP",
+                "result_R": -1.0,
+            },
+        ])
+
+        result = backtest_v3.generate_operations_summary(trades)
+
+        total = result[
+            result["tipo"] == "ACTIVO_TEMPORALIDAD"
+        ].iloc[0]
+
+        self.assertEqual(total["operaciones"], 2)
+        self.assertAlmostEqual(total["resultado_R"], 0.5)
+
+    def test_operations_summary_ignores_invalid_results(self):
+        trades = [
+            {
+                "asset": "AAPL",
+                "timeframe": "1d",
+                "exit_time": "2025-01-10",
+                "exit_reason": "TARGET",
+                "result_R": 1.0,
+            },
+            {
+                "asset": "AAPL",
+                "timeframe": "1d",
+                "exit_time": "2025-01-11",
+                "exit_reason": "STOP",
+                "result_R": float("nan"),
+            },
+        ]
+
+        result = backtest_v3.generate_operations_summary(trades)
+
+        total = result[
+            result["tipo"] == "ACTIVO_TEMPORALIDAD"
+        ].iloc[0]
+
+        self.assertEqual(total["operaciones"], 1)
+        self.assertAlmostEqual(total["resultado_R"], 1.0)
+
 
 if __name__ == "__main__":
     unittest.main()
