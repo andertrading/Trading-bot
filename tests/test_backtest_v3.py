@@ -29,6 +29,80 @@ class TestBacktestV3(unittest.TestCase):
             index=index,
         )
 
+    def make_execution_data(self, rows=14):
+        index = pd.date_range(
+            "2025-01-01",
+            periods=rows,
+            freq="15min",
+        )
+
+        data = pd.DataFrame(
+            {
+                "Open": [100.0] * rows,
+                "High": [101.0] * rows,
+                "Low": [99.0] * rows,
+                "Close": [100.0] * rows,
+                "Volume": [1000] * rows,
+                "ATR": [2.0] * rows,
+            },
+            index=index,
+        )
+
+        # Señal en la vela 4; entrada en la apertura de la vela 5.
+        data.iloc[4, data.columns.get_loc("Close")] = 100.0
+        data.iloc[5, data.columns.get_loc("Open")] = 101.0
+
+        return data
+
+    def run_execution_test(self, data, signal_indexes=(4,)):
+        signals = set(signal_indexes)
+
+        def fake_signal(data, asset, timeframe, index):
+            if index in signals:
+                return {
+                    "action": "BUY CANDIDATE",
+                    "score": 80,
+                }
+
+            return None
+
+        with (
+            patch.object(
+                backtest_v3,
+                "MIN_BARS",
+                5,
+            ),
+            patch.dict(
+                backtest_v3.PERIODS,
+                {
+                    "15m": {
+                        "period": "60d",
+                        "max_bars": 3,
+                    }
+                },
+            ),
+            patch.object(
+                backtest_v3,
+                "download_history",
+                return_value=data.copy(),
+            ),
+            patch.object(
+                backtest_v3,
+                "add_indicators",
+                side_effect=lambda frame: frame,
+            ),
+            patch.object(
+                backtest_v3,
+                "evaluate_signal_at",
+                side_effect=fake_signal,
+            ),
+        ):
+            return backtest_v3.run_backtest(
+                "AAPL",
+                "AAPL",
+                "15m",
+            )
+
     def test_valid_ohlc_data(self):
         self.assertTrue(
             backtest_v3._valid_ohlc(self.make_data())
@@ -59,8 +133,8 @@ class TestBacktestV3(unittest.TestCase):
                 "15m",
             )
 
-        if cleaned is not None:
-            self.assertFalse(cleaned.index.has_duplicates)
+        self.assertIsNotNone(cleaned)
+        self.assertFalse(cleaned.index.has_duplicates)
 
     def test_metrics_with_no_trades(self):
         result = backtest_v3.calculate_metrics(
@@ -321,6 +395,137 @@ class TestBacktestV3(unittest.TestCase):
 
         self.assertEqual(total["operaciones"], 1)
         self.assertAlmostEqual(total["resultado_R"], 1.0)
+
+    # ---------------------------------------------------------
+    # PRUEBAS DE EJECUCIÓN DEL MOTOR
+    # ---------------------------------------------------------
+
+    def test_entry_uses_next_candle_open(self):
+        data = self.make_execution_data()
+
+        trades, error = self.run_execution_test(data)
+
+        self.assertIsNone(error)
+        self.assertEqual(len(trades), 1)
+
+        trade = trades[0]
+
+        self.assertEqual(trade["entry"], 101.0)
+        self.assertEqual(trade["signal_reference"], 100.0)
+
+    def test_stop_and_target_are_calculated_from_entry(self):
+        data = self.make_execution_data()
+
+        # ATR = 2; riesgo = 1.5 ATR; objetivo = 3 ATR.
+        trades, error = self.run_execution_test(data)
+
+        self.assertIsNone(error)
+        self.assertEqual(len(trades), 1)
+
+        trade = trades[0]
+
+        self.assertAlmostEqual(trade["stop"], 98.0)
+        self.assertAlmostEqual(trade["target"], 107.0)
+
+    def test_stop_is_triggered(self):
+        data = self.make_execution_data()
+
+        data.iloc[5, data.columns.get_loc("Low")] = 97.5
+
+        trades, error = self.run_execution_test(data)
+
+        self.assertIsNone(error)
+        self.assertEqual(len(trades), 1)
+        self.assertEqual(trades[0]["exit_reason"], "STOP")
+        self.assertAlmostEqual(trades[0]["exit"], 98.0)
+
+    def test_target_is_triggered(self):
+        data = self.make_execution_data()
+
+        data.iloc[5, data.columns.get_loc("High")] = 107.5
+
+        trades, error = self.run_execution_test(data)
+
+        self.assertIsNone(error)
+        self.assertEqual(len(trades), 1)
+        self.assertEqual(trades[0]["exit_reason"], "TARGET")
+        self.assertAlmostEqual(trades[0]["exit"], 107.0)
+
+    def test_stop_has_priority_when_stop_and_target_are_hit(self):
+        data = self.make_execution_data()
+
+        data.iloc[5, data.columns.get_loc("Low")] = 97.5
+        data.iloc[5, data.columns.get_loc("High")] = 107.5
+
+        trades, error = self.run_execution_test(data)
+
+        self.assertIsNone(error)
+        self.assertEqual(len(trades), 1)
+        self.assertEqual(trades[0]["exit_reason"], "STOP")
+        self.assertAlmostEqual(trades[0]["exit"], 98.0)
+
+    def test_stop_gap_exits_at_open(self):
+        data = self.make_execution_data()
+
+        data.iloc[5, data.columns.get_loc("Open")] = 97.0
+        data.iloc[5, data.columns.get_loc("Low")] = 96.0
+
+        trades, error = self.run_execution_test(data)
+
+        self.assertIsNone(error)
+        self.assertEqual(len(trades), 1)
+        self.assertEqual(trades[0]["exit_reason"], "STOP_GAP")
+        self.assertAlmostEqual(trades[0]["exit"], 97.0)
+
+    def test_target_gap_exits_at_target(self):
+        data = self.make_execution_data()
+
+        data.iloc[5, data.columns.get_loc("Open")] = 108.0
+        data.iloc[5, data.columns.get_loc("High")] = 109.0
+
+        trades, error = self.run_execution_test(data)
+
+        self.assertIsNone(error)
+        self.assertEqual(len(trades), 1)
+        self.assertEqual(trades[0]["exit_reason"], "TARGET_GAP")
+        self.assertAlmostEqual(trades[0]["exit"], 107.0)
+
+    def test_trade_closes_at_max_hold(self):
+        data = self.make_execution_data()
+
+        data.iloc[7, data.columns.get_loc("Close")] = 102.5
+
+        trades, error = self.run_execution_test(data)
+
+        self.assertIsNone(error)
+        self.assertEqual(len(trades), 1)
+        self.assertEqual(trades[0]["exit_reason"], "MAX_HOLD")
+        self.assertAlmostEqual(trades[0]["exit"], 102.5)
+
+    def test_engine_does_not_open_overlapping_trades(self):
+        data = self.make_execution_data(rows=14)
+
+        # Señal en 4, otra durante la operación en 5,
+        # y una nueva señal después de terminar en 8.
+        trades, error = self.run_execution_test(
+            data,
+            signal_indexes=(4, 5, 8),
+        )
+
+        self.assertIsNone(error)
+
+        # La señal de la vela 5 no debe abrir otra operación.
+        # La señal de la vela 8 sí puede hacerlo.
+        self.assertEqual(len(trades), 2)
+
+        self.assertEqual(
+            trades[0]["signal_time"],
+            data.index[4],
+        )
+        self.assertEqual(
+            trades[1]["signal_time"],
+            data.index[8],
+        )
 
 
 if __name__ == "__main__":
