@@ -1,4 +1,3 @@
-
 import warnings
 
 import numpy as np
@@ -10,7 +9,7 @@ from indicators import add_indicators
 from strategies import evaluate_signal_at
 
 
-VERSION = "3.7"
+VERSION = "3.8"
 
 PERIODS = {
     "15m": {"period": "60d", "max_bars": 32},
@@ -21,9 +20,20 @@ MIN_BARS = 220
 
 DOWNLOAD_ERRORS = {}
 
-# Registro de velas incoherentes detectadas.
-# Si aparece alguna, se rechaza el histórico completo.
 EXCLUDED_OHLC_CANDLES = []
+
+
+# ---------------------------------------------------------
+# CONFIGURACIÓN DE HUECOS TEMPORALES
+# ---------------------------------------------------------
+
+INTRADAY_INTERVAL_MINUTES = {
+    "15m": 15,
+}
+
+# Tolerancia para evitar falsos positivos por pequeñas
+# diferencias de timestamp del proveedor.
+GAP_TOLERANCE_MULTIPLIER = 1.5
 
 
 def get_assets():
@@ -44,6 +54,103 @@ def get_assets():
             result.append((name, ticker))
 
     return result
+
+
+def _get_asset_type(asset):
+    """Devuelve el tipo de activo configurado."""
+
+    settings = ASSETS.get(asset, {})
+
+    if not isinstance(settings, dict):
+        return "UNKNOWN"
+
+    return str(settings.get("type", "UNKNOWN")).upper()
+
+
+def _has_unexpected_gap(
+    previous_timestamp,
+    current_timestamp,
+    interval,
+    asset_type,
+):
+    """
+    Detecta discontinuidades temporales anómalas.
+
+    CRYPTO:
+        Cotización continua.
+        Se comprueba la continuidad temporal.
+
+    STOCK / ETF:
+        En 15m se comprueban huecos dentro del mismo día.
+        Los cierres nocturnos no se consideran anomalías.
+
+    Temporalidad diaria de acciones y ETF:
+        No se comprueba automáticamente porque no disponemos
+        de un calendario bursátil con festivos.
+    """
+
+    try:
+        previous = pd.Timestamp(previous_timestamp)
+        current = pd.Timestamp(current_timestamp)
+
+    except (TypeError, ValueError):
+        return True
+
+    if pd.isna(previous) or pd.isna(current):
+        return True
+
+    elapsed = current - previous
+
+    if elapsed <= pd.Timedelta(0):
+        return True
+
+    asset_type = str(asset_type).upper()
+
+    # -----------------------------------------------------
+    # CRIPTOMONEDAS
+    # -----------------------------------------------------
+
+    if asset_type == "CRYPTO":
+
+        if interval == "15m":
+            expected = pd.Timedelta(minutes=15)
+
+        elif interval == "1d":
+            expected = pd.Timedelta(days=1)
+
+        else:
+            return True
+
+        maximum = expected * GAP_TOLERANCE_MULTIPLIER
+
+        return elapsed > maximum
+
+    # -----------------------------------------------------
+    # ACCIONES Y ETF
+    # -----------------------------------------------------
+
+    if asset_type in ("STOCK", "ETF"):
+
+        if interval == "15m":
+
+            # Los cierres nocturnos y cambios de fecha
+            # no se consideran huecos anómalos.
+            if previous.date() != current.date():
+                return False
+
+            expected = pd.Timedelta(minutes=15)
+
+            maximum = expected * GAP_TOLERANCE_MULTIPLIER
+
+            return elapsed > maximum
+
+        if interval == "1d":
+            # No se puede distinguir con seguridad un festivo
+            # de una sesión ausente sin calendario bursátil.
+            return False
+
+    # Tipo desconocido: no asumimos continuidad.
+    return True
 
 
 def _normalize_columns(data):
@@ -108,6 +215,7 @@ def _ohlc_validation_error(data):
     for column in required:
         try:
             values = data[column].to_numpy(dtype=float)
+
         except (TypeError, ValueError) as exc:
             return f"No se puede convertir {column} a números: {exc}"
 
@@ -137,13 +245,14 @@ def _valid_ohlc(data):
 
 def download_history(ticker, interval):
     """
-    Descarga el histórico.
+    Descarga y valida el histórico.
 
-    No elimina velas OHLC incoherentes: rechaza el histórico
-    completo para evitar crear discontinuidades artificiales.
+    No elimina velas OHLC incoherentes.
+    Si detecta alguna, rechaza el histórico completo.
     """
 
     key = (ticker, interval)
+
     DOWNLOAD_ERRORS.pop(key, None)
 
     if interval not in PERIODS:
@@ -169,7 +278,9 @@ def download_history(ticker, interval):
         )
 
         DOWNLOAD_ERRORS[key] = error
+
         warnings.warn(f"{ticker} ({interval}): {error}")
+
         return None
 
     if data is None:
@@ -217,8 +328,6 @@ def download_history(ticker, interval):
     try:
         data = data[columns].copy()
 
-        # Convertimos OHLC sin eliminar silenciosamente
-        # las filas que contengan valores ausentes.
         for column in required:
             data[column] = pd.to_numeric(
                 data[column],
@@ -231,7 +340,6 @@ def download_history(ticker, interval):
                 errors="coerce",
             )
 
-        # Un OHLC ausente o no numérico invalida el histórico.
         for column in required:
             if data[column].isna().any():
                 missing_count = int(data[column].isna().sum())
@@ -241,6 +349,7 @@ def download_history(ticker, interval):
                     f"{missing_count} valores ausentes o no numéricos. "
                     "Se rechaza el histórico para evitar huecos."
                 )
+
                 return None
 
         data = data.replace(
@@ -261,8 +370,6 @@ def download_history(ticker, interval):
             )
             return None
 
-        # Los duplicados temporales se resuelven conservando
-        # el último registro de cada timestamp.
         data = data[
             ~data.index.duplicated(keep="last")
         ]
@@ -282,7 +389,6 @@ def download_history(ticker, interval):
         )
         return None
 
-    # Los precios cero, negativos o no finitos son errores.
     for column in required:
         values = data[column].to_numpy(dtype=float)
 
@@ -298,15 +404,16 @@ def download_history(ticker, interval):
             )
             return None
 
-    # No borramos velas incoherentes.
-    # Si aparece alguna, rechazamos toda la serie.
     invalid_mask = _ohlc_incoherent_mask(data)
+
     invalid_rows = data.loc[invalid_mask].copy()
 
     invalid_count = len(invalid_rows)
 
     if invalid_count:
+
         for timestamp, candle in invalid_rows.iterrows():
+
             EXCLUDED_OHLC_CANDLES.append({
                 "ticker": ticker,
                 "timeframe": interval,
@@ -340,7 +447,7 @@ def download_history(ticker, interval):
         )
         return None
 
-    # Excluimos la última vela recibida para evitar utilizar
+    # Excluimos la última vela para evitar utilizar
     # una vela que pudiera estar incompleta.
     if len(data) > 1:
         data = data.iloc[:-1].copy()
@@ -362,8 +469,55 @@ def download_history(ticker, interval):
     return data
 
 
+def _validate_execution_gaps(
+    df,
+    start_index,
+    end_index,
+    interval,
+    asset_type,
+):
+    """
+    Comprueba los huecos temporales de un tramo del histórico.
+
+    Devuelve un mensaje de error si encuentra una discontinuidad.
+    """
+
+    if start_index < 0 or end_index >= len(df):
+        return "Índices fuera del histórico al comprobar huecos"
+
+    if start_index >= end_index:
+        return None
+
+    for index in range(start_index + 1, end_index + 1):
+
+        previous_timestamp = df.index[index - 1]
+        current_timestamp = df.index[index]
+
+        if _has_unexpected_gap(
+            previous_timestamp,
+            current_timestamp,
+            interval,
+            asset_type,
+        ):
+            elapsed = (
+                pd.Timestamp(current_timestamp)
+                - pd.Timestamp(previous_timestamp)
+            )
+
+            return (
+                f"Hueco temporal anómalo detectado en "
+                f"{asset_type} ({interval}): "
+                f"{previous_timestamp} -> {current_timestamp} "
+                f"(duración: {elapsed}). "
+                "Backtest detenido para evitar simular "
+                "una operación a través de datos ausentes."
+            )
+
+    return None
+
+
 def run_backtest(asset, ticker, interval):
-    """Backtest con los indicadores y reglas de señal actuales."""
+    """Backtest con protección de huecos temporales."""
 
     if interval not in PERIODS:
         return [], "Temporalidad no admitida"
@@ -378,8 +532,6 @@ def run_backtest(asset, ticker, interval):
 
         return [], diagnostic
 
-    # Segunda validación: protege también frente a datos
-    # proporcionados por otras fuentes o pruebas.
     validation_error = _ohlc_validation_error(data)
 
     if validation_error:
@@ -410,8 +562,6 @@ def run_backtest(asset, ticker, interval):
             f"mínimo requerido: {MIN_BARS}"
         )
 
-    # Comprobamos que los indicadores no hayan alterado
-    # las velas OHLC ni introducido valores inválidos.
     validation_error = _ohlc_validation_error(df)
 
     if validation_error:
@@ -428,7 +578,10 @@ def run_backtest(asset, ticker, interval):
 
     max_bars = PERIODS[interval]["max_bars"]
 
+    asset_type = _get_asset_type(asset)
+
     trades = []
+
     i = MIN_BARS - 1
 
     while i + max_bars < len(df):
@@ -449,8 +602,22 @@ def run_backtest(asset, ticker, interval):
             continue
 
         signal_row = df.iloc[i]
+
         entry_index = i + 1
+
         entry_row = df.iloc[entry_index]
+
+        # Comprobar también el tramo entre señal y entrada.
+        gap_error = _validate_execution_gaps(
+            df,
+            i,
+            entry_index,
+            interval,
+            asset_type,
+        )
+
+        if gap_error:
+            return [], gap_error
 
         try:
             signal_close = float(signal_row["Close"])
@@ -473,8 +640,8 @@ def run_backtest(asset, ticker, interval):
             i += 1
             continue
 
-        # Riesgo y objetivo originales.
         stop = entry - 1.5 * atr
+
         target = entry + 3.0 * atr
 
         initial_risk = entry - stop
@@ -496,6 +663,21 @@ def run_backtest(asset, ticker, interval):
         exit_index = last_index
 
         for j in range(entry_index, last_index + 1):
+
+            # Comprobar la continuidad antes de utilizar
+            # cada nueva vela de ejecución.
+            if j > entry_index:
+
+                gap_error = _validate_execution_gaps(
+                    df,
+                    j - 1,
+                    j,
+                    interval,
+                    asset_type,
+                )
+
+                if gap_error:
+                    return [], gap_error
 
             candle = df.iloc[j]
 
@@ -523,23 +705,19 @@ def run_backtest(asset, ticker, interval):
                     f"en el índice {j}"
                 )
 
-            # Gap bajista: la salida se produce al precio
-            # de apertura, aunque la pérdida supere -1R.
             if candle_open <= stop:
                 exit_price = candle_open
                 exit_reason = "STOP_GAP"
                 exit_index = j
                 break
 
-            # Gap alcista: se mantiene la ejecución conservadora
-            # en el precio objetivo.
             if candle_open >= target:
                 exit_price = target
                 exit_reason = "TARGET_GAP"
                 exit_index = j
                 break
 
-            # Si stop y objetivo se alcanzan en la misma vela,
+            # Si stop y objetivo aparecen en la misma vela,
             # se prioriza el stop por prudencia.
             if candle_low <= stop:
                 exit_price = stop
@@ -554,6 +732,7 @@ def run_backtest(asset, ticker, interval):
                 break
 
         if exit_price is None:
+
             try:
                 exit_price = float(
                     df.iloc[last_index]["Close"]
@@ -571,8 +750,6 @@ def run_backtest(asset, ticker, interval):
 
         pnl_per_unit = exit_price - entry
 
-        # R se calcula siempre respecto al riesgo inicial.
-        # No se limita artificialmente a -1R.
         result_r = pnl_per_unit / initial_risk
 
         if not np.isfinite(result_r):
@@ -652,12 +829,14 @@ def calculate_metrics(trades):
         return _empty_metrics()
 
     if isinstance(trades, pd.DataFrame):
+
         if trades.empty or "result_R" not in trades.columns:
             return _empty_metrics()
 
         records = trades.to_dict("records")
 
     else:
+
         try:
             records = list(trades)
 
@@ -667,6 +846,7 @@ def calculate_metrics(trades):
     valid_trades = []
 
     for trade in records:
+
         if not isinstance(trade, dict):
             continue
 
@@ -699,9 +879,11 @@ def calculate_metrics(trades):
     )
 
     wins = results[results > 0]
+
     losses = results[results < 0]
 
     gross_profit = float(wins.sum())
+
     gross_loss = abs(float(losses.sum()))
 
     profit_factor = (
@@ -768,12 +950,14 @@ def generate_operations_summary(trades):
         return pd.DataFrame(columns=columns)
 
     if isinstance(trades, pd.DataFrame):
+
         if trades.empty:
             return pd.DataFrame(columns=columns)
 
         df = trades.copy()
 
     else:
+
         try:
             df = pd.DataFrame(list(trades))
 
@@ -841,24 +1025,30 @@ def generate_operations_summary(trades):
             return
 
         wins = results[results > 0]
+
         losses = results[results < 0]
 
         max_losing_streak = 0
+
         current_losing_streak = 0
 
         for result in results:
+
             if result < 0:
                 current_losing_streak += 1
+
                 max_losing_streak = max(
                     max_losing_streak,
                     current_losing_streak,
                 )
+
             else:
                 current_losing_streak = 0
 
         reasons = group["exit_reason"].value_counts()
 
         gross_profit = float(wins.sum())
+
         gross_loss = abs(float(losses.sum()))
 
         profit_factor = (
@@ -923,6 +1113,7 @@ def generate_operations_summary(trades):
     for (asset, timeframe), group in df.groupby(
         ["asset", "timeframe"]
     ):
+
         summarize(
             group,
             "ACTIVO_TEMPORALIDAD",
@@ -936,6 +1127,7 @@ def generate_operations_summary(trades):
     for (asset, timeframe, month), group in df.groupby(
         ["asset", "timeframe", "month"]
     ):
+
         summarize(
             group,
             "MENSUAL",
@@ -952,30 +1144,45 @@ def generate_operations_summary(trades):
 
 def main():
     all_trades = []
+
     summaries = []
+
     errors = []
 
     DOWNLOAD_ERRORS.clear()
+
     EXCLUDED_OHLC_CANDLES.clear()
 
     assets = get_assets()
 
     print(f"Trading Bot {VERSION} - Backtest")
+
     print(f"Activos habilitados: {len(assets)}")
+
     print("Modo: histórico, compras únicamente")
+
     print("Estrategia: compartida con el análisis en directo")
+
     print("Datos: Yahoo Finance")
+
     print("Costes: no incluidos ni verificados")
+
     print("Sizing: desactivado")
+
     print("Validación: históricos OHLC incoherentes rechazados")
+
+    print("Validación: protección frente a huecos temporales")
+
     print("-" * 50)
 
     for asset, ticker in assets:
+
         for interval in ("15m", "1d"):
 
             print(f"Analizando {asset} ({interval})...")
 
             try:
+
                 trades, error = run_backtest(
                     asset,
                     ticker,
@@ -983,6 +1190,7 @@ def main():
                 )
 
                 if error:
+
                     errors.append({
                         "asset": asset,
                         "ticker": ticker,
@@ -991,6 +1199,7 @@ def main():
                     })
 
                     print(f"  Sin resultados: {error}")
+
                     continue
 
                 all_trades.extend(trades)
@@ -1009,6 +1218,7 @@ def main():
                 )
 
             except Exception as exc:
+
                 error_message = (
                     f"{type(exc).__name__}: {exc}"
                 )
@@ -1066,17 +1276,25 @@ def main():
     )
 
     print("-" * 50)
+
     print(f"Operaciones totales: {len(all_trades)}")
+
     print(f"Combinaciones analizadas: {len(summaries)}")
+
     print(f"Errores o datos insuficientes: {len(errors)}")
+
     print(
         f"Velas OHLC incoherentes detectadas: "
         f"{len(EXCLUDED_OHLC_CANDLES)}"
     )
+
     print(
-        f"Filas del resumen detallado: {len(operations_summary)}"
+        f"Filas del resumen detallado: "
+        f"{len(operations_summary)}"
     )
+
     print("Archivos CSV generados.")
+
     print(
         "IMPORTANTE: resultados brutos, sin costes, "
         "sin sizing y sin simulación de cartera."
