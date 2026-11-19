@@ -325,7 +325,10 @@ class TestBacktestV3(unittest.TestCase):
 
         new_index = list(data.index)
 
-        new_index[6] = new_index[6] + pd.Timedelta(minutes=15)
+        for index in range(6, len(new_index)):
+            new_index[index] = (
+                new_index[index] + pd.Timedelta(minutes=15)
+            )
 
         data.index = pd.DatetimeIndex(new_index)
 
@@ -345,7 +348,10 @@ class TestBacktestV3(unittest.TestCase):
 
         new_index = list(data.index)
 
-        new_index[6] = new_index[6] + pd.Timedelta(minutes=15)
+        for index in range(6, len(new_index)):
+            new_index[index] = (
+                new_index[index] + pd.Timedelta(minutes=15)
+            )
 
         data.index = pd.DatetimeIndex(new_index)
 
