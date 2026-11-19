@@ -31,18 +31,15 @@ class TestStrategies(unittest.TestCase):
 
     def test_valid_data_generates_candidate(self):
         result = evaluate_signal_at(
-            "AAPL", "1d", make_valid_data()
+            "AAPL", make_valid_data(), "1d"
         )
 
-        self.assertEqual(
-            result["action"],
-            "BUY CANDIDATE",
-        )
+        self.assertEqual(result["action"], "BUY CANDIDATE")
         self.assertFalse(result.get("validated", False))
 
     def test_unsupported_timeframe_is_rejected(self):
         result = evaluate_signal_at(
-            "AAPL", "5m", make_valid_data()
+            "AAPL", make_valid_data(), "5m"
         )
 
         self.assertEqual(result["action"], "NO TRADE")
@@ -50,8 +47,8 @@ class TestStrategies(unittest.TestCase):
     def test_insufficient_data_is_rejected(self):
         result = evaluate_signal_at(
             "AAPL",
-            "1d",
             make_valid_data(MIN_BARS - 1),
+            "1d",
         )
 
         self.assertEqual(result["action"], "NO TRADE")
@@ -59,7 +56,7 @@ class TestStrategies(unittest.TestCase):
     def test_missing_required_column_is_rejected(self):
         data = make_valid_data().drop(columns=["RSI"])
 
-        result = evaluate_signal_at("AAPL", "1d", data)
+        result = evaluate_signal_at("AAPL", data, "1d")
 
         self.assertEqual(result["action"], "NO TRADE")
 
@@ -67,7 +64,7 @@ class TestStrategies(unittest.TestCase):
         data = make_valid_data()
         data.loc[data.index[-1], "Close"] = 0
 
-        result = evaluate_signal_at("AAPL", "1d", data)
+        result = evaluate_signal_at("AAPL", data, "1d")
 
         self.assertEqual(result["action"], "NO TRADE")
 
@@ -75,15 +72,16 @@ class TestStrategies(unittest.TestCase):
         data = make_valid_data()
         data.loc[data.index[-1], "ATR"] = float("inf")
 
-        result = evaluate_signal_at("AAPL", "1d", data)
+        result = evaluate_signal_at("AAPL", data, "1d")
 
         self.assertEqual(result["action"], "NO TRADE")
 
     def test_boolean_numeric_value_is_rejected(self):
         data = make_valid_data()
+        data["RSI"] = data["RSI"].astype(object)
         data.loc[data.index[-1], "RSI"] = True
 
-        result = evaluate_signal_at("AAPL", "1d", data)
+        result = evaluate_signal_at("AAPL", data, "1d")
 
         self.assertEqual(result["action"], "NO TRADE")
 
@@ -91,7 +89,7 @@ class TestStrategies(unittest.TestCase):
         data = make_valid_data()
         data.loc[data.index[-1], "RSI"] = 105
 
-        result = evaluate_signal_at("AAPL", "1d", data)
+        result = evaluate_signal_at("AAPL", data, "1d")
 
         self.assertEqual(result["action"], "NO TRADE")
 
@@ -99,20 +97,17 @@ class TestStrategies(unittest.TestCase):
         data = make_valid_data()
         data.loc[data.index[-1], "ATR_PERCENT"] = 5.1
 
-        result = evaluate_signal_at("AAPL", "1d", data)
+        result = evaluate_signal_at("AAPL", data, "1d")
 
         self.assertEqual(result["action"], "NO TRADE")
 
     def test_risk_reward_is_at_least_two(self):
         result = evaluate_signal_at(
-            "AAPL", "1d", make_valid_data()
+            "AAPL", make_valid_data(), "1d"
         )
 
         if result["action"] == "BUY CANDIDATE":
-            self.assertGreaterEqual(
-                result["risk_reward"],
-                2.0,
-            )
+            self.assertGreaterEqual(result["risk_reward"], 2.0)
 
     def test_indicator_exception_is_handled(self):
         with patch(
@@ -121,8 +116,8 @@ class TestStrategies(unittest.TestCase):
         ):
             result = evaluate_signal(
                 "AAPL",
-                "1d",
                 make_valid_data(),
+                "1d",
             )
 
         self.assertEqual(result["action"], "NO TRADE")
