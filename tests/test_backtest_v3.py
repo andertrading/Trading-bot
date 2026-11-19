@@ -408,10 +408,7 @@ class TestBacktestV3(unittest.TestCase):
 
         self.assertIsNone(error)
         self.assertEqual(len(trades), 1)
-
-        trade = trades[0]
-
-        self.assertEqual(trade["entry"], 101.0)
+        self.assertEqual(trades[0]["entry"], 101.0)
 
     def test_stop_and_target_are_calculated_from_entry(self):
         data = self.make_execution_data()
@@ -466,8 +463,14 @@ class TestBacktestV3(unittest.TestCase):
     def test_stop_gap_exits_at_open(self):
         data = self.make_execution_data()
 
-        data.iloc[5, data.columns.get_loc("Open")] = 97.0
-        data.iloc[5, data.columns.get_loc("Low")] = 96.0
+        # La entrada ocurre en la vela 5.
+        # El gap bajista aparece en la vela 6.
+        data.iloc[5, data.columns.get_loc("High")] = 102.0
+        data.iloc[5, data.columns.get_loc("Low")] = 100.0
+
+        data.iloc[6, data.columns.get_loc("Open")] = 97.0
+        data.iloc[6, data.columns.get_loc("High")] = 98.0
+        data.iloc[6, data.columns.get_loc("Low")] = 96.0
 
         trades, error = self.run_execution_test(data)
 
@@ -478,8 +481,14 @@ class TestBacktestV3(unittest.TestCase):
     def test_target_gap_exits_at_target(self):
         data = self.make_execution_data()
 
-        data.iloc[5, data.columns.get_loc("Open")] = 108.0
-        data.iloc[5, data.columns.get_loc("High")] = 109.0
+        # La entrada ocurre en la vela 5.
+        # El gap alcista aparece en la vela 6.
+        data.iloc[5, data.columns.get_loc("High")] = 102.0
+        data.iloc[5, data.columns.get_loc("Low")] = 100.0
+
+        data.iloc[6, data.columns.get_loc("Open")] = 108.0
+        data.iloc[6, data.columns.get_loc("High")] = 109.0
+        data.iloc[6, data.columns.get_loc("Low")] = 107.5
 
         trades, error = self.run_execution_test(data)
 
