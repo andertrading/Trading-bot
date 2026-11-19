@@ -1,6 +1,8 @@
 
 import logging
 import os
+import threading
+import time
 from datetime import datetime, timedelta, timezone
 
 import pandas as pd
@@ -37,6 +39,21 @@ COLUMNS = ["Open", "High", "Low", "Close", "Volume"]
 
 CRYPTO_ASSETS = {"BTC", "ETH", "SOL", "XLM", "XRP"}
 
+# Margen conservador respecto al límite de 8 créditos/minuto.
+TWELVE_DATA_MIN_INTERVAL = 8.5
+
+# Caché temporal en memoria.
+CACHE_TTL = {
+    "15m": 300,
+    "1d": 1800,
+}
+
+_data_cache = {}
+_cache_lock = threading.Lock()
+
+_api_lock = threading.Lock()
+_last_api_request = 0.0
+
 
 def _asset_config(asset):
     config = ASSETS.get(asset)
@@ -48,6 +65,41 @@ def _asset_config(asset):
         return None
 
     return config
+
+
+def _get_cached_data(asset, interval):
+    key = (asset, interval)
+
+    with _cache_lock:
+        cached = _data_cache.get(key)
+
+        if cached is None:
+            return None
+
+        dataframe, saved_at = cached
+        age = time.monotonic() - saved_at
+
+        if age > CACHE_TTL[interval]:
+            del _data_cache[key]
+            return None
+
+        logger.info(
+            "Caché utilizada: %s %s",
+            asset,
+            interval,
+        )
+
+        return dataframe.copy()
+
+
+def _save_cached_data(asset, interval, dataframe):
+    key = (asset, interval)
+
+    with _cache_lock:
+        _data_cache[key] = (
+            dataframe.copy(),
+            time.monotonic(),
+        )
 
 
 def _normalise_dataframe(df):
@@ -75,10 +127,16 @@ def _normalise_dataframe(df):
     for col in COLUMNS:
         df[col] = pd.to_numeric(df[col], errors="coerce")
 
-    df = df.dropna(subset=["Open", "High", "Low", "Close"])
+    df = df.dropna(
+        subset=["Open", "High", "Low", "Close"]
+    )
 
     if not isinstance(df.index, pd.DatetimeIndex):
-        df.index = pd.to_datetime(df.index, utc=True, errors="coerce")
+        df.index = pd.to_datetime(
+            df.index,
+            utc=True,
+            errors="coerce",
+        )
 
     df = df[~df.index.isna()]
 
@@ -127,11 +185,34 @@ def _remove_incomplete_candle(df, interval):
         return df[df.index <= cutoff]
 
     if interval == "1d":
+        # Criterio conservador: no utilizar la vela del día UTC actual.
         today = now.date()
-
         return df[df.index.date < today]
 
     return df
+
+
+def _twelvedata_request(params):
+    global _last_api_request
+
+    with _api_lock:
+        elapsed = time.monotonic() - _last_api_request
+        wait_time = TWELVE_DATA_MIN_INTERVAL - elapsed
+
+        if wait_time > 0:
+            logger.info(
+                "Límite Twelve Data: esperando %.1f segundos",
+                wait_time,
+            )
+            time.sleep(wait_time)
+
+        _last_api_request = time.monotonic()
+
+        return requests.get(
+            TWELVE_DATA_URL,
+            params=params,
+            timeout=30,
+        )
 
 
 def _download_twelvedata(asset, config, interval):
@@ -141,12 +222,8 @@ def _download_twelvedata(asset, config, interval):
         logger.error("Falta TWELVE_DATA_API_KEY")
         return None
 
-    # Los símbolos se consultan directamente por su ticker.
-    # En nuestra prueba anterior estos símbolos funcionaron.
-    symbol = asset
-
     params = {
-        "symbol": symbol,
+        "symbol": asset,
         "interval": INTERVAL_MAP[interval],
         "outputsize": 5000,
         "timezone": "UTC",
@@ -154,12 +231,7 @@ def _download_twelvedata(asset, config, interval):
     }
 
     try:
-        response = requests.get(
-            TWELVE_DATA_URL,
-            params=params,
-            timeout=30,
-        )
-
+        response = _twelvedata_request(params)
         response.raise_for_status()
 
         payload = response.json()
@@ -175,12 +247,14 @@ def _download_twelvedata(asset, config, interval):
         df = pd.DataFrame(payload["values"])
 
         if df.empty:
-            logger.error("Twelve Data devolvió datos vacíos para %s", asset)
+            logger.error(
+                "Twelve Data devolvió datos vacíos para %s",
+                asset,
+            )
             return None
 
         df = df.rename(
             columns={
-                "datetime": "datetime",
                 "open": "Open",
                 "high": "High",
                 "low": "Low",
@@ -190,7 +264,10 @@ def _download_twelvedata(asset, config, interval):
         )
 
         if "datetime" not in df.columns:
-            logger.error("No hay fechas en los datos de %s", asset)
+            logger.error(
+                "No hay fechas en los datos de %s",
+                asset,
+            )
             return None
 
         df["datetime"] = pd.to_datetime(
@@ -203,10 +280,6 @@ def _download_twelvedata(asset, config, interval):
         df = df.set_index("datetime")
 
         df = _normalise_dataframe(df)
-
-        if df is None:
-            return None
-
         df = _remove_incomplete_candle(df, interval)
 
         if df is None or len(df) < 220:
@@ -243,11 +316,13 @@ def _download_twelvedata(asset, config, interval):
 
 
 def _download_yahoo(asset, config, interval):
-    # En config.py el campo correcto es yahoo, no ticker.
     ticker = config.get("yahoo")
 
     if not ticker:
-        logger.error("No hay ticker de Yahoo para %s", asset)
+        logger.error(
+            "No hay ticker de Yahoo para %s",
+            asset,
+        )
         return None
 
     period = "60d" if interval == "15m" else "10y"
@@ -310,7 +385,10 @@ def _download_yahoo(asset, config, interval):
 
 def download_data(asset, interval="15m"):
     if interval not in INTERVAL_MAP:
-        logger.error("Temporalidad no admitida: %s", interval)
+        logger.error(
+            "Temporalidad no admitida: %s",
+            interval,
+        )
         return None
 
     config = _asset_config(asset)
@@ -322,28 +400,42 @@ def download_data(asset, interval="15m"):
         )
         return None
 
+    cached = _get_cached_data(asset, interval)
+
+    if cached is not None:
+        return cached
+
     provider = PROVIDER_MAP.get(asset)
 
     if provider == "twelvedata":
-        return _download_twelvedata(
+        dataframe = _download_twelvedata(
             asset,
             config,
             interval,
         )
 
-    if provider == "yahoo":
-        return _download_yahoo(
+    elif provider == "yahoo":
+        dataframe = _download_yahoo(
             asset,
             config,
             interval,
         )
 
-    logger.error(
-        "No hay proveedor definido para %s",
-        asset,
-    )
+    else:
+        logger.error(
+            "No hay proveedor definido para %s",
+            asset,
+        )
+        return None
 
-    return None
+    if dataframe is not None and not dataframe.empty:
+        _save_cached_data(
+            asset,
+            interval,
+            dataframe,
+        )
+
+    return dataframe
 
 
 def get_data_timestamp(df):
@@ -360,34 +452,29 @@ def get_data_timestamp(df):
     return timestamp
 
 
-def is_data_fresh(df, max_age_minutes=30, asset=None, interval="15m"):
-    """
-    Comprueba la antigüedad de los datos sin confundir
-    el cierre normal de los mercados con un fallo de descarga.
-
-    Las criptomonedas cotizan 24/7.
-    Para acciones y ETF se aplica una tolerancia mayor
-    mientras terminamos de incorporar calendarios bursátiles.
-    """
-
+def is_data_fresh(
+    df,
+    max_age_minutes=30,
+    asset=None,
+    interval="15m",
+):
     timestamp = get_data_timestamp(df)
 
     if timestamp is None:
         return False
 
     now = pd.Timestamp.now(tz="UTC")
-    age_minutes = (now - timestamp).total_seconds() / 60
+
+    age_minutes = (
+        now - timestamp
+    ).total_seconds() / 60
 
     if age_minutes < 0:
         return False
 
-    crypto_assets = {"BTC", "ETH", "SOL", "XLM", "XRP"}
-
-    if asset in crypto_assets:
+    if asset in CRYPTO_ASSETS:
         limit = 30 if interval == "15m" else 48 * 60
     else:
-        # Tolerancia provisional para cierres, fines de semana
-        # y festivos. No sustituye al calendario bursátil.
         limit = max(max_age_minutes, 72 * 60)
 
     return age_minutes <= limit
