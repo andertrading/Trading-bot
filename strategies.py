@@ -1,4 +1,6 @@
 
+import math
+
 from indicators import add_indicators
 
 
@@ -40,26 +42,46 @@ def evaluate_signal(df, asset, timeframe):
         "Close", "EMA20", "EMA50", "EMA200",
         "RSI", "MACD", "MACD_SIGNAL",
         "ATR", "ATR_PERCENT", "HIGH20",
-        "RELATIVE_VOLUME",
     ]
 
-    if any(
-        name not in row.index or
-        not __import__("math").isfinite(float(row[name]))
-        for name in required
-    ):
-        return {
-            "action": "NO TRADE",
-            "reason": "Indicadores incompletos",
-            "asset": asset,
-            "timeframe": timeframe,
-        }
+    for name in required:
+        if name not in row.index:
+            return {
+                "action": "NO TRADE",
+                "reason": f"Falta indicador: {name}",
+                "asset": asset,
+                "timeframe": timeframe,
+            }
+
+        try:
+            if not math.isfinite(float(row[name])):
+                return {
+                    "action": "NO TRADE",
+                    "reason": f"Indicador no válido: {name}",
+                    "asset": asset,
+                    "timeframe": timeframe,
+                }
+        except (TypeError, ValueError):
+            return {
+                "action": "NO TRADE",
+                "reason": f"Indicador no numérico: {name}",
+                "asset": asset,
+                "timeframe": timeframe,
+            }
 
     price = float(row["Close"])
     atr = float(row["ATR"])
     rsi = float(row["RSI"])
     atr_pct = float(row["ATR_PERCENT"])
-    relative_volume = float(row["RELATIVE_VOLUME"])
+
+    # El volumen es opcional: si no está disponible,
+    # no se conceden puntos por confirmación de volumen.
+    try:
+        relative_volume = float(row["RELATIVE_VOLUME"])
+        volume_valid = math.isfinite(relative_volume)
+    except (KeyError, TypeError, ValueError):
+        relative_volume = 0.0
+        volume_valid = False
 
     if price <= 0 or atr <= 0:
         return {
@@ -69,7 +91,6 @@ def evaluate_signal(df, asset, timeframe):
             "timeframe": timeframe,
         }
 
-    # Filtro de volatilidad extrema.
     if atr_pct > 5:
         return {
             "action": "NO TRADE",
@@ -109,11 +130,10 @@ def evaluate_signal(df, asset, timeframe):
         reasons.append("Ruptura de máximos de 20 velas")
 
     # Confirmación de volumen.
-    if relative_volume >= 1.2:
+    if volume_valid and relative_volume >= 1.2:
         score += 10
         reasons.append("Volumen superior a la media")
 
-    # Umbral mínimo para evitar operaciones forzadas.
     if score < 70:
         return {
             "action": "NO TRADE",
@@ -123,7 +143,6 @@ def evaluate_signal(df, asset, timeframe):
             "timeframe": timeframe,
         }
 
-    # Stop y objetivo orientativos.
     stop = price - (1.5 * atr)
     target = price + (3.0 * atr)
 
@@ -137,7 +156,6 @@ def evaluate_signal(df, asset, timeframe):
 
     risk = price - stop
     reward = target - price
-
     risk_reward = reward / risk
 
     if risk_reward < 2:
