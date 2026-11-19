@@ -52,8 +52,15 @@ class TestBacktestV3(unittest.TestCase):
 
         return data
 
-    def run_execution_test(self, data, signal_indexes=(4,)):
+    def run_execution_test(
+        self,
+        data,
+        signal_indexes=(4,),
+        target=109.0,
+    ):
         signals = set(signal_indexes)
+
+        backtest_v3.RR_REJECTIONS.clear()
 
         def fake_signal(data, asset, timeframe, index):
             if index in signals:
@@ -62,7 +69,7 @@ class TestBacktestV3(unittest.TestCase):
                     "score": 80,
                     "entry_reference": 100.0,
                     "stop": 97.0,
-                    "target": 106.0,
+                    "target": target,
                 }
 
             return {
@@ -653,6 +660,70 @@ class TestBacktestV3(unittest.TestCase):
         self.assertAlmostEqual(total["resultado_R"], 1.0)
 
     # ---------------------------------------------------------
+    # PRUEBAS DEL FILTRO DE RATIO RIESGO/BENEFICIO
+    # ---------------------------------------------------------
+
+    def test_execution_rr_is_exactly_two_to_one(self):
+        data = self.make_execution_data()
+
+        trades, error = self.run_execution_test(
+            data,
+            target=109.0,
+        )
+
+        self.assertIsNone(error)
+        self.assertEqual(len(trades), 1)
+
+        self.assertAlmostEqual(
+            trades[0]["execution_rr"],
+            2.0,
+        )
+
+        self.assertEqual(
+            len(backtest_v3.RR_REJECTIONS),
+            0,
+        )
+
+    def test_execution_rr_below_two_to_one_is_rejected(self):
+        data = self.make_execution_data()
+
+        trades, error = self.run_execution_test(
+            data,
+            target=106.0,
+        )
+
+        self.assertIsNone(error)
+        self.assertEqual(trades, [])
+
+        self.assertEqual(
+            len(backtest_v3.RR_REJECTIONS),
+            1,
+        )
+
+        rejection = backtest_v3.RR_REJECTIONS[0]
+
+        self.assertAlmostEqual(
+            rejection["execution_rr"],
+            1.25,
+        )
+
+    def test_execution_rr_above_two_to_one_is_accepted(self):
+        data = self.make_execution_data()
+
+        trades, error = self.run_execution_test(
+            data,
+            target=113.0,
+        )
+
+        self.assertIsNone(error)
+        self.assertEqual(len(trades), 1)
+
+        self.assertAlmostEqual(
+            trades[0]["execution_rr"],
+            3.0,
+        )
+
+    # ---------------------------------------------------------
     # PRUEBAS DE EJECUCIÓN DEL MOTOR
     # ---------------------------------------------------------
 
@@ -678,7 +749,7 @@ class TestBacktestV3(unittest.TestCase):
         self.assertAlmostEqual(trade["signal_reference"], 100.0)
         self.assertAlmostEqual(trade["entry"], 101.0)
         self.assertAlmostEqual(trade["stop"], 97.0)
-        self.assertAlmostEqual(trade["target"], 106.0)
+        self.assertAlmostEqual(trade["target"], 109.0)
         self.assertAlmostEqual(trade["initial_risk_per_unit"], 4.0)
 
     def test_entry_is_rejected_if_open_is_at_or_below_original_stop(self):
@@ -697,10 +768,10 @@ class TestBacktestV3(unittest.TestCase):
     def test_entry_is_rejected_if_open_is_at_or_above_original_target(self):
         data = self.make_execution_data()
 
-        data.iloc[5, data.columns.get_loc("Open")] = 107.0
-        data.iloc[5, data.columns.get_loc("High")] = 108.0
-        data.iloc[5, data.columns.get_loc("Low")] = 99.0
-        data.iloc[5, data.columns.get_loc("Close")] = 107.0
+        data.iloc[5, data.columns.get_loc("Open")] = 109.0
+        data.iloc[5, data.columns.get_loc("High")] = 110.0
+        data.iloc[5, data.columns.get_loc("Low")] = 108.0
+        data.iloc[5, data.columns.get_loc("Close")] = 109.0
 
         trades, error = self.run_execution_test(data)
 
@@ -722,20 +793,20 @@ class TestBacktestV3(unittest.TestCase):
     def test_target_is_triggered(self):
         data = self.make_execution_data()
 
-        data.iloc[5, data.columns.get_loc("High")] = 106.5
+        data.iloc[5, data.columns.get_loc("High")] = 109.5
 
         trades, error = self.run_execution_test(data)
 
         self.assertIsNone(error)
         self.assertEqual(len(trades), 1)
         self.assertEqual(trades[0]["exit_reason"], "TARGET")
-        self.assertAlmostEqual(trades[0]["exit"], 106.0)
+        self.assertAlmostEqual(trades[0]["exit"], 109.0)
 
     def test_stop_has_priority_when_stop_and_target_are_hit(self):
         data = self.make_execution_data()
 
         data.iloc[5, data.columns.get_loc("Low")] = 96.5
-        data.iloc[5, data.columns.get_loc("High")] = 106.5
+        data.iloc[5, data.columns.get_loc("High")] = 109.5
 
         trades, error = self.run_execution_test(data)
 
@@ -768,16 +839,16 @@ class TestBacktestV3(unittest.TestCase):
         data.iloc[5, data.columns.get_loc("High")] = 102.0
         data.iloc[5, data.columns.get_loc("Low")] = 100.0
 
-        data.iloc[6, data.columns.get_loc("Open")] = 108.0
-        data.iloc[6, data.columns.get_loc("High")] = 109.0
-        data.iloc[6, data.columns.get_loc("Low")] = 107.5
-        data.iloc[6, data.columns.get_loc("Close")] = 108.0
+        data.iloc[6, data.columns.get_loc("Open")] = 110.0
+        data.iloc[6, data.columns.get_loc("High")] = 111.0
+        data.iloc[6, data.columns.get_loc("Low")] = 109.5
+        data.iloc[6, data.columns.get_loc("Close")] = 110.0
 
         trades, error = self.run_execution_test(data)
 
         self.assertIsNone(error)
         self.assertEqual(len(trades), 1)
-        self.assertAlmostEqual(trades[0]["exit"], 106.0)
+        self.assertAlmostEqual(trades[0]["exit"], 109.0)
         self.assertTrue(backtest_v3._valid_ohlc(data))
 
     def test_trade_closes_at_max_hold(self):
@@ -849,17 +920,17 @@ class TestBacktestV3(unittest.TestCase):
         data.iloc[5, data.columns.get_loc("High")] = 102.0
         data.iloc[5, data.columns.get_loc("Low")] = 100.0
 
-        data.iloc[6, data.columns.get_loc("Open")] = 108.0
-        data.iloc[6, data.columns.get_loc("High")] = 109.0
-        data.iloc[6, data.columns.get_loc("Low")] = 107.5
-        data.iloc[6, data.columns.get_loc("Close")] = 108.0
+        data.iloc[6, data.columns.get_loc("Open")] = 110.0
+        data.iloc[6, data.columns.get_loc("High")] = 111.0
+        data.iloc[6, data.columns.get_loc("Low")] = 109.5
+        data.iloc[6, data.columns.get_loc("Close")] = 110.0
 
         trades, error = self.run_execution_test(data)
 
         self.assertIsNone(error)
         self.assertEqual(len(trades), 1)
         self.assertEqual(trades[0]["exit_reason"], "TARGET_GAP")
-        self.assertAlmostEqual(trades[0]["result_R"], 1.25)
+        self.assertAlmostEqual(trades[0]["result_R"], 2.0)
 
     def test_intrabar_stop_result_is_minus_one_r(self):
         data = self.make_execution_data()
@@ -873,23 +944,23 @@ class TestBacktestV3(unittest.TestCase):
         self.assertEqual(trades[0]["exit_reason"], "STOP")
         self.assertAlmostEqual(trades[0]["result_R"], -1.0)
 
-    def test_intrabar_target_result_is_one_point_twenty_five_r(self):
+    def test_intrabar_target_result_is_two_r(self):
         data = self.make_execution_data()
 
-        data.iloc[5, data.columns.get_loc("High")] = 106.5
+        data.iloc[5, data.columns.get_loc("High")] = 109.5
 
         trades, error = self.run_execution_test(data)
 
         self.assertIsNone(error)
         self.assertEqual(len(trades), 1)
         self.assertEqual(trades[0]["exit_reason"], "TARGET")
-        self.assertAlmostEqual(trades[0]["result_R"], 1.25)
+        self.assertAlmostEqual(trades[0]["result_R"], 2.0)
 
     def test_stop_priority_result_is_minus_one_r(self):
         data = self.make_execution_data()
 
         data.iloc[5, data.columns.get_loc("Low")] = 96.5
-        data.iloc[5, data.columns.get_loc("High")] = 106.5
+        data.iloc[5, data.columns.get_loc("High")] = 109.5
 
         trades, error = self.run_execution_test(data)
 
