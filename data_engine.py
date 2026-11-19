@@ -321,9 +321,8 @@ def _remove_incomplete_candle(df, interval, asset=None):
         if asset is None:
             return df
 
-        # Los datos diarios se normalizan y comparan en UTC.
-        # Se excluye siempre la vela correspondiente al día UTC actual,
-        # que puede estar todavía en formación.
+        # Comparación diaria consistente en UTC.
+        # Se excluye la vela del día UTC actual.
         return df[df.index.date < now.date()]
 
     return df
@@ -413,6 +412,51 @@ def _download_twelvedata(asset, config, interval):
                 asset,
                 symbol,
                 payload.get("message", payload.get("code", payload)),
+            )
+            return None
+
+        # Verificación obligatoria de la moneda del proveedor.
+        meta = payload.get("meta")
+
+        if not isinstance(meta, dict):
+            logger.error(
+                "MONEDA NO VERIFICABLE | %s | %s | falta metadata",
+                asset,
+                symbol,
+            )
+            return None
+
+        provider_currency = meta.get("currency")
+        configured_currency = config.get("currency")
+
+        if not provider_currency or not configured_currency:
+            logger.error(
+                "MONEDA NO VERIFICABLE | %s | %s | Twelve Data=%s | Config=%s",
+                asset,
+                symbol,
+                provider_currency,
+                configured_currency,
+            )
+            return None
+
+        provider_currency = str(provider_currency).upper().strip()
+        configured_currency = str(configured_currency).upper().strip()
+
+        logger.info(
+            "TWELVE DATA METADATA | %s | symbol=%s | currency=%s | configured=%s",
+            asset,
+            symbol,
+            provider_currency,
+            configured_currency,
+        )
+
+        if provider_currency != configured_currency:
+            logger.error(
+                "MONEDA INCOMPATIBLE | %s | %s | Twelve Data=%s | Config=%s",
+                asset,
+                symbol,
+                provider_currency,
+                configured_currency,
             )
             return None
 
@@ -838,8 +882,6 @@ def is_data_fresh(
             return is_fresh
 
         if interval == "1d":
-            # Las marcas diarias de los proveedores se comparan
-            # por su fecha UTC, sin convertirlas a hora local.
             expected_date = _previous_weekday(now.date())
             timestamp_utc_date = timestamp_dt.date()
 
