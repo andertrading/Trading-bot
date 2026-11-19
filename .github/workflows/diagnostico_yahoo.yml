@@ -24,7 +24,7 @@ jobs:
       - name: Instalar dependencias
         run: |
           python -m pip install --upgrade pip
-          pip install yfinance==0.2.65 pandas==2.2.3 numpy==2.2.6
+          pip install yfinance==0.2.65 pandas==2.2.3 numpy==2.2.6 scipy
 
       - name: Ejecutar diagnóstico Yahoo Finance
         run: python -u diagnostico_yahoo.py
