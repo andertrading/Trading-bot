@@ -2,7 +2,7 @@
 import math
 
 from config import (
-    INITIAL_CAPITAL_EUR,
+    INITIAL_CAPITAL_USD,
     MAX_PORTFOLIO_RISK,
 )
 
@@ -15,130 +15,199 @@ def _is_finite_number(value):
         return False
 
 
-def _blocked_status(reason):
-    return {
-        "status": "BLOCKED",
-        "reason": reason,
-        "risk_eur": None,
-        "remaining_risk_eur": None,
-        "can_open_trade": False,
-    }
-
-
 def get_portfolio_status(
     open_positions=None,
     positions_confirmed=False,
-    capital_eur=None,
+    capital_usd=None,
 ):
     """
-    Calcula el riesgo agregado de las posiciones abiertas.
+    Calcula el riesgo agregado de la cartera en USD.
 
-    Si las posiciones manuales no están confirmadas,
-    no permite abrir nuevas operaciones.
+    Cada posición debe incluir:
+        risk_usd: riesgo monetario estimado de la posición en USD.
+
+    No se presupone que las posiciones estén sincronizadas
+    automáticamente con eToro.
     """
 
-    if capital_eur is None:
-        capital_eur = INITIAL_CAPITAL_EUR
+    if capital_usd is None:
+        capital_usd = INITIAL_CAPITAL_USD
 
-    if not _is_finite_number(capital_eur):
-        return _blocked_status("Capital no válido")
+    if not _is_finite_number(capital_usd):
+        return {
+            "status": "BLOCKED",
+            "reason": "El capital USD no es válido.",
+            "currency": "USD",
+        }
 
-    capital_eur = float(capital_eur)
+    capital_usd = float(capital_usd)
 
-    if capital_eur <= 0:
-        return _blocked_status("Capital no válido")
+    if capital_usd <= 0:
+        return {
+            "status": "BLOCKED",
+            "reason": "El capital USD debe ser positivo.",
+            "currency": "USD",
+        }
 
-    if not _is_finite_number(MAX_PORTFOLIO_RISK):
-        return _blocked_status("Límite de riesgo de cartera no válido")
-
-    maximum_risk_pct = float(MAX_PORTFOLIO_RISK)
-
-    if maximum_risk_pct <= 0:
-        return _blocked_status("Límite de riesgo de cartera no válido")
+    max_risk_usd = capital_usd * MAX_PORTFOLIO_RISK
 
     if not positions_confirmed:
         return {
             "status": "UNKNOWN",
-            "reason": "No se han confirmado las posiciones abiertas",
-            "risk_eur": None,
-            "remaining_risk_eur": None,
-            "can_open_trade": False,
+            "reason": (
+                "Las posiciones abiertas no están confirmadas. "
+                "No se puede verificar el riesgo real de la cartera."
+            ),
+            "capital_usd": capital_usd,
+            "max_portfolio_risk_usd": max_risk_usd,
+            "current_portfolio_risk_usd": None,
+            "remaining_risk_usd": None,
+            "currency": "USD",
         }
 
     if open_positions is None:
         open_positions = []
 
     if not isinstance(open_positions, (list, tuple)):
-        return _blocked_status("Formato de posiciones incorrecto")
+        return {
+            "status": "BLOCKED",
+            "reason": "El formato de las posiciones no es válido.",
+            "currency": "USD",
+        }
 
-    total_risk_eur = 0.0
+    current_risk_usd = 0.0
 
-    for position in open_positions:
-
+    for index, position in enumerate(open_positions):
         if not isinstance(position, dict):
-            return _blocked_status("Formato de posición incorrecto")
+            return {
+                "status": "BLOCKED",
+                "reason": (
+                    f"La posición {index + 1} no tiene un formato válido."
+                ),
+                "currency": "USD",
+            }
 
-        risk = position.get("risk_eur")
+        risk_usd = position.get("risk_usd")
 
-        if not _is_finite_number(risk):
-            return _blocked_status("Riesgo de posición no válido")
+        if not _is_finite_number(risk_usd):
+            return {
+                "status": "BLOCKED",
+                "reason": (
+                    f"El riesgo USD de la posición {index + 1} "
+                    "no es válido."
+                ),
+                "currency": "USD",
+            }
 
-        risk = float(risk)
+        risk_usd = float(risk_usd)
 
-        if risk < 0:
-            return _blocked_status("Riesgo negativo no válido")
+        if risk_usd < 0:
+            return {
+                "status": "BLOCKED",
+                "reason": (
+                    f"El riesgo USD de la posición {index + 1} "
+                    "no puede ser negativo."
+                ),
+                "currency": "USD",
+            }
 
-        total_risk_eur += risk
+        current_risk_usd += risk_usd
 
-        if not math.isfinite(total_risk_eur):
-            return _blocked_status("Riesgo agregado no válido")
-
-    maximum_risk_eur = capital_eur * maximum_risk_pct
-
-    if not math.isfinite(maximum_risk_eur):
-        return _blocked_status("Límite de riesgo calculado no válido")
-
-    remaining_risk_eur = max(
+    remaining_risk_usd = max(
         0.0,
-        maximum_risk_eur - total_risk_eur
+        max_risk_usd - current_risk_usd,
+    )
+
+    risk_usage_pct = (
+        current_risk_usd / max_risk_usd
+        if max_risk_usd > 0
+        else 0.0
+    )
+
+    status = (
+        "BLOCKED"
+        if current_risk_usd >= max_risk_usd
+        else "OK"
     )
 
     return {
-        "status": "CONFIRMED",
-        "risk_eur": round(total_risk_eur, 2),
-        "maximum_risk_eur": round(maximum_risk_eur, 2),
-        "remaining_risk_eur": round(remaining_risk_eur, 2),
-        "can_open_trade": remaining_risk_eur > 0,
+        "status": status,
+        "reason": (
+            "Límite de riesgo de cartera alcanzado."
+            if status == "BLOCKED"
+            else "Riesgo de cartera dentro del límite."
+        ),
+        "capital_usd": capital_usd,
+        "max_portfolio_risk_usd": max_risk_usd,
+        "current_portfolio_risk_usd": current_risk_usd,
+        "remaining_risk_usd": remaining_risk_usd,
+        "risk_usage_pct": risk_usage_pct,
+        "currency": "USD",
     }
 
 
 def can_add_trade(
-    portfolio_status,
-    proposed_risk_eur,
+    proposed_risk_usd,
+    open_positions=None,
+    positions_confirmed=False,
+    capital_usd=None,
 ):
-    """Comprueba si una operación cabe en el riesgo disponible."""
+    """Comprueba si una nueva operación cabe en el límite de cartera."""
 
-    if not isinstance(portfolio_status, dict):
-        return False
+    if not _is_finite_number(proposed_risk_usd):
+        return {
+            "allowed": False,
+            "reason": "El riesgo propuesto en USD no es válido.",
+            "currency": "USD",
+        }
 
-    if portfolio_status.get("status") != "CONFIRMED":
-        return False
+    proposed_risk_usd = float(proposed_risk_usd)
 
-    if portfolio_status.get("can_open_trade") is not True:
-        return False
+    if proposed_risk_usd <= 0:
+        return {
+            "allowed": False,
+            "reason": "El riesgo propuesto debe ser positivo.",
+            "currency": "USD",
+        }
 
-    remaining = portfolio_status.get("remaining_risk_eur")
+    portfolio = get_portfolio_status(
+        open_positions=open_positions,
+        positions_confirmed=positions_confirmed,
+        capital_usd=capital_usd,
+    )
 
-    if not _is_finite_number(remaining):
-        return False
+    if portfolio["status"] == "UNKNOWN":
+        return {
+            "allowed": False,
+            "reason": (
+                "No se puede autorizar una operación sin confirmar "
+                "las posiciones abiertas."
+            ),
+            "portfolio": portfolio,
+            "currency": "USD",
+        }
 
-    if not _is_finite_number(proposed_risk_eur):
-        return False
+    if portfolio["status"] == "BLOCKED":
+        return {
+            "allowed": False,
+            "reason": portfolio["reason"],
+            "portfolio": portfolio,
+            "currency": "USD",
+        }
 
-    remaining = float(remaining)
-    proposed_risk_eur = float(proposed_risk_eur)
+    allowed = (
+        proposed_risk_usd <= portfolio["remaining_risk_usd"]
+    )
 
-    if remaining <= 0 or proposed_risk_eur <= 0:
-        return False
-
-    return proposed_risk_eur <= remaining
+    return {
+        "allowed": allowed,
+        "reason": (
+            "Riesgo dentro del límite disponible."
+            if allowed
+            else "La operación superaría el límite de riesgo de cartera."
+        ),
+        "proposed_risk_usd": proposed_risk_usd,
+        "remaining_risk_usd": portfolio["remaining_risk_usd"],
+        "portfolio": portfolio,
+        "currency": "USD",
+    }
