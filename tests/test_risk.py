@@ -72,6 +72,19 @@ class TestRiskManager(unittest.TestCase):
         self.assertEqual(result["status"], "BLOCKED")
         self.assertFalse(result["validated"])
 
+    def test_missing_portfolio_risk_blocks_size(self):
+        with patch("risk_manager.ALLOW_POSITION_SIZING", True):
+            result = calculate_position_size(
+                entry=100,
+                stop=95,
+                score=85,
+                quote_to_usd=1,
+                costs_per_unit_quote=0,
+            )
+
+        self.assertEqual(result["status"], "BLOCKED")
+        self.assertFalse(result["validated"])
+
     def test_missing_currency_conversion_blocks_size(self):
         with patch("risk_manager.ALLOW_POSITION_SIZING", True):
             result = calculate_position_size(
