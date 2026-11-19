@@ -10,7 +10,7 @@ from indicators import add_indicators
 from strategies import evaluate_signal_at
 
 
-VERSION = "3.1"
+VERSION = "3.2"
 
 PERIODS = {
     "15m": {"period": "60d", "max_bars": 32},
@@ -79,7 +79,7 @@ def download_history(ticker, interval):
     data = data[~data.index.duplicated(keep="last")]
     data = data.sort_index()
 
-    # Conservador: excluimos la última vela por si está incompleta.
+    # Excluimos la última vela por si está incompleta.
     if len(data) > 1:
         data = data.iloc[:-1]
 
@@ -145,7 +145,7 @@ def run_backtest(asset, ticker, interval):
             i += 1
             continue
 
-        # La entrada se produce en la apertura de la vela siguiente.
+        # Entrada en la apertura de la vela siguiente.
         stop = entry - 1.5 * atr
         target = entry + 3.0 * atr
         initial_risk = entry - stop
@@ -183,22 +183,22 @@ def run_backtest(asset, ticker, interval):
             ):
                 continue
 
-            # Un hueco bajista puede producir una pérdida superior a 1R.
+            # Hueco bajista: ejecución al precio de apertura.
             if candle_open <= stop:
                 exit_price = candle_open
                 exit_reason = "STOP_GAP"
                 exit_index = j
                 break
 
-            # Objetivo alcanzado al abrir: ejecución conservadora al objetivo.
+            # Hueco alcista: ejecución conservadora al objetivo.
             if candle_open >= target:
                 exit_price = target
                 exit_reason = "TARGET_GAP"
                 exit_index = j
                 break
 
-            # Si ambos niveles se alcanzan dentro de la misma vela,
-            # se prioriza siempre el stop.
+            # Si se alcanzan ambos niveles en la misma vela,
+            # se prioriza el stop.
             if candle_low <= stop:
                 exit_price = stop
                 exit_reason = "STOP"
@@ -251,7 +251,7 @@ def run_backtest(asset, ticker, interval):
 
 
 def calculate_metrics(trades):
-    """Calcula métricas de una secuencia independiente de operaciones."""
+    """Calcula métricas de una secuencia independiente."""
 
     if not trades:
         return {
@@ -304,6 +304,12 @@ def calculate_metrics(trades):
         else None
     )
 
+    durations = [
+        trade["duration_bars"]
+        for trade in trades
+        if np.isfinite(trade["duration_bars"])
+    ]
+
     return {
         "trades": len(results),
         "wins": len(wins),
@@ -322,13 +328,174 @@ def calculate_metrics(trades):
             float(drawdown.max()), 4
         ),
         "average_duration_bars": round(
-            float(np.mean([
-                trade["duration_bars"]
-                for trade in trades
-            ])),
-            2,
-        ),
+            float(np.mean(durations)), 2
+        ) if durations else 0,
     }
+
+
+def generate_operations_summary(trades):
+    """
+    Genera un resumen compacto por activo, temporalidad y mes.
+
+    El drawdown se calcula sobre la secuencia de operaciones
+    de cada grupo, no como drawdown de una cartera real.
+    """
+
+    columns = [
+        "tipo",
+        "activo",
+        "temporalidad",
+        "periodo",
+        "operaciones",
+        "ganadoras",
+        "perdedoras",
+        "acierto_pct",
+        "resultado_R",
+        "media_R",
+        "media_ganadoras_R",
+        "media_perdedoras_R",
+        "mejor_operacion_R",
+        "peor_operacion_R",
+        "profit_factor",
+        "drawdown_max_R",
+        "racha_perdedora_max",
+        "STOP",
+        "STOP_GAP",
+        "TARGET",
+        "TARGET_GAP",
+        "MAX_HOLD",
+    ]
+
+    if not trades:
+        return pd.DataFrame(columns=columns)
+
+    df = pd.DataFrame(trades)
+
+    df["result_R"] = pd.to_numeric(
+        df["result_R"], errors="coerce"
+    )
+
+    df["exit_time"] = pd.to_datetime(
+        df["exit_time"],
+        errors="coerce",
+        utc=True,
+    )
+
+    df = df.dropna(subset=["result_R", "exit_time"])
+    df = df.sort_values("exit_time")
+
+    summaries = []
+
+    def summarize(group, summary_type, asset, timeframe, period):
+        group = group.sort_values("exit_time")
+
+        results = pd.to_numeric(
+            group["result_R"], errors="coerce"
+        ).dropna()
+
+        if results.empty:
+            return
+
+        wins = results[results > 0]
+        losses = results[results < 0]
+
+        equity = results.cumsum()
+        peaks = equity.cummax().clip(lower=0)
+        drawdown = peaks - equity
+
+        max_losing_streak = 0
+        current_losing_streak = 0
+
+        for result in results:
+            if result < 0:
+                current_losing_streak += 1
+                max_losing_streak = max(
+                    max_losing_streak,
+                    current_losing_streak,
+                )
+            else:
+                current_losing_streak = 0
+
+        reasons = group["exit_reason"].value_counts()
+
+        gross_profit = float(wins.sum())
+        gross_loss = abs(float(losses.sum()))
+
+        profit_factor = (
+            gross_profit / gross_loss
+            if gross_loss > 0
+            else None
+        )
+
+        summaries.append({
+            "tipo": summary_type,
+            "activo": asset,
+            "temporalidad": timeframe,
+            "periodo": period,
+            "operaciones": len(results),
+            "ganadoras": len(wins),
+            "perdedoras": len(losses),
+            "acierto_pct": round(
+                len(wins) / len(results) * 100, 2
+            ),
+            "resultado_R": round(float(results.sum()), 4),
+            "media_R": round(float(results.mean()), 4),
+            "media_ganadoras_R": (
+                round(float(wins.mean()), 4)
+                if len(wins) else None
+            ),
+            "media_perdedoras_R": (
+                round(float(losses.mean()), 4)
+                if len(losses) else None
+            ),
+            "mejor_operacion_R": round(
+                float(results.max()), 4
+            ),
+            "peor_operacion_R": round(
+                float(results.min()), 4
+            ),
+            "profit_factor": (
+                round(profit_factor, 4)
+                if profit_factor is not None else None
+            ),
+            "drawdown_max_R": round(
+                float(drawdown.max()), 4
+            ),
+            "racha_perdedora_max": max_losing_streak,
+            "STOP": int(reasons.get("STOP", 0)),
+            "STOP_GAP": int(reasons.get("STOP_GAP", 0)),
+            "TARGET": int(reasons.get("TARGET", 0)),
+            "TARGET_GAP": int(reasons.get("TARGET_GAP", 0)),
+            "MAX_HOLD": int(reasons.get("MAX_HOLD", 0)),
+        })
+
+    # Resumen por activo y temporalidad.
+    for (asset, timeframe), group in df.groupby(
+        ["asset", "timeframe"]
+    ):
+        summarize(
+            group,
+            "ACTIVO_TEMPORALIDAD",
+            asset,
+            timeframe,
+            "TOTAL",
+        )
+
+    # Resumen mensual por activo y temporalidad.
+    df["month"] = df["exit_time"].dt.strftime("%Y-%m")
+
+    for (asset, timeframe, month), group in df.groupby(
+        ["asset", "timeframe", "month"]
+    ):
+        summarize(
+            group,
+            "MENSUAL",
+            asset,
+            timeframe,
+            month,
+        )
+
+    return pd.DataFrame(summaries, columns=columns)
 
 
 def main():
@@ -390,18 +557,31 @@ def main():
                 })
                 print(f"  Error: {exc}")
 
+    # CSV detallado de operaciones.
     pd.DataFrame(all_trades).to_csv(
         "operaciones_backtest_v3.csv",
         index=False,
     )
 
+    # CSV de métricas por activo y temporalidad.
     pd.DataFrame(summaries).to_csv(
         "resultados_backtest_v3.csv",
         index=False,
     )
 
+    # CSV de errores.
     pd.DataFrame(errors).to_csv(
         "errores_backtest_v3.csv",
+        index=False,
+    )
+
+    # Nuevo CSV compacto de análisis.
+    operations_summary = generate_operations_summary(
+        all_trades
+    )
+
+    operations_summary.to_csv(
+        "resumen_operaciones_v3.csv",
         index=False,
     )
 
@@ -409,6 +589,9 @@ def main():
     print(f"Operaciones totales: {len(all_trades)}")
     print(f"Combinaciones analizadas: {len(summaries)}")
     print(f"Errores o datos insuficientes: {len(errors)}")
+    print(
+        f"Filas del resumen detallado: {len(operations_summary)}"
+    )
     print("Archivos CSV generados.")
     print(
         "IMPORTANTE: resultados brutos, sin costes, "
