@@ -703,7 +703,7 @@ class TestBacktestV3(unittest.TestCase):
         rejection = backtest_v3.RR_REJECTIONS[0]
 
         self.assertAlmostEqual(
-            rejection["execution_rr"],
+            rejection["actual_rr"],
             1.25,
         )
 
