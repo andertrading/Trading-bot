@@ -21,7 +21,8 @@ class TestIndicators(unittest.TestCase):
         )
 
         close = pd.Series(
-            np.linspace(100, 150, 300)
+            np.linspace(100, 150, 300),
+            index=dates
         )
 
         self.df = pd.DataFrame({
@@ -80,9 +81,14 @@ class TestIndicators(unittest.TestCase):
     def test_previous_high_does_not_include_current_candle(self):
         result = add_indicators(self.df)
 
+        previous_high = self.df["High"].iloc[-21:-1].max()
+        calculated_high = result["HIGH20"].iloc[-1]
+
+        self.assertTrue(np.isfinite(calculated_high))
+
         self.assertAlmostEqual(
-            result["HIGH20"].iloc[-1],
-            self.df["High"].iloc[-21:-1].max()
+            calculated_high,
+            previous_high
         )
 
 
