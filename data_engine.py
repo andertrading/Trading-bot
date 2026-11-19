@@ -3,7 +3,8 @@ import logging
 import os
 import threading
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, time as datetime_time, timezone
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 import requests
@@ -43,6 +44,7 @@ YAHOO_INTERVAL_MAP = {
 COLUMNS = ["Open", "High", "Low", "Close", "Volume"]
 
 CRYPTO_ASSETS = {"BTC", "ETH", "SOL", "XLM", "XRP"}
+LONDON_ASSETS = {"CSPX", "CNDX"}
 
 CRYPTO_SYMBOLS = {
     "BTC": "BTC/USD",
@@ -50,6 +52,19 @@ CRYPTO_SYMBOLS = {
     "SOL": "SOL/USD",
     "XLM": "XLM/USD",
     "XRP": "XRP/USD",
+}
+
+MARKET_CONFIG = {
+    "US": {
+        "timezone": "America/New_York",
+        "open": datetime_time(9, 30),
+        "close": datetime_time(16, 0),
+    },
+    "LONDON": {
+        "timezone": "Europe/London",
+        "open": datetime_time(8, 0),
+        "close": datetime_time(16, 30),
+    },
 }
 
 TWELVE_DATA_MIN_INTERVAL = 8.5
@@ -76,6 +91,13 @@ def _asset_config(asset):
         return None
 
     return config
+
+
+def _market_for_asset(asset):
+    if asset in LONDON_ASSETS:
+        return MARKET_CONFIG["LONDON"]
+
+    return MARKET_CONFIG["US"]
 
 
 def _get_cached_data(asset, interval):
@@ -184,28 +206,133 @@ def _normalise_dataframe(df):
     return df if not df.empty else None
 
 
-def _remove_incomplete_candle(df, interval):
+def _previous_weekday(day):
+    day = day - timedelta(days=1)
+
+    while day.weekday() >= 5:
+        day -= timedelta(days=1)
+
+    return day
+
+
+def _last_completed_session_date(now_local):
+    market = now_local.time()
+    opening = MARKET_CONFIG_FOR_DATE["open"] if False else None
+
+
+def _session_for_asset(asset):
+    market = _market_for_asset(asset)
+
+    return (
+        ZoneInfo(market["timezone"]),
+        market["open"],
+        market["close"],
+    )
+
+
+def _last_expected_intraday_timestamp(asset, now_utc):
+    tz, opening, closing = _session_for_asset(asset)
+
+    now_local = now_utc.astimezone(tz)
+    session_date = now_local.date()
+
+    open_dt = datetime.combine(
+        session_date,
+        opening,
+        tzinfo=tz,
+    )
+
+    close_dt = datetime.combine(
+        session_date,
+        closing,
+        tzinfo=tz,
+    )
+
+    if now_local.weekday() >= 5 or now_local < open_dt:
+        previous_day = _previous_weekday(session_date)
+
+        while True:
+            previous_close = datetime.combine(
+                previous_day,
+                closing,
+                tzinfo=tz,
+            )
+
+            if previous_close.weekday() < 5:
+                return previous_close - timedelta(minutes=15)
+
+            previous_day = _previous_weekday(previous_day)
+
+    if now_local >= close_dt:
+        return close_dt - timedelta(minutes=15)
+
+    elapsed = (now_local - open_dt).total_seconds()
+
+    completed_intervals = int(elapsed // 900)
+
+    if completed_intervals <= 0:
+        previous_day = _previous_weekday(session_date)
+
+        previous_close = datetime.combine(
+            previous_day,
+            closing,
+            tzinfo=tz,
+        )
+
+        return previous_close - timedelta(minutes=15)
+
+    expected = (
+        open_dt
+        + timedelta(minutes=15 * (completed_intervals - 1))
+    )
+
+    return expected
+
+
+def _remove_incomplete_candle(df, interval, asset=None):
     if df is None or df.empty:
         return df
 
     now = datetime.now(timezone.utc)
 
     if interval == "15m":
-        current_period_start = now.replace(
-            minute=(now.minute // 15) * 15,
-            second=0,
-            microsecond=0,
-        )
+        if asset in CRYPTO_ASSETS:
+            current_period_start = now.replace(
+                minute=(now.minute // 15) * 15,
+                second=0,
+                microsecond=0,
+            )
 
-        last_completed_start = pd.Timestamp(
-            current_period_start - timedelta(minutes=15)
-        )
+            last_completed_start = pd.Timestamp(
+                current_period_start - timedelta(minutes=15)
+            )
+
+        else:
+            if asset is None:
+                return df
+
+            expected = _last_expected_intraday_timestamp(
+                asset,
+                now,
+            )
+
+            last_completed_start = pd.Timestamp(
+                expected.astimezone(timezone.utc)
+            )
 
         return df[df.index <= last_completed_start]
 
     if interval == "1d":
-        today = now.date()
-        return df[df.index.date < today]
+        if asset in CRYPTO_ASSETS:
+            return df[df.index.date < now.date()]
+
+        if asset is None:
+            return df
+
+        tz, _, _ = _session_for_asset(asset)
+        today_local = now.astimezone(tz).date()
+
+        return df[df.index.tz_convert(tz).date < today_local]
 
     return df
 
@@ -345,7 +472,6 @@ def _download_twelvedata(asset, config, interval):
             )
             return None
 
-        # Registramos las fechas antes de eliminar la vela en curso.
         _log_dataframe_timestamps(
             "Twelve Data RAW",
             asset,
@@ -353,7 +479,11 @@ def _download_twelvedata(asset, config, interval):
             df,
         )
 
-        df = _remove_incomplete_candle(df, interval)
+        df = _remove_incomplete_candle(
+            df,
+            interval,
+            asset,
+        )
 
         if df is None or len(df) < 220:
             logger.warning(
@@ -463,6 +593,37 @@ def _download_yahoo(asset, config, interval):
             return None
 
         result = results[0]
+        meta = result.get("meta", {})
+
+        yahoo_currency = meta.get("currency")
+        configured_currency = config.get("currency")
+
+        logger.info(
+            "YAHOO METADATA | %s | currency=%s | exchange=%s | timezone=%s",
+            asset,
+            yahoo_currency,
+            meta.get("fullExchangeName", meta.get("exchangeName")),
+            meta.get("exchangeTimezoneName"),
+        )
+
+        if not yahoo_currency or not configured_currency:
+            logger.error(
+                "Moneda no verificable para %s: Yahoo=%s config=%s",
+                asset,
+                yahoo_currency,
+                configured_currency,
+            )
+            return None
+
+        if yahoo_currency.upper() != configured_currency.upper():
+            logger.error(
+                "MONEDA INCOMPATIBLE | %s | Yahoo=%s | Config=%s",
+                asset,
+                yahoo_currency,
+                configured_currency,
+            )
+            return None
+
         timestamps = result.get("timestamp", [])
         indicators = result.get("indicators", {})
         quotes = indicators.get("quote", [])
@@ -507,7 +668,11 @@ def _download_yahoo(asset, config, interval):
             df,
         )
 
-        df = _remove_incomplete_candle(df, interval)
+        df = _remove_incomplete_candle(
+            df,
+            interval,
+            asset,
+        )
 
         if df is None or len(df) < 220:
             logger.warning(
@@ -626,36 +791,82 @@ def is_data_fresh(
 ):
     timestamp = get_data_timestamp(df)
 
-    if timestamp is None:
+    if timestamp is None or asset is None:
         logger.warning(
-            "DATA FRESHNESS REJECTED | %s | %s | sin timestamp",
+            "DATA FRESHNESS REJECTED | %s | %s | sin timestamp o activo",
             asset,
             interval,
         )
         return False
 
-    now = pd.Timestamp.now(tz="UTC")
+    now = datetime.now(timezone.utc)
+
+    timestamp_dt = timestamp.to_pydatetime()
+
+    if timestamp_dt > now:
+        logger.warning(
+            "DATA FRESHNESS REJECTED | %s | %s | timestamp futuro",
+            asset,
+            interval,
+        )
+        return False
 
     age_minutes = (
-        now - timestamp
+        now - timestamp_dt
     ).total_seconds() / 60
-
-    if age_minutes < 0:
-        logger.warning(
-            "DATA FRESHNESS REJECTED | %s | %s | timestamp futuro: %s",
-            asset,
-            interval,
-            timestamp,
-        )
-        return False
 
     if asset in CRYPTO_ASSETS:
         limit = 45 if interval == "15m" else 48 * 60
+
     else:
-        # Se conserva temporalmente el margen anterior para mercados
-        # tradicionales. La validación por horario de mercado debe
-        # añadirse antes de utilizar señales intradía como operables.
-        limit = max(max_age_minutes, 72 * 60)
+        tz, _, _ = _session_for_asset(asset)
+        now_local = now.astimezone(tz)
+
+        if interval == "15m":
+            expected = _last_expected_intraday_timestamp(
+                asset,
+                now,
+            )
+
+            expected_utc = expected.astimezone(timezone.utc)
+
+            difference_minutes = abs(
+                (timestamp_dt - expected_utc).total_seconds()
+            ) / 60
+
+            is_fresh = difference_minutes <= 45
+
+            logger.info(
+                "DATA FRESHNESS | %s | %s | timestamp=%s | expected=%s | difference=%.1f min | fresh=%s",
+                asset,
+                interval,
+                timestamp.isoformat(),
+                expected_utc.isoformat(),
+                difference_minutes,
+                is_fresh,
+            )
+
+            return is_fresh
+
+        if interval == "1d":
+            expected_date = _previous_weekday(now_local.date())
+
+            timestamp_local_date = timestamp_dt.astimezone(tz).date()
+
+            is_fresh = timestamp_local_date == expected_date
+
+            logger.info(
+                "DATA FRESHNESS | %s | %s | timestamp=%s | expected_date=%s | fresh=%s",
+                asset,
+                interval,
+                timestamp.isoformat(),
+                expected_date,
+                is_fresh,
+            )
+
+            return is_fresh
+
+        limit = max_age_minutes
 
     is_fresh = age_minutes <= limit
 
