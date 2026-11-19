@@ -31,7 +31,7 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
-scan_lock = threading.Lock()
+state_lock = threading.Lock()
 
 scan_state = {
     "status": "idle",
@@ -114,11 +114,7 @@ def analyze_asset(asset, timeframe):
         return result
 
     except Exception:
-        logger.exception(
-            "Error analizando %s %s",
-            asset,
-            timeframe,
-        )
+        logger.exception("Error analizando %s %s", asset, timeframe)
         return no_trade(
             asset,
             timeframe,
@@ -133,14 +129,11 @@ def run_scan():
         if not settings.get("enabled", False):
             continue
 
-        for timeframe in (
-            INTRADAY_INTERVAL,
-            SWING_INTERVAL,
-        ):
+        for timeframe in (INTRADAY_INTERVAL, SWING_INTERVAL):
             result = analyze_asset(asset, timeframe)
             results.append(result)
 
-            with scan_lock:
+            with state_lock:
                 scan_state["results"] = list(results)
                 scan_state["analyses_completed"] = len(results)
 
@@ -173,37 +166,34 @@ def _scan_worker():
     try:
         result = run_scan()
 
-        with scan_lock:
+        with state_lock:
+            scan_state.update(result)
             scan_state["status"] = "completed"
             scan_state["finished_at"] = datetime.now(
                 timezone.utc
             ).isoformat()
-            scan_state.update(result)
 
     except Exception as exc:
         logger.exception("Error durante el escaneo")
 
-        with scan_lock:
+        with state_lock:
             scan_state["status"] = "error"
             scan_state["error"] = str(exc)
             scan_state["finished_at"] = datetime.now(
                 timezone.utc
             ).isoformat()
 
-    finally:
-        scan_lock.release()
-
 
 def start_scan():
-    if not scan_lock.acquire(blocking=False):
-        return False
+    with state_lock:
+        if scan_state["status"] == "running":
+            return False
 
-    enabled_assets = [
-        asset for asset, settings in ASSETS.items()
-        if settings.get("enabled", False)
-    ]
+        enabled_assets = [
+            asset for asset, settings in ASSETS.items()
+            if settings.get("enabled", False)
+        ]
 
-    with scan_lock:
         scan_state.update({
             "status": "running",
             "scan_id": str(uuid4()),
@@ -223,9 +213,16 @@ def start_scan():
         thread.start()
         return True
 
-    except Exception:
-        scan_lock.release()
+    except Exception as exc:
         logger.exception("No se pudo iniciar el escaneo")
+
+        with state_lock:
+            scan_state["status"] = "error"
+            scan_state["error"] = str(exc)
+            scan_state["finished_at"] = datetime.now(
+                timezone.utc
+            ).isoformat()
+
         return False
 
 
@@ -254,7 +251,7 @@ def health():
 def scan():
     started = start_scan()
 
-    with scan_lock:
+    with state_lock:
         response = dict(scan_state)
 
     response["scan_started"] = started
@@ -266,7 +263,7 @@ def scan():
 
 @app.route("/scan/status", methods=["GET"])
 def scan_status():
-    with scan_lock:
+    with state_lock:
         response = dict(scan_state)
 
     response["automatic_execution"] = False
@@ -276,7 +273,4 @@ def scan_status():
 
 
 if __name__ == "__main__":
-    app.run(
-        host="0.0.0.0",
-        port=5000,
-    )
+    app.run(host="0.0.0.0", port=5000)
