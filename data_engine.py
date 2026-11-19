@@ -7,13 +7,13 @@ from datetime import datetime, timedelta, timezone
 
 import pandas as pd
 import requests
-import yfinance as yf
 
 from config import ASSETS
 
 logger = logging.getLogger(__name__)
 
 TWELVE_DATA_URL = "https://api.twelvedata.com/time_series"
+YAHOO_CHART_URL = "https://query1.finance.yahoo.com/v8/finance/chart"
 
 PROVIDER_MAP = {
     "CSPX": "yahoo",
@@ -35,14 +35,17 @@ INTERVAL_MAP = {
     "1d": "1day",
 }
 
+YAHOO_INTERVAL_MAP = {
+    "15m": "15m",
+    "1d": "1d",
+}
+
 COLUMNS = ["Open", "High", "Low", "Close", "Volume"]
 
 CRYPTO_ASSETS = {"BTC", "ETH", "SOL", "XLM", "XRP"}
 
-# Margen conservador respecto al límite de 8 créditos/minuto.
 TWELVE_DATA_MIN_INTERVAL = 8.5
 
-# Caché temporal en memoria.
 CACHE_TTL = {
     "15m": 300,
     "1d": 1800,
@@ -83,11 +86,7 @@ def _get_cached_data(asset, interval):
             del _data_cache[key]
             return None
 
-        logger.info(
-            "Caché utilizada: %s %s",
-            asset,
-            interval,
-        )
+        logger.info("Caché utilizada: %s %s", asset, interval)
 
         return dataframe.copy()
 
@@ -111,7 +110,10 @@ def _normalise_dataframe(df):
     if isinstance(df.columns, pd.MultiIndex):
         df.columns = df.columns.get_level_values(0)
 
-    df.columns = [str(col).strip().title() for col in df.columns]
+    df.columns = [
+        str(col).strip().title()
+        for col in df.columns
+    ]
 
     required = ["Open", "High", "Low", "Close"]
 
@@ -125,7 +127,10 @@ def _normalise_dataframe(df):
     df = df[COLUMNS].copy()
 
     for col in COLUMNS:
-        df[col] = pd.to_numeric(df[col], errors="coerce")
+        df[col] = pd.to_numeric(
+            df[col],
+            errors="coerce",
+        )
 
     df = df.dropna(
         subset=["Open", "High", "Low", "Close"]
@@ -185,7 +190,6 @@ def _remove_incomplete_candle(df, interval):
         return df[df.index <= cutoff]
 
     if interval == "1d":
-        # Criterio conservador: no utilizar la vela del día UTC actual.
         today = now.date()
         return df[df.index.date < today]
 
@@ -246,9 +250,9 @@ def _download_twelvedata(asset, config, interval):
 
         df = pd.DataFrame(payload["values"])
 
-        if df.empty:
+        if df.empty or "datetime" not in df.columns:
             logger.error(
-                "Twelve Data devolvió datos vacíos para %s",
+                "Twelve Data devolvió datos vacíos o sin fechas para %s",
                 asset,
             )
             return None
@@ -262,13 +266,6 @@ def _download_twelvedata(asset, config, interval):
                 "volume": "Volume",
             }
         )
-
-        if "datetime" not in df.columns:
-            logger.error(
-                "No hay fechas en los datos de %s",
-                asset,
-            )
-            return None
 
         df["datetime"] = pd.to_datetime(
             df["datetime"],
@@ -319,55 +316,107 @@ def _download_yahoo(asset, config, interval):
     ticker = config.get("yahoo")
 
     if not ticker:
-        logger.error(
-            "No hay ticker de Yahoo para %s",
-            asset,
-        )
+        logger.error("No hay ticker de Yahoo para %s", asset)
         return None
 
-    period = "60d" if interval == "15m" else "10y"
+    now = datetime.now(timezone.utc)
+
+    if interval == "15m":
+        start = now - timedelta(days=60)
+    else:
+        start = now - timedelta(days=3650)
+
+    params = {
+        "period1": int(start.timestamp()),
+        "period2": int(now.timestamp()),
+        "interval": YAHOO_INTERVAL_MAP[interval],
+        "events": "history",
+        "includeAdjustedClose": "true",
+    }
+
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 Chrome/120.0 Safari/537.36"
+        )
+    }
 
     try:
-        raw = yf.download(
-            ticker,
-            period=period,
-            interval=interval,
-            auto_adjust=False,
-            progress=False,
-            threads=False,
-            timeout=30,
+        response = requests.get(
+            f"{YAHOO_CHART_URL}/{ticker}",
+            params=params,
+            headers=headers,
+            timeout=25,
         )
 
-        if raw is None or raw.empty:
+        if response.status_code == 429:
             logger.error(
-                "Yahoo no devolvió datos para %s (%s)",
-                asset,
+                "Yahoo limitó las peticiones para %s (HTTP 429)",
                 ticker,
             )
             return None
 
-        df = _normalise_dataframe(raw)
+        response.raise_for_status()
 
-        if df is None:
+        payload = response.json()
+        chart = payload.get("chart", {})
+
+        if chart.get("error"):
             logger.error(
-                "Datos de Yahoo no válidos para %s",
-                asset,
+                "Yahoo rechazó %s: %s",
+                ticker,
+                chart["error"],
             )
             return None
 
+        results = chart.get("result")
+
+        if not results:
+            logger.error(
+                "Yahoo no devolvió resultados para %s",
+                ticker,
+            )
+            return None
+
+        result = results[0]
+        timestamps = result.get("timestamp", [])
+        indicators = result.get("indicators", {})
+        quotes = indicators.get("quote", [])
+
+        if not timestamps or not quotes:
+            logger.error(
+                "Yahoo devolvió datos incompletos para %s",
+                ticker,
+            )
+            return None
+
+        quote = quotes[0]
+
+        df = pd.DataFrame({
+            "Open": quote.get("open", []),
+            "High": quote.get("high", []),
+            "Low": quote.get("low", []),
+            "Close": quote.get("close", []),
+            "Volume": quote.get("volume", []),
+        }, index=pd.to_datetime(
+            timestamps,
+            unit="s",
+            utc=True,
+        ))
+
+        df = _normalise_dataframe(df)
         df = _remove_incomplete_candle(df, interval)
 
         if df is None or len(df) < 220:
             logger.warning(
                 "Histórico insuficiente en Yahoo para %s %s",
-                asset,
+                ticker,
                 interval,
             )
             return None
 
         logger.info(
-            "Yahoo OK: %s (%s) %s, %s velas",
-            asset,
+            "Yahoo OK: %s %s, %s velas",
             ticker,
             interval,
             len(df),
@@ -375,10 +424,18 @@ def _download_yahoo(asset, config, interval):
 
         return df
 
+    except requests.RequestException as exc:
+        logger.error(
+            "Error HTTP de Yahoo para %s: %s",
+            ticker,
+            exc,
+        )
+        return None
+
     except Exception:
         logger.exception(
-            "Error descargando Yahoo Finance para %s",
-            asset,
+            "Error procesando Yahoo Finance para %s",
+            ticker,
         )
         return None
 
