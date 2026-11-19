@@ -2,6 +2,12 @@
 import logging
 import faulthandler
 import threading
+import sys
+import platform
+
+import pandas as pd
+import numpy as np
+
 from datetime import datetime, timezone
 from uuid import uuid4
 
@@ -59,18 +65,10 @@ def no_trade(asset, timeframe, reason):
 
 
 def analyze_asset(asset, timeframe):
-    logger.info(
-        "ANALYSIS START | %s | %s",
-        asset,
-        timeframe,
-    )
+    logger.info("ANALYSIS START | %s | %s", asset, timeframe)
 
     try:
-        logger.info(
-            "DATA DOWNLOAD START | %s | %s",
-            asset,
-            timeframe,
-        )
+        logger.info("DATA DOWNLOAD START | %s | %s", asset, timeframe)
 
         df = download_data(asset, timeframe)
 
@@ -84,11 +82,7 @@ def analyze_asset(asset, timeframe):
         if df is None or df.empty:
             return no_trade(asset, timeframe, "Datos no disponibles")
 
-        logger.info(
-            "TIMESTAMP CHECK | %s | %s",
-            asset,
-            timeframe,
-        )
+        logger.info("TIMESTAMP CHECK | %s | %s", asset, timeframe)
 
         timestamp = get_data_timestamp(df)
 
@@ -112,30 +106,14 @@ def analyze_asset(asset, timeframe):
                 "Los datos tienen una fecha futura",
             )
 
-        if not is_data_fresh(
-            df,
-            asset=asset,
-            interval=timeframe,
-        ):
-            return no_trade(
-                asset,
-                timeframe,
-                "Datos desactualizados",
-            )
+        if not is_data_fresh(df, asset=asset, interval=timeframe):
+            return no_trade(asset, timeframe, "Datos desactualizados")
 
-        logger.info(
-            "STRATEGY START | %s | %s",
-            asset,
-            timeframe,
-        )
+        logger.info("STRATEGY START | %s | %s", asset, timeframe)
 
         result = evaluate_signal(df, asset, timeframe)
 
-        logger.info(
-            "STRATEGY END | %s | %s",
-            asset,
-            timeframe,
-        )
+        logger.info("STRATEGY END | %s | %s", asset, timeframe)
 
         if not isinstance(result, dict):
             return no_trade(
@@ -161,17 +139,9 @@ def analyze_asset(asset, timeframe):
         return result
 
     except Exception:
-        logger.exception(
-            "PYTHON ERROR | %s | %s",
-            asset,
-            timeframe,
-        )
+        logger.exception("PYTHON ERROR | %s | %s", asset, timeframe)
 
-        return no_trade(
-            asset,
-            timeframe,
-            "Error interno de análisis",
-        )
+        return no_trade(asset, timeframe, "Error interno de análisis")
 
 
 def run_scan():
@@ -316,6 +286,18 @@ def health():
         "status": "healthy",
         "version": BOT_VERSION,
         "timestamp": datetime.now(timezone.utc).isoformat(),
+        "mode": "PAPER_ONLY",
+    })
+
+
+@app.route("/diagnostics", methods=["GET"])
+def diagnostics():
+    return jsonify({
+        "python_version": sys.version,
+        "python_executable": sys.executable,
+        "platform": platform.platform(),
+        "pandas_version": pd.__version__,
+        "numpy_version": np.__version__,
         "mode": "PAPER_ONLY",
     })
 
