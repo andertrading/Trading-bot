@@ -29,34 +29,56 @@ class TestTradingBotApp(unittest.TestCase):
         self.assertEqual(data["version"], "3.0")
         self.assertEqual(data["mode"], "PAPER_ONLY")
 
-    @patch("Bot.run_scan")
-    def test_scan_endpoint(self, mock_run_scan):
-        mock_run_scan.return_value = {
-            "version": "3.0",
-            "status": "analysis_completed",
-            "analyses_completed": 24,
-            "candidates_found": 0,
-            "no_trade_count": 24,
-            "results": [],
-            "mode": "PAPER_ONLY",
-            "telegram_alerts_enabled": False,
-            "automatic_execution": False,
-            "real_trading_authorized": False,
-        }
+    @patch("Bot.start_scan")
+    def test_scan_endpoint(self, mock_start_scan):
+        mock_start_scan.return_value = True
 
         response = self.client.get("/scan")
-        self.assertEqual(response.status_code, 200)
+
+        self.assertEqual(response.status_code, 202)
 
         data = response.get_json()
-        self.assertEqual(data["status"], "analysis_completed")
-        self.assertEqual(data["mode"], "PAPER_ONLY")
+
+        self.assertTrue(data["scan_started"])
         self.assertFalse(data["automatic_execution"])
         self.assertFalse(data["real_trading_authorized"])
 
-        mock_run_scan.assert_called_once()
+        mock_start_scan.assert_called_once()
+
+    @patch("Bot.start_scan")
+    def test_scan_already_running(self, mock_start_scan):
+        mock_start_scan.return_value = False
+
+        response = self.client.get("/scan")
+
+        self.assertEqual(response.status_code, 200)
+
+        data = response.get_json()
+
+        self.assertFalse(data["scan_started"])
+        self.assertFalse(data["automatic_execution"])
+        self.assertFalse(data["real_trading_authorized"])
+
+        mock_start_scan.assert_called_once()
+
+    def test_scan_status_endpoint(self):
+        response = self.client.get("/scan/status")
+
+        self.assertEqual(response.status_code, 200)
+
+        data = response.get_json()
+
+        self.assertIn("status", data)
+        self.assertIn("analyses_completed", data)
+        self.assertIn("total_analyses", data)
+        self.assertFalse(data["automatic_execution"])
+        self.assertFalse(data["real_trading_authorized"])
 
     @patch("Bot.analyze_asset")
-    def test_scan_analyzes_all_enabled_assets_and_timeframes(self, mock_analyze):
+    def test_scan_analyzes_all_enabled_assets_and_timeframes(
+        self,
+        mock_analyze,
+    ):
         mock_analyze.return_value = {
             "action": "NO TRADE",
             "mode": "PAPER_ONLY",
@@ -73,17 +95,17 @@ class TestTradingBotApp(unittest.TestCase):
 
         self.assertEqual(
             result["analyses_completed"],
-            expected_count
+            expected_count,
         )
 
         self.assertEqual(
             mock_analyze.call_count,
-            expected_count
+            expected_count,
         )
 
         self.assertEqual(
             result["no_trade_count"],
-            expected_count
+            expected_count,
         )
 
         self.assertEqual(result["candidates_found"], 0)
