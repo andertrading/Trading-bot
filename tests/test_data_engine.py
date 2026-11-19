@@ -180,7 +180,7 @@ class TestDataNormalisation(unittest.TestCase):
         df = pd.concat(
             [
                 self.df,
-                self.df.iloc[[1]].assign(close=108),
+                self.df.iloc[[1]].assign(close=103.5),
             ]
         )
 
@@ -188,7 +188,7 @@ class TestDataNormalisation(unittest.TestCase):
 
         self.assertIsNotNone(result)
         self.assertEqual(result.index.duplicated().sum(), 0)
-        self.assertEqual(result.loc[self.index[1], "Close"], 108)
+        self.assertEqual(result.loc[self.index[1], "Close"], 103.5)
 
     def test_converts_timestamps_to_utc(self):
         df = self.df.copy()
