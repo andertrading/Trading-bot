@@ -68,11 +68,7 @@ class TestBacktestV3(unittest.TestCase):
             }
 
         with (
-            patch.object(
-                backtest_v3,
-                "MIN_BARS",
-                5,
-            ),
+            patch.object(backtest_v3, "MIN_BARS", 5),
             patch.dict(
                 backtest_v3.PERIODS,
                 {
@@ -195,11 +191,7 @@ class TestBacktestV3(unittest.TestCase):
         data.iloc[6, data.columns.get_loc("High")] = 1.0
 
         with (
-            patch.object(
-                backtest_v3,
-                "MIN_BARS",
-                5,
-            ),
+            patch.object(backtest_v3, "MIN_BARS", 5),
             patch.object(
                 backtest_v3,
                 "download_history",
@@ -219,6 +211,169 @@ class TestBacktestV3(unittest.TestCase):
         self.assertEqual(trades, [])
         self.assertIsNotNone(error)
         indicators_mock.assert_not_called()
+
+    # ---------------------------------------------------------
+    # DETECCIÓN DE HUECOS TEMPORALES
+    # ---------------------------------------------------------
+
+    def test_crypto_15m_detects_missing_candle(self):
+        previous = pd.Timestamp("2025-01-01 10:00")
+        current = pd.Timestamp("2025-01-01 10:30")
+
+        result = backtest_v3._has_unexpected_gap(
+            previous,
+            current,
+            "15m",
+            "CRYPTO",
+        )
+
+        self.assertTrue(result)
+
+    def test_crypto_15m_accepts_consecutive_candles(self):
+        previous = pd.Timestamp("2025-01-01 10:00")
+        current = pd.Timestamp("2025-01-01 10:15")
+
+        result = backtest_v3._has_unexpected_gap(
+            previous,
+            current,
+            "15m",
+            "CRYPTO",
+        )
+
+        self.assertFalse(result)
+
+    def test_stock_15m_detects_missing_candle_same_day(self):
+        previous = pd.Timestamp("2025-01-02 10:00")
+        current = pd.Timestamp("2025-01-02 10:30")
+
+        result = backtest_v3._has_unexpected_gap(
+            previous,
+            current,
+            "15m",
+            "STOCK",
+        )
+
+        self.assertTrue(result)
+
+    def test_stock_15m_accepts_overnight_closure(self):
+        previous = pd.Timestamp("2025-01-02 17:45")
+        current = pd.Timestamp("2025-01-03 09:30")
+
+        result = backtest_v3._has_unexpected_gap(
+            previous,
+            current,
+            "15m",
+            "STOCK",
+        )
+
+        self.assertFalse(result)
+
+    def test_etf_15m_accepts_overnight_closure(self):
+        previous = pd.Timestamp("2025-01-02 17:45")
+        current = pd.Timestamp("2025-01-03 09:00")
+
+        result = backtest_v3._has_unexpected_gap(
+            previous,
+            current,
+            "15m",
+            "ETF",
+        )
+
+        self.assertFalse(result)
+
+    def test_stock_daily_does_not_reject_weekend_gap(self):
+        previous = pd.Timestamp("2025-01-03")
+        current = pd.Timestamp("2025-01-06")
+
+        result = backtest_v3._has_unexpected_gap(
+            previous,
+            current,
+            "1d",
+            "STOCK",
+        )
+
+        self.assertFalse(result)
+
+    def test_crypto_daily_detects_missing_day(self):
+        previous = pd.Timestamp("2025-01-01")
+        current = pd.Timestamp("2025-01-03")
+
+        result = backtest_v3._has_unexpected_gap(
+            previous,
+            current,
+            "1d",
+            "CRYPTO",
+        )
+
+        self.assertTrue(result)
+
+    def test_execution_gap_validator_accepts_contiguous_data(self):
+        data = self.make_execution_data()
+
+        result = backtest_v3._validate_execution_gaps(
+            data,
+            4,
+            7,
+            "15m",
+            "STOCK",
+        )
+
+        self.assertIsNone(result)
+
+    def test_execution_gap_validator_detects_missing_candle(self):
+        data = self.make_execution_data()
+
+        new_index = list(data.index)
+
+        new_index[6] = new_index[6] + pd.Timedelta(minutes=15)
+
+        data.index = pd.DatetimeIndex(new_index)
+
+        result = backtest_v3._validate_execution_gaps(
+            data,
+            5,
+            6,
+            "15m",
+            "STOCK",
+        )
+
+        self.assertIsNotNone(result)
+        self.assertIn("Hueco temporal anómalo", result)
+
+    def test_engine_stops_if_gap_appears_during_open_trade(self):
+        data = self.make_execution_data()
+
+        new_index = list(data.index)
+
+        new_index[6] = new_index[6] + pd.Timedelta(minutes=15)
+
+        data.index = pd.DatetimeIndex(new_index)
+
+        trades, error = self.run_execution_test(data)
+
+        self.assertEqual(trades, [])
+        self.assertIsNotNone(error)
+        self.assertIn("Hueco temporal anómalo", error)
+
+    def test_engine_does_not_reject_overnight_gap_for_stock(self):
+        data = self.make_execution_data()
+
+        new_index = list(data.index)
+
+        new_index[6] = pd.Timestamp("2025-01-02 09:30")
+
+        for index in range(7, len(new_index)):
+            new_index[index] = (
+                pd.Timestamp("2025-01-02 09:30")
+                + pd.Timedelta(minutes=15 * (index - 6))
+            )
+
+        data.index = pd.DatetimeIndex(new_index)
+
+        trades, error = self.run_execution_test(data)
+
+        self.assertIsNone(error)
+        self.assertEqual(len(trades), 1)
 
     # ---------------------------------------------------------
     # MÉTRICAS
@@ -625,7 +780,7 @@ class TestBacktestV3(unittest.TestCase):
         )
 
     # ---------------------------------------------------------
-    # PRUEBAS ADICIONALES DEL CÁLCULO DE R
+    # PRUEBAS DEL CÁLCULO DE R
     # ---------------------------------------------------------
 
     def test_stop_gap_result_r_can_be_below_minus_one(self):
