@@ -10,7 +10,7 @@ from indicators import add_indicators
 from strategies import evaluate_signal_at
 
 
-VERSION = "3.3"
+VERSION = "3.4"
 
 PERIODS = {
     "15m": {"period": "60d", "max_bars": 32},
@@ -56,6 +56,7 @@ def _normalize_columns(data):
 
     for level in range(data.columns.nlevels):
         values = set(data.columns.get_level_values(level))
+
         if fields.intersection(values):
             data.columns = data.columns.get_level_values(level)
             return data
@@ -140,7 +141,6 @@ def download_history(ticker, interval):
         np.nan,
     )
 
-    # Los precios son obligatorios; el volumen es opcional.
     data = data.dropna(subset=required)
 
     data = data[
@@ -389,19 +389,37 @@ def _calculate_drawdown(results):
 def calculate_metrics(trades):
     """Calcula métricas de una secuencia independiente."""
 
-    if trades is None or len(trades) == 0:
+    if trades is None:
         return _empty_metrics()
+
+    if isinstance(trades, pd.DataFrame):
+        if trades.empty or "result_R" not in trades.columns:
+            return _empty_metrics()
+
+        records = trades.to_dict("records")
+
+    else:
+        try:
+            records = list(trades)
+        except (TypeError, ValueError):
+            return _empty_metrics()
 
     valid_trades = []
 
-    for trade in trades:
+    for trade in records:
+        if not isinstance(trade, dict):
+            continue
+
         try:
             result = float(trade["result_R"])
             duration = float(trade["duration_bars"])
-        except (TypeError, ValueError, KeyError):
+        except (TypeError, ValueError, KeyError, OverflowError):
             continue
 
         if not np.isfinite(result) or not np.isfinite(duration):
+            continue
+
+        if duration <= 0:
             continue
 
         valid_trades.append((result, duration))
@@ -490,10 +508,31 @@ def generate_operations_summary(trades):
         "MAX_HOLD",
     ]
 
-    if not trades:
+    if trades is None:
         return pd.DataFrame(columns=columns)
 
-    df = pd.DataFrame(trades)
+    if isinstance(trades, pd.DataFrame):
+        if trades.empty:
+            return pd.DataFrame(columns=columns)
+
+        df = trades.copy()
+
+    else:
+        try:
+            df = pd.DataFrame(list(trades))
+        except (TypeError, ValueError):
+            return pd.DataFrame(columns=columns)
+
+    required = [
+        "result_R",
+        "exit_time",
+        "asset",
+        "timeframe",
+        "exit_reason",
+    ]
+
+    if not all(column in df.columns for column in required):
+        return pd.DataFrame(columns=columns)
 
     df["result_R"] = pd.to_numeric(
         df["result_R"],
@@ -507,14 +546,17 @@ def generate_operations_summary(trades):
     )
 
     df = df.dropna(
-        subset=["result_R", "exit_time"]
+        subset=["result_R", "exit_time", "asset", "timeframe"]
     )
 
     df = df[
         np.isfinite(df["result_R"].to_numpy(dtype=float))
     ]
 
-    df = df.sort_values("exit_time")
+    if df.empty:
+        return pd.DataFrame(columns=columns)
+
+    df = df.sort_values("exit_time").copy()
 
     summaries = []
 
@@ -522,19 +564,9 @@ def generate_operations_summary(trades):
 
         group = group.sort_values("exit_time")
 
-        results = pd.to_numeric(
-            group["result_R"],
-            errors="coerce",
-        ).dropna()
+        results = group["result_R"].to_numpy(dtype=float)
 
-        if results.empty:
-            return
-
-        results = results[
-            np.isfinite(results.to_numpy(dtype=float))
-        ]
-
-        if results.empty:
+        if len(results) == 0:
             return
 
         wins = results[results > 0]
@@ -600,9 +632,7 @@ def generate_operations_summary(trades):
                 else None
             ),
             "drawdown_max_R": round(
-                _calculate_drawdown(
-                    results.to_numpy(dtype=float)
-                ),
+                _calculate_drawdown(results),
                 4,
             ),
             "racha_perdedora_max": max_losing_streak,
