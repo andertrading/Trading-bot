@@ -8,6 +8,7 @@ import math
 
 import pandas as pd
 import numpy as np
+import requests
 
 from datetime import datetime, timezone
 from uuid import uuid4
@@ -27,6 +28,8 @@ from config import (
     CLOSE_FEES_CONFIRMED,
     SPREADS_CONFIRMED,
     FX_CONVERSION_CONFIRMED,
+    TELEGRAM_TOKEN,
+    TELEGRAM_CHAT_ID,
 )
 
 from data_engine import (
@@ -53,6 +56,16 @@ logger = logging.getLogger(__name__)
 
 state_lock = threading.Lock()
 
+TELEGRAM_ENABLED = bool(
+    TELEGRAM_TOKEN and TELEGRAM_CHAT_ID
+)
+
+TELEGRAM_API_URL = (
+    f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+    if TELEGRAM_TOKEN
+    else None
+)
+
 scan_state = {
     "status": "idle",
     "scan_id": None,
@@ -62,7 +75,244 @@ scan_state = {
     "total_analyses": 0,
     "results": [],
     "error": None,
+    "telegram_alerts_enabled": TELEGRAM_ENABLED,
+    "telegram_notification_status": "not_sent",
 }
+
+
+def send_telegram_message(message):
+    """
+    Envía un mensaje informativo a Telegram.
+    Nunca ejecuta operaciones.
+    """
+
+    if not TELEGRAM_ENABLED:
+        logger.warning(
+            "TELEGRAM DISABLED | Missing credentials"
+        )
+        return False
+
+    try:
+        response = requests.post(
+            TELEGRAM_API_URL,
+            json={
+                "chat_id": TELEGRAM_CHAT_ID,
+                "text": message,
+            },
+            timeout=10,
+        )
+
+        response.raise_for_status()
+
+        data = response.json()
+
+        if not data.get("ok", False):
+            logger.error(
+                "TELEGRAM API ERROR | %s",
+                data.get("description", "Unknown error"),
+            )
+            return False
+
+        logger.info("TELEGRAM MESSAGE SENT")
+        return True
+
+    except requests.RequestException:
+        logger.exception("TELEGRAM CONNECTION ERROR")
+        return False
+
+    except ValueError:
+        logger.exception("TELEGRAM INVALID RESPONSE")
+        return False
+
+    except Exception:
+        logger.exception("TELEGRAM UNEXPECTED ERROR")
+        return False
+
+
+def format_number(value, decimals=4):
+    try:
+        number = float(value)
+
+        if not math.isfinite(number):
+            return "N/D"
+
+        return f"{number:.{decimals}f}"
+
+    except (TypeError, ValueError):
+        return "N/D"
+
+
+def build_telegram_messages(scan_result):
+    """
+    Construye un resumen y mensajes separados para cada
+    candidata técnica bloqueada.
+    """
+
+    timestamp = scan_result.get(
+        "timestamp",
+        datetime.now(timezone.utc).isoformat(),
+    )
+
+    analyses = scan_result.get("analyses_completed", 0)
+    technical = scan_result.get("technical_candidates_found", 0)
+    blocked = scan_result.get("candidates_blocked", 0)
+    validated = scan_result.get("validated_candidates", 0)
+    no_trade_count = scan_result.get("no_trade_count", 0)
+
+    portfolio = scan_result.get("portfolio_status", {})
+    portfolio_status = (
+        portfolio.get("status", "UNKNOWN")
+        if isinstance(portfolio, dict)
+        else "UNKNOWN"
+    )
+
+    messages = []
+
+    summary = (
+        "TRADING BOT 3.0\n"
+        "ANÁLISIS COMPLETADO\n\n"
+        f"Fecha: {timestamp}\n"
+        f"Análisis realizados: {analyses}\n"
+        f"Candidatas técnicas: {technical}\n"
+        f"Candidatas bloqueadas: {blocked}\n"
+        f"Candidatas validadas: {validated}\n"
+        f"NO TRADE: {no_trade_count}\n"
+        f"Estado de cartera: {portfolio_status}\n\n"
+        "MODO: PAPER ONLY\n"
+        "Ejecución automática: DESACTIVADA\n"
+        "Operativa real: NO AUTORIZADA"
+    )
+
+    messages.append(summary)
+
+    blocked_candidates = [
+        item
+        for item in scan_result.get("results", [])
+        if (
+            item.get("action") == "BUY CANDIDATE"
+            and item.get("validation_status") == "BLOCKED"
+        )
+    ]
+
+    if not blocked_candidates:
+        messages.append(
+            "No se han detectado candidatas técnicas "
+            "bloqueadas en este análisis."
+        )
+        return messages
+
+    for candidate in blocked_candidates:
+        asset = candidate.get("asset", "N/D")
+        timeframe = candidate.get("timeframe", "N/D")
+        score = candidate.get("score", "N/D")
+
+        entry = format_number(
+            candidate.get("entry"),
+            4,
+        )
+
+        stop = format_number(
+            candidate.get("stop"),
+            4,
+        )
+
+        target = format_number(
+            candidate.get("target"),
+            4,
+        )
+
+        rr = format_number(
+            candidate.get("risk_reward"),
+            2,
+        )
+
+        risk = format_number(
+            candidate.get("provisional_risk_pct"),
+            4,
+        )
+
+        reasons = candidate.get(
+            "validation_reasons",
+            [],
+        )
+
+        if not isinstance(reasons, list):
+            reasons = [str(reasons)]
+
+        reasons_text = "\n".join(
+            f"- {reason}" for reason in reasons
+        )
+
+        if len(reasons_text) > 1800:
+            reasons_text = reasons_text[:1800] + "..."
+
+        message = (
+            "CANDIDATA TÉCNICA DETECTADA\n"
+            "BLOQUEADA — NO OPERAR\n\n"
+            f"Activo: {asset}\n"
+            f"Temporalidad: {timeframe}\n"
+            f"Score: {score}\n"
+            f"Entrada técnica: {entry}\n"
+            f"Stop técnico: {stop}\n"
+            f"Objetivo técnico: {target}\n"
+            f"Ratio riesgo/beneficio: {rr}\n"
+            f"Riesgo provisional: {risk}\n\n"
+            "MOTIVOS DEL BLOQUEO:\n"
+            f"{reasons_text}\n\n"
+            "Estado: NO VALIDADA\n"
+            "No constituye una orden de compra.\n"
+            "No operar."
+        )
+
+        messages.append(message)
+
+    return messages
+
+
+def send_telegram_notifications(scan_result):
+    """
+    Envía el resumen del análisis y las candidatas bloqueadas.
+    Un fallo de Telegram no interrumpe el bot.
+    """
+
+    if not TELEGRAM_ENABLED:
+        return "disabled"
+
+    try:
+        messages = build_telegram_messages(scan_result)
+
+        sent = 0
+        failed = 0
+
+        for message in messages:
+            if send_telegram_message(message):
+                sent += 1
+            else:
+                failed += 1
+
+        if failed == 0:
+            logger.info(
+                "TELEGRAM NOTIFICATIONS COMPLETED | sent=%s",
+                sent,
+            )
+            return f"sent:{sent}"
+
+        logger.warning(
+            "TELEGRAM NOTIFICATIONS PARTIAL | sent=%s failed=%s",
+            sent,
+            failed,
+        )
+
+        if sent > 0:
+            return f"partial:{sent}/{failed}"
+
+        return "failed"
+
+    except Exception:
+        logger.exception(
+            "TELEGRAM NOTIFICATION BUILD ERROR"
+        )
+        return "failed"
 
 
 def no_trade(asset, timeframe, reason):
@@ -413,7 +663,7 @@ def run_scan():
         "currency": ACCOUNT_CURRENCY,
         "results": results,
         "mode": "PAPER_ONLY",
-        "telegram_alerts_enabled": False,
+        "telegram_alerts_enabled": TELEGRAM_ENABLED,
         "automatic_execution": False,
         "real_trading_authorized": False,
     }
@@ -424,6 +674,13 @@ def _scan_worker():
 
     try:
         result = run_scan()
+
+        # Las notificaciones se envían al terminar el análisis.
+        # Si Telegram falla, el análisis no se pierde.
+        telegram_status = send_telegram_notifications(result)
+
+        result["telegram_alerts_enabled"] = TELEGRAM_ENABLED
+        result["telegram_notification_status"] = telegram_status
 
         with state_lock:
             scan_state.update(result)
@@ -467,6 +724,8 @@ def start_scan():
             "total_analyses": len(enabled_assets) * 2,
             "results": [],
             "error": None,
+            "telegram_alerts_enabled": TELEGRAM_ENABLED,
+            "telegram_notification_status": "pending",
         })
 
     try:
@@ -506,6 +765,7 @@ def home():
         "mode": "PAPER_ONLY",
         "automatic_execution": False,
         "real_trading_authorized": False,
+        "telegram_alerts_enabled": TELEGRAM_ENABLED,
     })
 
 
@@ -518,6 +778,7 @@ def health():
             timezone.utc
         ).isoformat(),
         "mode": "PAPER_ONLY",
+        "telegram_alerts_enabled": TELEGRAM_ENABLED,
     })
 
 
@@ -530,6 +791,7 @@ def diagnostics():
         "pandas_version": pd.__version__,
         "numpy_version": np.__version__,
         "mode": "PAPER_ONLY",
+        "telegram_alerts_enabled": TELEGRAM_ENABLED,
     })
 
 
