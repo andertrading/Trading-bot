@@ -41,7 +41,6 @@ def no_trade(asset, timeframe, reason):
 
 
 def analyze_asset(asset, timeframe):
-
     try:
         # 1. Descargar datos
         df = download_data(asset, timeframe)
@@ -53,7 +52,7 @@ def analyze_asset(asset, timeframe):
                 "Datos no disponibles",
             )
 
-        # 2. Obtener fecha de la última vela
+        # 2. Comprobar fecha de la última vela
         timestamp = get_data_timestamp(df)
 
         if timestamp is None:
@@ -63,14 +62,29 @@ def analyze_asset(asset, timeframe):
                 "No se pudo determinar la fecha de los datos",
             )
 
-        # 3. Comprobar antigüedad
+        now = datetime.now(timezone.utc)
+
+        age_minutes = (
+            now - timestamp.to_pydatetime()
+        ).total_seconds() / 60
+
+        if age_minutes < 0:
+            return no_trade(
+                asset,
+                timeframe,
+                "Los datos tienen una fecha futura",
+            )
+
+        # 3. Validar antigüedad según el activo y temporalidad.
+        # Se evita imponer un límite universal que bloquee
+        # acciones y ETF durante cierres normales del mercado.
         if not is_data_fresh(
             df,
             asset=asset,
             interval=timeframe,
         ):
             logger.warning(
-                "Datos antiguos: %s %s | última vela: %s",
+                "Datos desactualizados: %s %s | última vela: %s",
                 asset,
                 timeframe,
                 timestamp,
@@ -82,26 +96,7 @@ def analyze_asset(asset, timeframe):
                 "Datos desactualizados",
             )
 
-        # 4. Protección adicional conservadora
-        now = datetime.now(timezone.utc)
-
-        age_minutes = (
-            now - timestamp.to_pydatetime()
-        ).total_seconds() / 60
-
-        max_age = (
-            30 if timeframe == "15m"
-            else 48 * 60
-        )
-
-        if age_minutes < 0 or age_minutes > max_age:
-            return no_trade(
-                asset,
-                timeframe,
-                "Datos fuera del límite de antigüedad permitido",
-            )
-
-        # 5. Evaluar estrategia
+        # 4. Evaluar estrategia
         result = evaluate_signal(
             df,
             asset,
@@ -115,7 +110,7 @@ def analyze_asset(asset, timeframe):
                 "La estrategia devolvió un resultado no válido",
             )
 
-        # 6. Añadir información de control
+        # 5. Añadir información de control
         result["asset"] = asset
         result["timeframe"] = timeframe
         result["data_timestamp"] = timestamp.isoformat()
@@ -139,7 +134,6 @@ def analyze_asset(asset, timeframe):
 
 
 def run_scan():
-
     results = []
 
     for asset, settings in ASSETS.items():
@@ -188,43 +182,31 @@ def run_scan():
 
 @app.route("/", methods=["GET"])
 def home():
-
     return jsonify({
-        "bot": "Trading Bot",
+        "name": "Trading Bot",
         "version": BOT_VERSION,
-        "status": "running",
+        "status": "online",
         "mode": "PAPER_ONLY",
+        "automatic_execution": False,
     })
 
 
 @app.route("/health", methods=["GET"])
 def health():
-
     return jsonify({
         "status": "healthy",
         "version": BOT_VERSION,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "mode": "PAPER_ONLY",
     })
 
 
 @app.route("/scan", methods=["GET"])
 def scan():
-
-    try:
-        return jsonify(run_scan())
-
-    except Exception:
-        logger.exception(
-            "Error general durante el análisis"
-        )
-
-        return jsonify({
-            "status": "error",
-            "message": "No se pudo completar el análisis",
-        }), 500
+    return jsonify(run_scan())
 
 
 if __name__ == "__main__":
-
     app.run(
         host="0.0.0.0",
         port=5000,
