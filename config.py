@@ -153,6 +153,12 @@ DISABLED_ASSETS = {
     "OIL": "CL=F",
 }
 
+# IMPORTANTE:
+# Las comisiones de entrada configuradas en ASSETS son estimaciones
+# provisionales. No deben considerarse verificadas con eToro.
+# También están pendientes de confirmar las comisiones de cierre,
+# spreads y conversiones de divisa.
+
 # Costes pendientes de confirmar.
 CLOSE_FEES_CONFIRMED = False
 SPREADS_CONFIRMED = False
