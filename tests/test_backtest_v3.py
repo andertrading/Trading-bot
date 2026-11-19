@@ -63,7 +63,7 @@ class TestBacktestV3(unittest.TestCase):
                 }
 
             return {
-                "action": "NO SIGNAL",
+                "action": "NO TRADE",
                 "score": 0,
             }
 
@@ -463,52 +463,54 @@ class TestBacktestV3(unittest.TestCase):
     def test_stop_gap_exits_at_open(self):
         data = self.make_execution_data()
 
-        # La entrada ocurre en la vela 5.
-        # El gap bajista aparece en la vela 6.
         data.iloc[5, data.columns.get_loc("High")] = 102.0
         data.iloc[5, data.columns.get_loc("Low")] = 100.0
 
         data.iloc[6, data.columns.get_loc("Open")] = 97.0
         data.iloc[6, data.columns.get_loc("High")] = 98.0
         data.iloc[6, data.columns.get_loc("Low")] = 96.0
+        data.iloc[6, data.columns.get_loc("Close")] = 97.0
 
         trades, error = self.run_execution_test(data)
 
         self.assertIsNone(error)
         self.assertEqual(len(trades), 1)
         self.assertAlmostEqual(trades[0]["exit"], 97.0)
+        self.assertTrue(backtest_v3._valid_ohlc(data))
 
     def test_target_gap_exits_at_target(self):
         data = self.make_execution_data()
 
-        # La entrada ocurre en la vela 5.
-        # El gap alcista aparece en la vela 6.
         data.iloc[5, data.columns.get_loc("High")] = 102.0
         data.iloc[5, data.columns.get_loc("Low")] = 100.0
 
         data.iloc[6, data.columns.get_loc("Open")] = 108.0
         data.iloc[6, data.columns.get_loc("High")] = 109.0
         data.iloc[6, data.columns.get_loc("Low")] = 107.5
+        data.iloc[6, data.columns.get_loc("Close")] = 108.0
 
         trades, error = self.run_execution_test(data)
 
         self.assertIsNone(error)
         self.assertEqual(len(trades), 1)
         self.assertAlmostEqual(trades[0]["exit"], 107.0)
+        self.assertTrue(backtest_v3._valid_ohlc(data))
 
     def test_trade_closes_at_max_hold(self):
         data = self.make_execution_data()
 
         data.iloc[5, data.columns.get_loc("High")] = 102.0
         data.iloc[5, data.columns.get_loc("Low")] = 100.0
-        data.iloc[7, data.columns.get_loc("Close")] = 102.5
+
+        data.iloc[7, data.columns.get_loc("Close")] = 100.5
 
         trades, error = self.run_execution_test(data)
 
         self.assertIsNone(error)
         self.assertEqual(len(trades), 1)
         self.assertEqual(trades[0]["exit_reason"], "MAX_HOLD")
-        self.assertAlmostEqual(trades[0]["exit"], 102.5)
+        self.assertAlmostEqual(trades[0]["exit"], 100.5)
+        self.assertTrue(backtest_v3._valid_ohlc(data))
 
     def test_engine_does_not_open_overlapping_trades(self):
         data = self.make_execution_data(rows=14)
