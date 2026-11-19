@@ -1,6 +1,8 @@
 
 import logging
+import threading
 from datetime import datetime, timezone
+from uuid import uuid4
 
 from flask import Flask, jsonify
 
@@ -29,6 +31,19 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
+scan_lock = threading.Lock()
+
+scan_state = {
+    "status": "idle",
+    "scan_id": None,
+    "started_at": None,
+    "finished_at": None,
+    "analyses_completed": 0,
+    "total_analyses": 0,
+    "results": [],
+    "error": None,
+}
+
 
 def no_trade(asset, timeframe, reason):
     return {
@@ -42,17 +57,11 @@ def no_trade(asset, timeframe, reason):
 
 def analyze_asset(asset, timeframe):
     try:
-        # 1. Descargar datos
         df = download_data(asset, timeframe)
 
         if df is None or df.empty:
-            return no_trade(
-                asset,
-                timeframe,
-                "Datos no disponibles",
-            )
+            return no_trade(asset, timeframe, "Datos no disponibles")
 
-        # 2. Comprobar fecha de la última vela
         timestamp = get_data_timestamp(df)
 
         if timestamp is None:
@@ -75,33 +84,18 @@ def analyze_asset(asset, timeframe):
                 "Los datos tienen una fecha futura",
             )
 
-        # 3. Validar antigüedad según el activo y temporalidad.
-        # Se evita imponer un límite universal que bloquee
-        # acciones y ETF durante cierres normales del mercado.
         if not is_data_fresh(
             df,
             asset=asset,
             interval=timeframe,
         ):
-            logger.warning(
-                "Datos desactualizados: %s %s | última vela: %s",
-                asset,
-                timeframe,
-                timestamp,
-            )
-
             return no_trade(
                 asset,
                 timeframe,
                 "Datos desactualizados",
             )
 
-        # 4. Evaluar estrategia
-        result = evaluate_signal(
-            df,
-            asset,
-            timeframe,
-        )
+        result = evaluate_signal(df, asset, timeframe)
 
         if not isinstance(result, dict):
             return no_trade(
@@ -110,7 +104,7 @@ def analyze_asset(asset, timeframe):
                 "La estrategia devolvió un resultado no válido",
             )
 
-        # 5. Añadir información de control
+        result = result.copy()
         result["asset"] = asset
         result["timeframe"] = timeframe
         result["data_timestamp"] = timestamp.isoformat()
@@ -125,7 +119,6 @@ def analyze_asset(asset, timeframe):
             asset,
             timeframe,
         )
-
         return no_trade(
             asset,
             timeframe,
@@ -137,7 +130,6 @@ def run_scan():
     results = []
 
     for asset, settings in ASSETS.items():
-
         if not settings.get("enabled", False):
             continue
 
@@ -145,23 +137,20 @@ def run_scan():
             INTRADAY_INTERVAL,
             SWING_INTERVAL,
         ):
-
-            result = analyze_asset(
-                asset,
-                timeframe,
-            )
-
+            result = analyze_asset(asset, timeframe)
             results.append(result)
 
+            with scan_lock:
+                scan_state["results"] = list(results)
+                scan_state["analyses_completed"] = len(results)
+
     candidates = [
-        result
-        for result in results
+        result for result in results
         if result.get("action") == "BUY CANDIDATE"
     ]
 
     no_trades = [
-        result
-        for result in results
+        result for result in results
         if result.get("action") == "NO TRADE"
     ]
 
@@ -178,6 +167,66 @@ def run_scan():
         "automatic_execution": False,
         "real_trading_authorized": False,
     }
+
+
+def _scan_worker():
+    try:
+        result = run_scan()
+
+        with scan_lock:
+            scan_state["status"] = "completed"
+            scan_state["finished_at"] = datetime.now(
+                timezone.utc
+            ).isoformat()
+            scan_state.update(result)
+
+    except Exception as exc:
+        logger.exception("Error durante el escaneo")
+
+        with scan_lock:
+            scan_state["status"] = "error"
+            scan_state["error"] = str(exc)
+            scan_state["finished_at"] = datetime.now(
+                timezone.utc
+            ).isoformat()
+
+    finally:
+        scan_lock.release()
+
+
+def start_scan():
+    if not scan_lock.acquire(blocking=False):
+        return False
+
+    enabled_assets = [
+        asset for asset, settings in ASSETS.items()
+        if settings.get("enabled", False)
+    ]
+
+    with scan_lock:
+        scan_state.update({
+            "status": "running",
+            "scan_id": str(uuid4()),
+            "started_at": datetime.now(timezone.utc).isoformat(),
+            "finished_at": None,
+            "analyses_completed": 0,
+            "total_analyses": len(enabled_assets) * 2,
+            "results": [],
+            "error": None,
+        })
+
+    try:
+        thread = threading.Thread(
+            target=_scan_worker,
+            daemon=True,
+        )
+        thread.start()
+        return True
+
+    except Exception:
+        scan_lock.release()
+        logger.exception("No se pudo iniciar el escaneo")
+        return False
 
 
 @app.route("/", methods=["GET"])
@@ -203,7 +252,27 @@ def health():
 
 @app.route("/scan", methods=["GET"])
 def scan():
-    return jsonify(run_scan())
+    started = start_scan()
+
+    with scan_lock:
+        response = dict(scan_state)
+
+    response["scan_started"] = started
+    response["automatic_execution"] = False
+    response["real_trading_authorized"] = False
+
+    return jsonify(response), 202 if started else 200
+
+
+@app.route("/scan/status", methods=["GET"])
+def scan_status():
+    with scan_lock:
+        response = dict(scan_state)
+
+    response["automatic_execution"] = False
+    response["real_trading_authorized"] = False
+
+    return jsonify(response)
 
 
 if __name__ == "__main__":
