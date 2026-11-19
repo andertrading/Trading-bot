@@ -10,7 +10,7 @@ from config import (
 )
 
 
-# Límites absolutos acordados para Trading Bot 3.0.
+# Límites absolutos de seguridad.
 HARD_MAX_RISK_PER_TRADE = 0.01
 HARD_MAX_PORTFOLIO_RISK = 0.03
 
@@ -35,6 +35,7 @@ def _blocked_status(reason):
         "risk_pct": 0.0,
         "risk_amount_usd": 0.0,
         "position_size": 0.0,
+        "currency": "USD",
     }
 
 
@@ -54,6 +55,7 @@ def risk_pct_for_score(score):
     Devuelve el riesgo provisional según la calidad.
     Nunca supera el 1 % absoluto por operación.
     """
+
     if not _is_finite_number(score):
         return 0.0
 
@@ -65,6 +67,9 @@ def risk_pct_for_score(score):
     tier = _risk_tier_for_score(score)
 
     if tier is None:
+        return 0.0
+
+    if not isinstance(RISK_TIERS, dict):
         return 0.0
 
     tier_risk = RISK_TIERS.get(tier, 0.0)
@@ -113,11 +118,12 @@ def calculate_position_size(
 
     portfolio_risk_usd:
         Riesgo agregado actual de la cartera en USD.
+        Es obligatorio facilitarlo explícitamente.
 
     costs_per_unit_quote:
         Costes estimados por unidad en la moneda de cotización.
         Deben incluir los costes aplicables por unidad.
-        No introducir aquí una comisión fija por operación
+        No introducir una comisión fija por operación
         como si fuese un coste unitario.
 
     El cálculo permanece bloqueado mientras
@@ -134,7 +140,9 @@ def calculate_position_size(
         capital_usd = INITIAL_CAPITAL_USD
 
     if portfolio_risk_usd is None:
-        portfolio_risk_usd = 0.0
+        return _blocked_status(
+            "Falta confirmar el riesgo acumulado de la cartera en USD."
+        )
 
     if quote_to_usd is None:
         return _blocked_status(
@@ -237,16 +245,32 @@ def calculate_position_size(
         capital_usd * max_portfolio_risk_pct
     )
 
-    remaining_portfolio_risk_usd = (
-        max_portfolio_risk_usd - portfolio_risk_usd
-    )
+    if (
+        not _is_finite_number(max_portfolio_risk_usd)
+        or max_portfolio_risk_usd <= 0
+    ):
+        return _blocked_status(
+            "El límite monetario de riesgo de cartera no es válido."
+        )
 
-    if remaining_portfolio_risk_usd <= 0:
+    if portfolio_risk_usd >= max_portfolio_risk_usd:
         return _blocked_status(
             "Se ha alcanzado el límite de riesgo de cartera."
         )
 
+    remaining_portfolio_risk_usd = (
+        max_portfolio_risk_usd - portfolio_risk_usd
+    )
+
     risk_amount_usd = capital_usd * risk_pct
+
+    if (
+        not _is_finite_number(risk_amount_usd)
+        or risk_amount_usd <= 0
+    ):
+        return _blocked_status(
+            "El importe de riesgo calculado no es válido."
+        )
 
     risk_amount_usd = min(
         risk_amount_usd,
@@ -259,7 +283,10 @@ def calculate_position_size(
         price_risk_quote + costs_per_unit_quote
     )
 
-    if total_risk_per_unit_quote <= 0:
+    if (
+        not _is_finite_number(total_risk_per_unit_quote)
+        or total_risk_per_unit_quote <= 0
+    ):
         return _blocked_status(
             "El riesgo por unidad no es válido."
         )
