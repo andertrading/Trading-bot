@@ -6,18 +6,21 @@ import os
 BOT_VERSION = "3.0"
 TIMEZONE = "Europe/Madrid"
 
+# Moneda única de referencia del sistema.
+ACCOUNT_CURRENCY = "USD"
+
 # Modo seguro: únicamente señales y simulación.
 TRADING_MODE = "paper"
 
-# Capital de referencia para pruebas.
-INITIAL_CAPITAL_EUR = 1000.0
+# Capital de referencia.
+INITIAL_CAPITAL_USD = 1000.0
 
-# Gestión del riesgo: límites máximos.
+# Límites máximos de riesgo.
 MAX_RISK_PER_TRADE = 0.01
 MAX_PORTFOLIO_RISK = 0.03
 
 # Riesgo provisional por nivel de calidad.
-# No se habilitará riesgo real sin validación estadística.
+# No habilitar para operativa real sin validación.
 RISK_TIERS = {
     "A": 0.0025,
     "B": 0.0050,
@@ -25,12 +28,12 @@ RISK_TIERS = {
     "D": 0.0100,
 }
 
-# Temporalidades de las estrategias.
+# Temporalidades.
 INTRADAY_INTERVAL = "15m"
 SWING_INTERVAL = "1d"
 
 # Activos candidatos.
-# La disponibilidad definitiva debe comprobarse en eToro.
+# La moneda de cuenta es USD.
 ASSETS = {
     "CSPX": {
         "name": "iShares Core S&P 500",
@@ -142,8 +145,7 @@ ASSETS = {
     },
 }
 
-# Activos originales no habilitados por las restricciones CFD.
-# Se conservan como referencia, pero no generan señales.
+# Activos deshabilitados por restricciones de CFD.
 DISABLED_ASSETS = {
     "EURUSD": "EURUSD=X",
     "GBPUSD": "GBPUSD=X",
@@ -151,16 +153,17 @@ DISABLED_ASSETS = {
     "OIL": "CL=F",
 }
 
-# Costes todavía pendientes de confirmar.
-# No se debe asumir que la comisión de cierre está verificada.
+# Costes pendientes de confirmar.
 CLOSE_FEES_CONFIRMED = False
 SPREADS_CONFIRMED = False
 FX_CONVERSION_CONFIRMED = False
 
-# Sin conversión de divisa verificada no se calcula tamaño operativo.
+# No calcular tamaños hasta validar precios y costes.
 ALLOW_POSITION_SIZING = False
 
-# Datos y alertas.
+# Antigüedad máxima general de datos.
 DATA_MAX_AGE_MINUTES = 30
+
+# Credenciales: únicamente mediante variables de entorno.
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
