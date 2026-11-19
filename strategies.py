@@ -11,6 +11,7 @@ STOP_ATR = 1.5
 TARGET_ATR = 3.0
 MIN_SCORE = 70
 MAX_ATR_PERCENT = 5.0
+MIN_RISK_REWARD = 2.0
 
 
 def _no_trade(asset, timeframe, reason, score=None):
@@ -28,6 +29,9 @@ def _no_trade(asset, timeframe, reason, score=None):
 
 
 def _valid_number(value):
+    if isinstance(value, bool):
+        return False
+
     try:
         return math.isfinite(float(value))
     except (TypeError, ValueError, OverflowError):
@@ -44,19 +48,46 @@ def evaluate_signal_at(data, asset, timeframe, index=-1):
 
     if timeframe not in SUPPORTED_TIMEFRAMES:
         return _no_trade(
-            asset, timeframe, "Temporalidad no admitida"
+            asset,
+            timeframe,
+            "Temporalidad no admitida",
         )
 
-    if data is None or len(data) < MIN_BARS:
+    if data is None:
         return _no_trade(
-            asset, timeframe, "Histórico insuficiente"
+            asset,
+            timeframe,
+            "Datos no disponibles",
+        )
+
+    try:
+        if len(data) < MIN_BARS:
+            return _no_trade(
+                asset,
+                timeframe,
+                "Histórico insuficiente",
+            )
+    except (TypeError, ValueError):
+        return _no_trade(
+            asset,
+            timeframe,
+            "Estructura de datos no válida",
+        )
+
+    if isinstance(index, bool) or not isinstance(index, int):
+        return _no_trade(
+            asset,
+            timeframe,
+            "Índice de vela no válido",
         )
 
     try:
         row = data.iloc[index]
-    except (IndexError, TypeError):
+    except (IndexError, TypeError, KeyError):
         return _no_trade(
-            asset, timeframe, "Vela no disponible"
+            asset,
+            timeframe,
+            "Vela no disponible",
         )
 
     required = [
@@ -75,59 +106,101 @@ def evaluate_signal_at(data, asset, timeframe, index=-1):
     for name in required:
         if name not in row.index:
             return _no_trade(
-                asset, timeframe, f"Falta indicador: {name}"
+                asset,
+                timeframe,
+                f"Falta indicador: {name}",
             )
 
         if not _valid_number(row[name]):
             return _no_trade(
-                asset, timeframe, f"Indicador no válido: {name}"
+                asset,
+                timeframe,
+                f"Indicador no válido: {name}",
             )
 
     price = float(row["Close"])
-    atr = float(row["ATR"])
+    ema20 = float(row["EMA20"])
+    ema50 = float(row["EMA50"])
+    ema200 = float(row["EMA200"])
     rsi = float(row["RSI"])
+    macd = float(row["MACD"])
+    macd_signal = float(row["MACD_SIGNAL"])
+    atr = float(row["ATR"])
     atr_pct = float(row["ATR_PERCENT"])
+    high20 = float(row["HIGH20"])
 
-    if price <= 0 or atr <= 0:
+    if any(
+        value <= 0
+        for value in (
+            price,
+            ema20,
+            ema50,
+            ema200,
+            atr,
+            high20,
+        )
+    ):
         return _no_trade(
-            asset, timeframe, "Precio o volatilidad no válidos"
+            asset,
+            timeframe,
+            "Precio o indicadores de tendencia no válidos",
+        )
+
+    if not 0 <= rsi <= 100:
+        return _no_trade(
+            asset,
+            timeframe,
+            "RSI fuera de rango",
         )
 
     if atr_pct < 0 or atr_pct > MAX_ATR_PERCENT:
         return _no_trade(
-            asset, timeframe, "Volatilidad excesiva"
+            asset,
+            timeframe,
+            "Volatilidad excesiva",
         )
 
     score = 0
     reasons = []
 
-    if price > float(row["EMA20"]):
+    # Tendencia y posición del precio.
+
+    if price > ema20:
         score += 15
         reasons.append("Precio sobre EMA20")
 
-    if float(row["EMA20"]) > float(row["EMA50"]):
+    if ema20 > ema50:
         score += 15
         reasons.append("EMA20 sobre EMA50")
 
-    if float(row["EMA50"]) > float(row["EMA200"]):
+    if ema50 > ema200:
         score += 20
         reasons.append("Tendencia principal alcista")
+
+    # Momentum.
 
     if 50 <= rsi <= 68:
         score += 15
         reasons.append("RSI favorable")
 
-    if float(row["MACD"]) > float(row["MACD_SIGNAL"]):
+    if macd > macd_signal:
         score += 15
         reasons.append("MACD alcista")
 
-    if price > float(row["HIGH20"]):
+    # Ruptura de máximos anteriores.
+    # HIGH20 debe calcularse con desplazamiento de una vela.
+
+    if price > high20:
         score += 10
         reasons.append("Ruptura de máximos de 20 velas")
 
-    # El volumen es opcional. Si no existe o no es válido,
-    # no se conceden los 10 puntos de confirmación.
-    relative_volume = row.get("RELATIVE_VOLUME", float("nan"))
+    # El volumen es opcional.
+    # Si no existe o no es válido, no suma puntos.
+
+    relative_volume = row.get(
+        "RELATIVE_VOLUME",
+        float("nan"),
+    )
 
     if (
         _valid_number(relative_volume)
@@ -144,24 +217,55 @@ def evaluate_signal_at(data, asset, timeframe, index=-1):
             score,
         )
 
+    # Cálculo de niveles de riesgo.
+
     stop = price - STOP_ATR * atr
     target = price + TARGET_ATR * atr
 
-    if not all(_valid_number(value) for value in (stop, target)):
+    if not all(
+        _valid_number(value)
+        for value in (stop, target)
+    ):
         return _no_trade(
-            asset, timeframe, "Niveles de riesgo no válidos", score
+            asset,
+            timeframe,
+            "Niveles de riesgo no válidos",
+            score,
         )
 
-    if stop <= 0 or target <= price:
+    if stop <= 0 or stop >= price or target <= price:
         return _no_trade(
-            asset, timeframe, "Niveles de riesgo no válidos", score
+            asset,
+            timeframe,
+            "Niveles de riesgo no válidos",
+            score,
         )
 
     risk = price - stop
     reward = target - price
+
+    if not _valid_number(risk) or not _valid_number(reward):
+        return _no_trade(
+            asset,
+            timeframe,
+            "Riesgo o beneficio no válido",
+            score,
+        )
+
+    if risk <= 0 or reward <= 0:
+        return _no_trade(
+            asset,
+            timeframe,
+            "Riesgo o beneficio no válido",
+            score,
+        )
+
     risk_reward = reward / risk
 
-    if not _valid_number(risk_reward) or risk_reward < 2:
+    if (
+        not _valid_number(risk_reward)
+        or risk_reward < MIN_RISK_REWARD
+    ):
         return _no_trade(
             asset,
             timeframe,
@@ -189,21 +293,48 @@ def evaluate_signal(df, asset, timeframe):
     Evalúa la última vela disponible para el escáner habitual.
     """
 
-    if df is None or len(df) < MIN_BARS:
-        return _no_trade(
-            asset, timeframe, "Histórico insuficiente"
-        )
-
     if timeframe not in SUPPORTED_TIMEFRAMES:
         return _no_trade(
-            asset, timeframe, "Temporalidad no admitida"
+            asset,
+            timeframe,
+            "Temporalidad no admitida",
         )
 
-    data = add_indicators(df)
+    if df is None:
+        return _no_trade(
+            asset,
+            timeframe,
+            "Datos no disponibles",
+        )
+
+    try:
+        if len(df) < MIN_BARS:
+            return _no_trade(
+                asset,
+                timeframe,
+                "Histórico insuficiente",
+            )
+    except (TypeError, ValueError):
+        return _no_trade(
+            asset,
+            timeframe,
+            "Estructura de datos no válida",
+        )
+
+    try:
+        data = add_indicators(df)
+    except Exception:
+        return _no_trade(
+            asset,
+            timeframe,
+            "Error al calcular indicadores",
+        )
 
     if data is None or data.empty:
         return _no_trade(
-            asset, timeframe, "No se pudieron calcular indicadores"
+            asset,
+            timeframe,
+            "No se pudieron calcular indicadores",
         )
 
     return evaluate_signal_at(
