@@ -30,9 +30,9 @@ class TestBacktestV3(unittest.TestCase):
         )
 
     def test_valid_ohlc_data(self):
-        data = self.make_data()
-
-        self.assertTrue(backtest_v3._valid_ohlc(data))
+        self.assertTrue(
+            backtest_v3._valid_ohlc(self.make_data())
+        )
 
     def test_invalid_ohlc_data_is_rejected(self):
         data = self.make_data()
@@ -49,14 +49,15 @@ class TestBacktestV3(unittest.TestCase):
         data = self.make_data()
         duplicated = pd.concat([data, data.iloc[[-1]]])
 
-        result = backtest_v3.download_history
-
         with patch.object(
             backtest_v3.yf,
             "download",
             return_value=duplicated,
         ):
-            cleaned = result("AAPL", "15m")
+            cleaned = backtest_v3.download_history(
+                "AAPL",
+                "15m",
+            )
 
         if cleaned is not None:
             self.assertFalse(cleaned.index.has_duplicates)
@@ -68,31 +69,70 @@ class TestBacktestV3(unittest.TestCase):
 
         self.assertIsInstance(result, dict)
 
+    def test_metrics_calculate_valid_trades(self):
+        trades = pd.DataFrame(
+            {
+                "result_R": [1.5, -1.0],
+                "duration_bars": [2, 3],
+            }
+        )
+
+        result = backtest_v3.calculate_metrics(trades)
+
+        self.assertEqual(result["trades"], 2)
+        self.assertEqual(result["wins"], 1)
+        self.assertEqual(result["losses"], 1)
+        self.assertAlmostEqual(result["win_rate"], 50.0)
+        self.assertAlmostEqual(result["total_R"], 0.5)
+        self.assertAlmostEqual(result["profit_factor"], 1.5)
+
     def test_metrics_ignore_invalid_r_values(self):
         trades = pd.DataFrame(
             {
-                "result_r": [1.0, -1.0, float("nan")],
+                "result_R": [1.0, -1.0, float("nan")],
                 "duration_bars": [2, 3, 4],
             }
         )
 
         result = backtest_v3.calculate_metrics(trades)
 
-        self.assertIsInstance(result, dict)
+        self.assertEqual(result["trades"], 2)
 
-        if "total_trades" in result:
-            self.assertEqual(result["total_trades"], 2)
+    def test_metrics_handle_zero_result(self):
+        trades = pd.DataFrame(
+            {
+                "result_R": [1.0, 0.0, -1.0],
+                "duration_bars": [2, 2, 3],
+            }
+        )
+
+        result = backtest_v3.calculate_metrics(trades)
+
+        self.assertEqual(result["trades"], 3)
+        self.assertEqual(result["wins"], 1)
+        self.assertEqual(result["losses"], 1)
 
     def test_drawdown_never_negative(self):
         trades = pd.DataFrame(
             {
-                "result_r": [1.0, -1.0, 2.0, -0.5],
+                "result_R": [1.0, -1.0, 2.0, -0.5],
             }
         )
 
         result = backtest_v3._calculate_drawdown(trades)
 
         self.assertGreaterEqual(result, 0)
+
+    def test_drawdown_calculates_expected_value(self):
+        trades = pd.DataFrame(
+            {
+                "result_R": [1.0, -1.0, 2.0, -0.5],
+            }
+        )
+
+        result = backtest_v3._calculate_drawdown(trades)
+
+        self.assertAlmostEqual(result, 1.0)
 
 
 if __name__ == "__main__":
