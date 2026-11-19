@@ -539,8 +539,11 @@ def generate_operations_summary(trades):
         errors="coerce",
     )
 
+    # Acepta formatos de fecha distintos en operaciones
+    # intradía y diarias, normalizando todas a UTC.
     df["exit_time"] = pd.to_datetime(
         df["exit_time"],
+        format="mixed",
         errors="coerce",
         utc=True,
     )
