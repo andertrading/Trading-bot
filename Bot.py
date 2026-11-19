@@ -4,6 +4,7 @@ import faulthandler
 import threading
 import sys
 import platform
+import math
 
 import pandas as pd
 import numpy as np
@@ -72,6 +73,7 @@ def no_trade(asset, timeframe, reason):
         "reason": reason,
         "mode": "PAPER_ONLY",
         "tradable": False,
+        "validated": False,
     }
 
 
@@ -98,6 +100,11 @@ def get_validation_blockers(portfolio_status):
             "Conversión de divisa pendiente de confirmar"
         )
 
+    if ACCOUNT_CURRENCY != "USD":
+        blockers.append(
+            "La divisa de la cuenta no está configurada en USD"
+        )
+
     if not isinstance(portfolio_status, dict):
         blockers.append(
             "Estado de cartera no disponible"
@@ -112,14 +119,15 @@ def get_validation_blockers(portfolio_status):
 
 def apply_validation_gate(result, portfolio_status):
     """
-    Conserva las candidatas técnicas, pero impide
-    considerarlas operaciones validadas.
+    Conserva las candidatas técnicas, pero bloquea todas
+    las operaciones hasta completar la validación integral.
     """
 
     result = result.copy()
 
     if result.get("action") != "BUY CANDIDATE":
         result["tradable"] = False
+        result["validated"] = False
         return result
 
     score = result.get("score")
@@ -135,17 +143,30 @@ def apply_validation_gate(result, portfolio_status):
 
     blockers = get_validation_blockers(portfolio_status)
 
-    if (
-        not isinstance(provisional_risk_pct, (int, float))
-        or provisional_risk_pct <= 0
-        or provisional_risk_pct > MAX_RISK_PER_TRADE
-    ):
+    try:
+        risk_is_valid = (
+            isinstance(provisional_risk_pct, (int, float))
+            and not isinstance(provisional_risk_pct, bool)
+            and math.isfinite(provisional_risk_pct)
+            and provisional_risk_pct > 0
+            and provisional_risk_pct <= MAX_RISK_PER_TRADE
+            and provisional_risk_pct <= 0.01
+        )
+    except (TypeError, ValueError):
+        risk_is_valid = False
+
+    if not risk_is_valid:
         blockers.append(
             "Nivel de riesgo provisional no válido"
         )
 
-    # No se calcula tamaño ni riesgo monetario de una
-    # posición sin costes y datos de cartera confirmados.
+    # El cálculo de tamaño y la validación integral
+    # todavía no están conectados a este flujo.
+    # Por tanto, ninguna candidata puede aprobarse.
+    blockers.append(
+        "Validación integral y cálculo de posición pendientes"
+    )
+
     result["validation_status"] = "BLOCKED"
     result["status"] = "BLOCKED_VALIDATION"
     result["tradable"] = False
@@ -293,17 +314,36 @@ def run_scan():
 
     # No existe conexión ni confirmación automática
     # de las posiciones abiertas en eToro.
-    portfolio_status = get_portfolio_status(
-        open_positions=None,
-        positions_confirmed=False,
-        capital_usd=INITIAL_CAPITAL_USD,
-    )
+    try:
+        portfolio_status = get_portfolio_status(
+            open_positions=None,
+            positions_confirmed=False,
+            capital_usd=INITIAL_CAPITAL_USD,
+        )
+
+        if not isinstance(portfolio_status, dict):
+            raise ValueError(
+                "El gestor de cartera devolvió un resultado no válido"
+            )
+
+    except Exception:
+        logger.exception("PORTFOLIO STATUS ERROR")
+
+        portfolio_status = {
+            "status": "UNKNOWN",
+            "current_portfolio_risk_usd": None,
+            "max_portfolio_risk_usd": (
+                INITIAL_CAPITAL_USD
+                * min(MAX_PORTFOLIO_RISK, 0.03)
+            ),
+            "remaining_risk_usd": None,
+            "currency": "USD",
+            "error": "No se pudo confirmar el estado de la cartera",
+        }
 
     logger.info(
         "PORTFOLIO STATUS | %s",
-        portfolio_status.get("status")
-        if isinstance(portfolio_status, dict)
-        else "INVALID",
+        portfolio_status.get("status"),
     )
 
     for asset, settings in ASSETS.items():
@@ -347,6 +387,7 @@ def run_scan():
         result for result in technical_candidates
         if result.get("validation_status") == "APPROVED"
         and result.get("tradable") is True
+        and result.get("validated") is True
     ]
 
     no_trades = [
@@ -367,8 +408,8 @@ def run_scan():
         "candidates_found": len(validated_candidates),
         "no_trade_count": len(no_trades),
         "portfolio_status": portfolio_status,
-        "portfolio_risk_limit": MAX_PORTFOLIO_RISK,
-        "max_risk_per_trade": MAX_RISK_PER_TRADE,
+        "portfolio_risk_limit": min(MAX_PORTFOLIO_RISK, 0.03),
+        "max_risk_per_trade": min(MAX_RISK_PER_TRADE, 0.01),
         "currency": ACCOUNT_CURRENCY,
         "results": results,
         "mode": "PAPER_ONLY",
