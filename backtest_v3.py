@@ -389,7 +389,7 @@ def _calculate_drawdown(results):
 def calculate_metrics(trades):
     """Calcula métricas de una secuencia independiente."""
 
-    if not trades:
+    if trades is None or len(trades) == 0:
         return _empty_metrics()
 
     valid_trades = []
