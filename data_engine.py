@@ -415,7 +415,6 @@ def _download_twelvedata(asset, config, interval):
             )
             return None
 
-        # Verificación obligatoria de la moneda del proveedor.
         meta = payload.get("meta")
 
         if not isinstance(meta, dict):
@@ -426,33 +425,117 @@ def _download_twelvedata(asset, config, interval):
             )
             return None
 
-        provider_currency = meta.get("currency")
-        configured_currency = config.get("currency")
+        # Comprobar que Twelve Data devuelve el símbolo solicitado.
+        provider_symbol = meta.get("symbol")
 
-        if not provider_currency or not configured_currency:
+        if not provider_symbol:
             logger.error(
-                "MONEDA NO VERIFICABLE | %s | %s | Twelve Data=%s | Config=%s",
+                "SÍMBOLO NO VERIFICABLE | %s | %s | falta meta.symbol",
                 asset,
                 symbol,
-                provider_currency,
-                configured_currency,
             )
             return None
 
-        provider_currency = str(provider_currency).upper().strip()
-        configured_currency = str(configured_currency).upper().strip()
+        normalised_provider_symbol = (
+            str(provider_symbol)
+            .upper()
+            .replace(" ", "")
+            .strip()
+        )
+
+        normalised_requested_symbol = (
+            str(symbol)
+            .upper()
+            .replace(" ", "")
+            .strip()
+        )
+
+        if normalised_provider_symbol != normalised_requested_symbol:
+            logger.error(
+                "SÍMBOLO INCOMPATIBLE | %s | solicitado=%s | recibido=%s",
+                asset,
+                normalised_requested_symbol,
+                normalised_provider_symbol,
+            )
+            return None
+
+        configured_currency = config.get("currency")
+
+        if not configured_currency:
+            logger.error(
+                "MONEDA NO VERIFICABLE | %s | %s | falta moneda configurada",
+                asset,
+                symbol,
+            )
+            return None
+
+        configured_currency = (
+            str(configured_currency).upper().strip()
+        )
+
+        # Twelve Data utiliza metadatos distintos para acciones y criptomonedas.
+        if asset in CRYPTO_ASSETS:
+            provider_currency = meta.get("currency_quote")
+
+            if not provider_currency:
+                logger.error(
+                    "MONEDA NO VERIFICABLE | %s | %s | "
+                    "meta.currency_quote ausente | claves_metadata=%s",
+                    asset,
+                    symbol,
+                    sorted(meta.keys()),
+                )
+                return None
+
+            provider_currency = (
+                str(provider_currency).upper().strip()
+            )
+
+            # Normalizar las denominaciones habituales de USD.
+            currency_aliases = {
+                "USD": "USD",
+                "US DOLLAR": "USD",
+                "UNITED STATES DOLLAR": "USD",
+            }
+
+            provider_currency = currency_aliases.get(
+                provider_currency,
+                provider_currency,
+            )
+
+            currency_field = "currency_quote"
+
+        else:
+            provider_currency = meta.get("currency")
+
+            if not provider_currency:
+                logger.error(
+                    "MONEDA NO VERIFICABLE | %s | %s | "
+                    "meta.currency ausente",
+                    asset,
+                    symbol,
+                )
+                return None
+
+            provider_currency = (
+                str(provider_currency).upper().strip()
+            )
+
+            currency_field = "currency"
 
         logger.info(
-            "TWELVE DATA METADATA | %s | symbol=%s | currency=%s | configured=%s",
+            "TWELVE DATA METADATA | %s | symbol=%s | %s=%s | configured=%s",
             asset,
             symbol,
+            currency_field,
             provider_currency,
             configured_currency,
         )
 
         if provider_currency != configured_currency:
             logger.error(
-                "MONEDA INCOMPATIBLE | %s | %s | Twelve Data=%s | Config=%s",
+                "MONEDA INCOMPATIBLE | %s | %s | "
+                "Twelve Data=%s | Config=%s",
                 asset,
                 symbol,
                 provider_currency,
