@@ -1,6 +1,8 @@
 
 import unittest
 from unittest.mock import patch
+from contextlib import redirect_stdout
+from io import StringIO
 
 import pandas as pd
 
@@ -153,10 +155,16 @@ class TestBacktestV3(unittest.TestCase):
 
         backtest_v3.EXCLUDED_OHLC_CANDLES.clear()
 
-        with patch.object(
-            backtest_v3.yf,
-            "download",
-            return_value=data,
+        # Capturamos el mensaje esperado del rechazo OHLC.
+        # El test sigue comprobando el rechazo, pero evita
+        # imprimir un falso error de AAPL en la consola.
+        with (
+            patch.object(
+                backtest_v3.yf,
+                "download",
+                return_value=data,
+            ),
+            redirect_stdout(StringIO()),
         ):
             result = backtest_v3.download_history(
                 "AAPL",
