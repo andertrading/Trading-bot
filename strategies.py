@@ -14,6 +14,27 @@ MAX_ATR_PERCENT = 5.0
 MIN_RISK_REWARD = 2.0
 
 
+def _is_dataframe(value):
+    return (
+        value is not None
+        and hasattr(value, "columns")
+        and hasattr(value, "iloc")
+    )
+
+
+def _normalize_arguments(data, asset):
+    """
+    Admite ambos órdenes:
+    data, asset
+    asset, data
+    """
+
+    if not _is_dataframe(data) and _is_dataframe(asset):
+        return asset, data
+
+    return data, asset
+
+
 def _no_trade(asset, timeframe, reason, score=None):
     result = {
         "action": "NO TRADE",
@@ -42,9 +63,14 @@ def evaluate_signal_at(data, asset, timeframe, index=-1):
     """
     Evalúa una vela concreta utilizando indicadores ya calculados.
 
+    Admite tanto (data, asset, timeframe) como
+    (asset, data, timeframe).
+
     Esta función es compartida por el análisis habitual y el backtest.
     No ejecuta operaciones ni calcula tamaño de posición.
     """
+
+    data, asset = _normalize_arguments(data, asset)
 
     if timeframe not in SUPPORTED_TIMEFRAMES:
         return _no_trade(
@@ -58,6 +84,13 @@ def evaluate_signal_at(data, asset, timeframe, index=-1):
             asset,
             timeframe,
             "Datos no disponibles",
+        )
+
+    if not _is_dataframe(data):
+        return _no_trade(
+            asset,
+            timeframe,
+            "Estructura de datos no válida",
         )
 
     try:
@@ -195,11 +228,10 @@ def evaluate_signal_at(data, asset, timeframe, index=-1):
         reasons.append("Ruptura de máximos de 20 velas")
 
     # El volumen es opcional.
-    # Si no existe o no es válido, no suma puntos.
 
     relative_volume = row.get(
         "RELATIVE_VOLUME",
-        float("nan"),
+        row.get("relative_volume", float("nan")),
     )
 
     if (
@@ -291,7 +323,12 @@ def evaluate_signal_at(data, asset, timeframe, index=-1):
 def evaluate_signal(df, asset, timeframe):
     """
     Evalúa la última vela disponible para el escáner habitual.
+
+    Admite tanto (df, asset, timeframe) como
+    (asset, df, timeframe).
     """
+
+    df, asset = _normalize_arguments(df, asset)
 
     if timeframe not in SUPPORTED_TIMEFRAMES:
         return _no_trade(
@@ -305,6 +342,13 @@ def evaluate_signal(df, asset, timeframe):
             asset,
             timeframe,
             "Datos no disponibles",
+        )
+
+    if not _is_dataframe(df):
+        return _no_trade(
+            asset,
+            timeframe,
+            "Estructura de datos no válida",
         )
 
     try:
