@@ -6,6 +6,7 @@ import time
 from datetime import datetime, timedelta, time as datetime_time, timezone
 from zoneinfo import ZoneInfo
 
+import numpy as np
 import pandas as pd
 import requests
 
@@ -82,12 +83,14 @@ _last_api_request = 0.0
 
 
 def _asset_config(asset):
+    """Solo permite activos habilitados expresamente."""
+
     config = ASSETS.get(asset)
 
     if not isinstance(config, dict):
         return None
 
-    if not config.get("enabled", True):
+    if config.get("enabled") is not True:
         return None
 
     return config
@@ -132,17 +135,50 @@ def _save_cached_data(asset, interval, dataframe):
 
 
 def _normalise_dataframe(df):
+    """Normaliza y valida los datos OHLCV."""
+
     if df is None or df.empty:
         return None
 
     df = df.copy()
 
     if isinstance(df.columns, pd.MultiIndex):
-        df.columns = df.columns.get_level_values(0)
+        required_fields = {
+            "Open",
+            "High",
+            "Low",
+            "Close",
+        }
+
+        selected_level = None
+
+        for level in range(df.columns.nlevels):
+            values = {
+                str(value).strip().title()
+                for value in df.columns.get_level_values(level)
+            }
+
+            if required_fields.issubset(values):
+                selected_level = level
+                break
+
+        if selected_level is None:
+            logger.error(
+                "No se pudo identificar el nivel OHLC de las columnas"
+            )
+            return None
+
+        df.columns = df.columns.get_level_values(selected_level)
 
     df.columns = [
         str(col).strip().title()
         for col in df.columns
+    ]
+
+    # Evitar columnas duplicadas tras normalizar los nombres.
+    df = df.loc[
+        :,
+        ~pd.Index(df.columns).duplicated(keep="last"),
     ]
 
     required = ["Open", "High", "Low", "Close"]
@@ -162,9 +198,21 @@ def _normalise_dataframe(df):
             errors="coerce",
         )
 
-    df = df.dropna(
-        subset=["Open", "High", "Low", "Close"]
+    # Evitar que precios infinitos contaminen los indicadores.
+    df = df.replace(
+        [np.inf, -np.inf],
+        np.nan,
     )
+
+    # Los precios OHLC son obligatorios.
+    df = df.dropna(
+        subset=required,
+    )
+
+    # El volumen puede faltar, pero no debe ser negativo
+    # ni contener valores infinitos.
+    df["Volume"] = df["Volume"].fillna(0.0)
+    df.loc[df["Volume"] < 0, "Volume"] = 0.0
 
     if not isinstance(df.index, pd.DatetimeIndex):
         df.index = pd.to_datetime(
@@ -183,15 +231,23 @@ def _normalise_dataframe(df):
     else:
         df.index = df.index.tz_convert("UTC")
 
-    df = df[~df.index.duplicated(keep="last")]
+    df = df[
+        ~df.index.duplicated(keep="last")
+    ]
+
     df = df.sort_index()
 
-    df = df[
-        (df["Open"] > 0)
-        & (df["High"] > 0)
-        & (df["Low"] > 0)
-        & (df["Close"] > 0)
-    ]
+    # Todos los precios deben ser finitos y positivos.
+    for col in required:
+        values = df[col].to_numpy(dtype=float)
+
+        if not np.isfinite(values).all():
+            return None
+
+        df = df[df[col] > 0]
+
+    if df.empty:
+        return None
 
     valid_ohlc = (
         (df["High"] >= df["Low"])
@@ -321,8 +377,7 @@ def _remove_incomplete_candle(df, interval, asset=None):
         if asset is None:
             return df
 
-        # Comparación diaria consistente en UTC.
-        # Se excluye la vela del día UTC actual.
+        # Se excluye la vela correspondiente al día UTC actual.
         return df[df.index.date < now.date()]
 
     return df
@@ -425,7 +480,6 @@ def _download_twelvedata(asset, config, interval):
             )
             return None
 
-        # Comprobar que Twelve Data devuelve el símbolo solicitado.
         provider_symbol = meta.get("symbol")
 
         if not provider_symbol:
@@ -473,7 +527,6 @@ def _download_twelvedata(asset, config, interval):
             str(configured_currency).upper().strip()
         )
 
-        # Twelve Data utiliza metadatos distintos para acciones y criptomonedas.
         if asset in CRYPTO_ASSETS:
             provider_currency = meta.get("currency_quote")
 
@@ -491,7 +544,6 @@ def _download_twelvedata(asset, config, interval):
                 str(provider_currency).upper().strip()
             )
 
-            # Normalizar las denominaciones habituales de USD.
             currency_aliases = {
                 "USD": "USD",
                 "US DOLLAR": "USD",
@@ -629,17 +681,18 @@ def _download_twelvedata(asset, config, interval):
 
         return df
 
-    except requests.RequestException as exc:
+    except requests.RequestException:
+        # No imprimir la excepción completa: puede contener
+        # la URL con la clave API en los parámetros.
         logger.error(
-            "Error de conexión Twelve Data para %s: %s",
+            "Error de conexión Twelve Data para %s",
             asset,
-            exc,
         )
         return None
 
     except Exception:
         logger.exception(
-            "Error procesando Twelve Data para %s",
+            "Error procesando datos Twelve Data para %s",
             asset,
         )
         return None
@@ -817,11 +870,10 @@ def _download_yahoo(asset, config, interval):
 
         return df
 
-    except requests.RequestException as exc:
+    except requests.RequestException:
         logger.error(
-            "Error HTTP de Yahoo para %s: %s",
+            "Error HTTP de Yahoo para %s",
             ticker,
-            exc,
         )
         return None
 
