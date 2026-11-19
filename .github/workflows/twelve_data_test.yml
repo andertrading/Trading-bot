@@ -1,0 +1,58 @@
+
+name: Twelve Data - Connection Test
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test-api:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check Twelve Data API
+        env:
+          TWELVE_DATA_API_KEY: ${{ secrets.TWELVE_DATA_API_KEY }}
+        run: |
+          python - <<'PY'
+          import os
+          import json
+          import urllib.request
+          import urllib.parse
+          import urllib.error
+          import sys
+
+          api_key = os.environ.get("TWELVE_DATA_API_KEY")
+
+          if not api_key:
+              print("ERROR: API key not configured.")
+              sys.exit(1)
+
+          params = urllib.parse.urlencode({
+              "symbol": "AAPL",
+              "apikey": api_key
+          })
+
+          url = "https://api.twelvedata.com/price?" + params
+          request = urllib.request.Request(url)
+
+          try:
+              with urllib.request.urlopen(request, timeout=20) as response:
+                  data = json.loads(response.read().decode())
+
+              if "price" in data:
+                  print("SUCCESS: Twelve Data connection working.")
+                  print("Symbol: AAPL")
+                  print("Price:", data["price"])
+              else:
+                  print("ERROR: API did not return a price.")
+                  print("API code:", data.get("code", "unknown"))
+                  print("Message:", data.get("message", "No details"))
+                  sys.exit(1)
+
+          except urllib.error.HTTPError as error:
+              print("HTTP error:", error.code)
+              sys.exit(1)
+          except Exception as error:
+              print("Connection failed:", type(error).__name__)
+              sys.exit(1)
+          PY
