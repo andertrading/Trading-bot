@@ -18,6 +18,14 @@ from config import (
     ASSETS,
     INTRADAY_INTERVAL,
     SWING_INTERVAL,
+    ACCOUNT_CURRENCY,
+    INITIAL_CAPITAL_USD,
+    MAX_RISK_PER_TRADE,
+    MAX_PORTFOLIO_RISK,
+    ALLOW_POSITION_SIZING,
+    CLOSE_FEES_CONFIRMED,
+    SPREADS_CONFIRMED,
+    FX_CONVERSION_CONFIRMED,
 )
 
 from data_engine import (
@@ -27,6 +35,8 @@ from data_engine import (
 )
 
 from strategies import evaluate_signal
+from risk_manager import risk_pct_for_score
+from portfolio import get_portfolio_status
 
 
 faulthandler.enable(all_threads=True)
@@ -61,14 +71,110 @@ def no_trade(asset, timeframe, reason):
         "timeframe": timeframe,
         "reason": reason,
         "mode": "PAPER_ONLY",
+        "tradable": False,
     }
 
 
-def analyze_asset(asset, timeframe):
-    logger.info("ANALYSIS START | %s | %s", asset, timeframe)
+def get_validation_blockers(portfolio_status):
+    blockers = []
+
+    if not ALLOW_POSITION_SIZING:
+        blockers.append(
+            "Cálculo de tamaño de posición desactivado"
+        )
+
+    if not CLOSE_FEES_CONFIRMED:
+        blockers.append(
+            "Comisiones de cierre pendientes de confirmar"
+        )
+
+    if not SPREADS_CONFIRMED:
+        blockers.append(
+            "Spreads pendientes de confirmar"
+        )
+
+    if not FX_CONVERSION_CONFIRMED:
+        blockers.append(
+            "Conversión de divisa pendiente de confirmar"
+        )
+
+    if not isinstance(portfolio_status, dict):
+        blockers.append(
+            "Estado de cartera no disponible"
+        )
+    elif portfolio_status.get("status") != "OK":
+        blockers.append(
+            "Cartera no confirmada o riesgo de cartera bloqueado"
+        )
+
+    return blockers
+
+
+def apply_validation_gate(result, portfolio_status):
+    """
+    Conserva las candidatas técnicas, pero impide
+    considerarlas operaciones validadas.
+    """
+
+    result = result.copy()
+
+    if result.get("action") != "BUY CANDIDATE":
+        result["tradable"] = False
+        return result
+
+    score = result.get("score")
 
     try:
-        logger.info("DATA DOWNLOAD START | %s | %s", asset, timeframe)
+        provisional_risk_pct = risk_pct_for_score(score)
+    except Exception:
+        logger.exception("RISK MANAGER ERROR")
+        provisional_risk_pct = 0.0
+
+    result["strategy_status"] = result.get("status")
+    result["provisional_risk_pct"] = provisional_risk_pct
+
+    blockers = get_validation_blockers(portfolio_status)
+
+    if (
+        not isinstance(provisional_risk_pct, (int, float))
+        or provisional_risk_pct <= 0
+        or provisional_risk_pct > MAX_RISK_PER_TRADE
+    ):
+        blockers.append(
+            "Nivel de riesgo provisional no válido"
+        )
+
+    # No se calcula tamaño ni riesgo monetario de una
+    # posición sin costes y datos de cartera confirmados.
+    result["validation_status"] = "BLOCKED"
+    result["status"] = "BLOCKED_VALIDATION"
+    result["tradable"] = False
+    result["validated"] = False
+    result["validation_reasons"] = blockers
+
+    logger.warning(
+        "CANDIDATE BLOCKED | %s | %s | reasons=%s",
+        result.get("asset"),
+        result.get("timeframe"),
+        blockers,
+    )
+
+    return result
+
+
+def analyze_asset(asset, timeframe):
+    logger.info(
+        "ANALYSIS START | %s | %s",
+        asset,
+        timeframe,
+    )
+
+    try:
+        logger.info(
+            "DATA DOWNLOAD START | %s | %s",
+            asset,
+            timeframe,
+        )
 
         df = download_data(asset, timeframe)
 
@@ -80,9 +186,11 @@ def analyze_asset(asset, timeframe):
         )
 
         if df is None or df.empty:
-            return no_trade(asset, timeframe, "Datos no disponibles")
-
-        logger.info("TIMESTAMP CHECK | %s | %s", asset, timeframe)
+            return no_trade(
+                asset,
+                timeframe,
+                "Datos no disponibles",
+            )
 
         timestamp = get_data_timestamp(df)
 
@@ -92,6 +200,11 @@ def analyze_asset(asset, timeframe):
                 timeframe,
                 "No se pudo determinar la fecha de los datos",
             )
+
+        if timestamp.tzinfo is None:
+            timestamp = timestamp.tz_localize("UTC")
+
+        timestamp = timestamp.tz_convert("UTC")
 
         now = datetime.now(timezone.utc)
 
@@ -106,14 +219,34 @@ def analyze_asset(asset, timeframe):
                 "Los datos tienen una fecha futura",
             )
 
-        if not is_data_fresh(df, asset=asset, interval=timeframe):
-            return no_trade(asset, timeframe, "Datos desactualizados")
+        if not is_data_fresh(
+            df,
+            asset=asset,
+            interval=timeframe,
+        ):
+            return no_trade(
+                asset,
+                timeframe,
+                "Datos desactualizados",
+            )
 
-        logger.info("STRATEGY START | %s | %s", asset, timeframe)
+        logger.info(
+            "STRATEGY START | %s | %s",
+            asset,
+            timeframe,
+        )
 
-        result = evaluate_signal(df, asset, timeframe)
+        result = evaluate_signal(
+            df,
+            asset,
+            timeframe,
+        )
 
-        logger.info("STRATEGY END | %s | %s", asset, timeframe)
+        logger.info(
+            "STRATEGY END | %s | %s",
+            asset,
+            timeframe,
+        )
 
         if not isinstance(result, dict):
             return no_trade(
@@ -128,6 +261,7 @@ def analyze_asset(asset, timeframe):
         result["data_timestamp"] = timestamp.isoformat()
         result["data_age_minutes"] = round(age_minutes, 2)
         result["mode"] = "PAPER_ONLY"
+        result["currency"] = ACCOUNT_CURRENCY
 
         logger.info(
             "ANALYSIS END | %s | %s | action=%s",
@@ -139,9 +273,17 @@ def analyze_asset(asset, timeframe):
         return result
 
     except Exception:
-        logger.exception("PYTHON ERROR | %s | %s", asset, timeframe)
+        logger.exception(
+            "PYTHON ERROR | %s | %s",
+            asset,
+            timeframe,
+        )
 
-        return no_trade(asset, timeframe, "Error interno de análisis")
+        return no_trade(
+            asset,
+            timeframe,
+            "Error interno de análisis",
+        )
 
 
 def run_scan():
@@ -149,12 +291,36 @@ def run_scan():
 
     logger.info("SCAN LOOP START")
 
+    # No existe conexión ni confirmación automática
+    # de las posiciones abiertas en eToro.
+    portfolio_status = get_portfolio_status(
+        open_positions=None,
+        positions_confirmed=False,
+        capital_usd=INITIAL_CAPITAL_USD,
+    )
+
+    logger.info(
+        "PORTFOLIO STATUS | %s",
+        portfolio_status.get("status")
+        if isinstance(portfolio_status, dict)
+        else "INVALID",
+    )
+
     for asset, settings in ASSETS.items():
         if not settings.get("enabled", False):
             continue
 
-        for timeframe in (INTRADAY_INTERVAL, SWING_INTERVAL):
+        for timeframe in (
+            INTRADAY_INTERVAL,
+            SWING_INTERVAL,
+        ):
             result = analyze_asset(asset, timeframe)
+
+            result = apply_validation_gate(
+                result,
+                portfolio_status,
+            )
+
             results.append(result)
 
             with state_lock:
@@ -167,9 +333,20 @@ def run_scan():
                 scan_state["total_analyses"],
             )
 
-    candidates = [
+    technical_candidates = [
         result for result in results
         if result.get("action") == "BUY CANDIDATE"
+    ]
+
+    blocked_candidates = [
+        result for result in technical_candidates
+        if result.get("validation_status") == "BLOCKED"
+    ]
+
+    validated_candidates = [
+        result for result in technical_candidates
+        if result.get("validation_status") == "APPROVED"
+        and result.get("tradable") is True
     ]
 
     no_trades = [
@@ -184,8 +361,15 @@ def run_scan():
         "status": "analysis_completed",
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "analyses_completed": len(results),
-        "candidates_found": len(candidates),
+        "technical_candidates_found": len(technical_candidates),
+        "candidates_blocked": len(blocked_candidates),
+        "validated_candidates": len(validated_candidates),
+        "candidates_found": len(validated_candidates),
         "no_trade_count": len(no_trades),
+        "portfolio_status": portfolio_status,
+        "portfolio_risk_limit": MAX_PORTFOLIO_RISK,
+        "max_risk_per_trade": MAX_RISK_PER_TRADE,
+        "currency": ACCOUNT_CURRENCY,
         "results": results,
         "mode": "PAPER_ONLY",
         "telegram_alerts_enabled": False,
@@ -226,14 +410,17 @@ def start_scan():
             return False
 
         enabled_assets = [
-            asset for asset, settings in ASSETS.items()
+            asset
+            for asset, settings in ASSETS.items()
             if settings.get("enabled", False)
         ]
 
         scan_state.update({
             "status": "running",
             "scan_id": str(uuid4()),
-            "started_at": datetime.now(timezone.utc).isoformat(),
+            "started_at": datetime.now(
+                timezone.utc
+            ).isoformat(),
             "finished_at": None,
             "analyses_completed": 0,
             "total_analyses": len(enabled_assets) * 2,
@@ -277,6 +464,7 @@ def home():
         "status": "online",
         "mode": "PAPER_ONLY",
         "automatic_execution": False,
+        "real_trading_authorized": False,
     })
 
 
@@ -285,7 +473,9 @@ def health():
     return jsonify({
         "status": "healthy",
         "version": BOT_VERSION,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(
+            timezone.utc
+        ).isoformat(),
         "mode": "PAPER_ONLY",
     })
 
@@ -328,4 +518,7 @@ def scan_status():
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
+    app.run(
+        host="0.0.0.0",
+        port=5000,
+    )
