@@ -1,6 +1,6 @@
 
 import unittest
-from datetime import datetime, timezone
+from datetime import datetime, timezone, date
 from unittest.mock import patch
 
 import numpy as np
@@ -10,6 +10,8 @@ from data_engine import (
     _asset_config,
     _normalise_dataframe,
     _remove_incomplete_candle,
+    _has_intraday_gaps,
+    _previous_trading_day,
     is_data_fresh,
 )
 
@@ -18,10 +20,15 @@ class FrozenDateTime(datetime):
 
     @classmethod
     def now(cls, tz=None):
-        return cls(
+        value = cls(
             2026, 11, 19, 13, 50,
             tzinfo=timezone.utc,
         )
+
+        if tz is not None:
+            return value.astimezone(tz)
+
+        return value.replace(tzinfo=None)
 
 
 class TestDailyDataFreshness(unittest.TestCase):
@@ -88,6 +95,18 @@ class TestDailyDataFreshness(unittest.TestCase):
 
         self.assertTrue(result)
 
+    def test_daily_data_rejects_old_session(self):
+        df = self.df.iloc[:1].copy()
+
+        with patch("data_engine.datetime", FrozenDateTime):
+            result = is_data_fresh(
+                df,
+                asset="TSLA",
+                interval="1d",
+            )
+
+        self.assertFalse(result)
+
 
 class TestDataNormalisation(unittest.TestCase):
 
@@ -126,9 +145,15 @@ class TestDataNormalisation(unittest.TestCase):
 
         result = _normalise_dataframe(df)
 
-        self.assertIsNotNone(result)
-        self.assertEqual(len(result), 2)
-        self.assertTrue(np.isfinite(result["Close"]).all())
+        self.assertIsNone(result)
+
+    def test_rejects_missing_prices(self):
+        df = self.df.copy()
+        df.loc[self.index[1], "close"] = np.nan
+
+        result = _normalise_dataframe(df)
+
+        self.assertIsNone(result)
 
     def test_rejects_non_positive_prices(self):
         df = self.df.copy()
@@ -136,9 +161,15 @@ class TestDataNormalisation(unittest.TestCase):
 
         result = _normalise_dataframe(df)
 
-        self.assertIsNotNone(result)
-        self.assertEqual(len(result), 2)
-        self.assertTrue((result["Open"] > 0).all())
+        self.assertIsNone(result)
+
+    def test_rejects_negative_prices(self):
+        df = self.df.copy()
+        df.loc[self.index[1], "close"] = -10
+
+        result = _normalise_dataframe(df)
+
+        self.assertIsNone(result)
 
     def test_rejects_inconsistent_ohlc_candles(self):
         df = self.df.copy()
@@ -146,8 +177,7 @@ class TestDataNormalisation(unittest.TestCase):
 
         result = _normalise_dataframe(df)
 
-        self.assertIsNotNone(result)
-        self.assertEqual(len(result), 2)
+        self.assertIsNone(result)
 
     def test_replaces_missing_volume_with_zero(self):
         df = self.df.drop(columns=["volume"])
@@ -176,7 +206,24 @@ class TestDataNormalisation(unittest.TestCase):
         self.assertIsNotNone(result)
         self.assertEqual(result.iloc[1]["Volume"], 0)
 
-    def test_removes_duplicate_timestamps(self):
+    def test_removes_identical_duplicate_timestamps(self):
+        df = pd.concat(
+            [
+                self.df,
+                self.df.iloc[[1]].copy(),
+            ]
+        )
+
+        result = _normalise_dataframe(df)
+
+        self.assertIsNotNone(result)
+        self.assertEqual(len(result), 3)
+        self.assertEqual(
+            result.index.duplicated().sum(),
+            0,
+        )
+
+    def test_rejects_conflicting_duplicate_timestamps(self):
         df = pd.concat(
             [
                 self.df,
@@ -186,9 +233,7 @@ class TestDataNormalisation(unittest.TestCase):
 
         result = _normalise_dataframe(df)
 
-        self.assertIsNotNone(result)
-        self.assertEqual(result.index.duplicated().sum(), 0)
-        self.assertEqual(result.loc[self.index[1], "Close"], 103.5)
+        self.assertIsNone(result)
 
     def test_converts_timestamps_to_utc(self):
         df = self.df.copy()
@@ -201,6 +246,18 @@ class TestDataNormalisation(unittest.TestCase):
 
     def test_rejects_missing_ohlc_columns(self):
         df = self.df.drop(columns=["high"])
+
+        result = _normalise_dataframe(df)
+
+        self.assertIsNone(result)
+
+    def test_rejects_invalid_timestamp(self):
+        df = self.df.copy()
+        df.index = [
+            "2026-11-18T13:00:00Z",
+            "fecha_invalida",
+            "2026-11-18T13:30:00Z",
+        ]
 
         result = _normalise_dataframe(df)
 
@@ -305,6 +362,125 @@ class TestIntradayDataFreshness(unittest.TestCase):
             )
 
         self.assertFalse(result)
+
+
+class TestIntradayGaps(unittest.TestCase):
+
+    def test_accepts_continuous_crypto_data(self):
+        index = pd.date_range(
+            "2026-11-19T12:00:00Z",
+            periods=10,
+            freq="15min",
+        )
+
+        df = pd.DataFrame(
+            {"Close": range(100, 110)},
+            index=index,
+        )
+
+        self.assertFalse(
+            _has_intraday_gaps(df, "BTC")
+        )
+
+    def test_rejects_missing_crypto_candle(self):
+        index = pd.date_range(
+            "2026-11-19T12:00:00Z",
+            periods=10,
+            freq="15min",
+        ).delete(5)
+
+        df = pd.DataFrame(
+            {"Close": range(len(index))},
+            index=index,
+        )
+
+        self.assertTrue(
+            _has_intraday_gaps(df, "BTC")
+        )
+
+    def test_accepts_continuous_us_session(self):
+        index = pd.date_range(
+            "2026-11-18T14:30:00Z",
+            periods=10,
+            freq="15min",
+        )
+
+        df = pd.DataFrame(
+            {"Close": range(100, 110)},
+            index=index,
+        )
+
+        self.assertFalse(
+            _has_intraday_gaps(df, "TSLA")
+        )
+
+    def test_rejects_missing_us_session_candle(self):
+        index = pd.date_range(
+            "2026-11-18T14:30:00Z",
+            periods=10,
+            freq="15min",
+        ).delete(5)
+
+        df = pd.DataFrame(
+            {"Close": range(len(index))},
+            index=index,
+        )
+
+        self.assertTrue(
+            _has_intraday_gaps(df, "TSLA")
+        )
+
+    def test_accepts_continuous_london_session(self):
+        index = pd.date_range(
+            "2026-11-18T08:00:00Z",
+            periods=10,
+            freq="15min",
+        )
+
+        df = pd.DataFrame(
+            {"Close": range(100, 110)},
+            index=index,
+        )
+
+        self.assertFalse(
+            _has_intraday_gaps(df, "CSPX")
+        )
+
+
+class TestMarketCalendars(unittest.TestCase):
+
+    def test_us_thanksgiving_is_not_trading_day(self):
+        result = _previous_trading_day(
+            date(2026, 11, 27),
+            "TSLA",
+        )
+
+        self.assertEqual(
+            result,
+            date(2026, 11, 25),
+        )
+
+    def test_uk_christmas_substitute_holiday(self):
+        result = _previous_trading_day(
+            date(2026, 12, 29),
+            "CSPX",
+        )
+
+        self.assertEqual(
+            result,
+            date(2026, 12, 24),
+        )
+
+    def test_crypto_does_not_use_weekend_calendar(self):
+        result = _previous_trading_day(
+            date(2026, 11, 22),
+            "BTC",
+        )
+
+        self.assertEqual(
+            result,
+            date(2026, 11, 21),
+        )
 
 
 if __name__ == "__main__":
