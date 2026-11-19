@@ -10,7 +10,7 @@ from indicators import add_indicators
 from strategies import evaluate_signal_at
 
 
-VERSION = "3.6"
+VERSION = "3.7"
 
 PERIODS = {
     "15m": {"period": "60d", "max_bars": 32},
@@ -21,7 +21,8 @@ MIN_BARS = 220
 
 DOWNLOAD_ERRORS = {}
 
-# Registro de velas OHLC incoherentes excluidas.
+# Registro de velas incoherentes detectadas.
+# Si aparece alguna, se rechaza el histórico completo.
 EXCLUDED_OHLC_CANDLES = []
 
 
@@ -84,6 +85,15 @@ def _ohlc_incoherent_mask(data):
 def _ohlc_validation_error(data):
     """Valida los precios OHLC y devuelve el motivo del error."""
 
+    if data is None:
+        return "El histórico es None"
+
+    if not isinstance(data, pd.DataFrame):
+        return "El histórico no es un DataFrame"
+
+    if data.empty:
+        return "El histórico está vacío"
+
     required = ["Open", "High", "Low", "Close"]
 
     missing = [
@@ -111,8 +121,9 @@ def _ohlc_validation_error(data):
 
     if invalid_count:
         return (
-            f"Quedan {invalid_count} velas OHLC incoherentes "
-            "después de la limpieza"
+            f"Se detectaron {invalid_count} velas OHLC incoherentes. "
+            "Se rechaza el histórico completo para evitar "
+            "operaciones a través de huecos."
         )
 
     return None
@@ -125,7 +136,12 @@ def _valid_ohlc(data):
 
 
 def download_history(ticker, interval):
-    """Descarga el histórico y excluye únicamente velas OHLC incoherentes."""
+    """
+    Descarga el histórico.
+
+    No elimina velas OHLC incoherentes: rechaza el histórico
+    completo para evitar crear discontinuidades artificiales.
+    """
 
     key = (ticker, interval)
     DOWNLOAD_ERRORS.pop(key, None)
@@ -201,23 +217,52 @@ def download_history(ticker, interval):
     try:
         data = data[columns].copy()
 
-        for column in columns:
+        # Convertimos OHLC sin eliminar silenciosamente
+        # las filas que contengan valores ausentes.
+        for column in required:
             data[column] = pd.to_numeric(
                 data[column],
                 errors="coerce",
             )
+
+        if "Volume" in data.columns:
+            data["Volume"] = pd.to_numeric(
+                data["Volume"],
+                errors="coerce",
+            )
+
+        # Un OHLC ausente o no numérico invalida el histórico.
+        for column in required:
+            if data[column].isna().any():
+                missing_count = int(data[column].isna().sum())
+
+                DOWNLOAD_ERRORS[key] = (
+                    f"La columna {column} contiene "
+                    f"{missing_count} valores ausentes o no numéricos. "
+                    "Se rechaza el histórico para evitar huecos."
+                )
+                return None
 
         data = data.replace(
             [np.inf, -np.inf],
             np.nan,
         )
 
-        rows_before_cleaning = len(data)
+        for column in required:
+            if data[column].isna().any():
+                DOWNLOAD_ERRORS[key] = (
+                    f"La columna {column} contiene valores no finitos"
+                )
+                return None
 
-        data = data.dropna(subset=required)
+        if data.index.hasnans:
+            DOWNLOAD_ERRORS[key] = (
+                "El índice contiene fechas no válidas"
+            )
+            return None
 
-        rows_removed = rows_before_cleaning - len(data)
-
+        # Los duplicados temporales se resuelven conservando
+        # el último registro de cada timestamp.
         data = data[
             ~data.index.duplicated(keep="last")
         ]
@@ -233,14 +278,11 @@ def download_history(ticker, interval):
 
     if data.empty:
         DOWNLOAD_ERRORS[key] = (
-            "No quedan velas después de eliminar "
-            "valores OHLC ausentes o inválidos. "
-            f"Filas recibidas: {raw_rows}"
+            "No quedan velas después de la limpieza"
         )
         return None
 
-    # Los precios no finitos, cero o negativos siguen
-    # siendo errores. No se excluyen silenciosamente.
+    # Los precios cero, negativos o no finitos son errores.
     for column in required:
         values = data[column].to_numpy(dtype=float)
 
@@ -256,34 +298,38 @@ def download_history(ticker, interval):
             )
             return None
 
-    # Identificamos las velas geométricamente incoherentes.
+    # No borramos velas incoherentes.
+    # Si aparece alguna, rechazamos toda la serie.
     invalid_mask = _ohlc_incoherent_mask(data)
     invalid_rows = data.loc[invalid_mask].copy()
 
-    excluded_count = len(invalid_rows)
+    invalid_count = len(invalid_rows)
 
-    # Registramos cada exclusión sin modificar sus precios.
-    for timestamp, candle in invalid_rows.iterrows():
-        EXCLUDED_OHLC_CANDLES.append({
-            "ticker": ticker,
-            "timeframe": interval,
-            "fecha": str(timestamp),
-            "open": float(candle["Open"]),
-            "high": float(candle["High"]),
-            "low": float(candle["Low"]),
-            "close": float(candle["Close"]),
-            "motivo": "Relaciones OHLC incoherentes",
-        })
+    if invalid_count:
+        for timestamp, candle in invalid_rows.iterrows():
+            EXCLUDED_OHLC_CANDLES.append({
+                "ticker": ticker,
+                "timeframe": interval,
+                "fecha": str(timestamp),
+                "open": float(candle["Open"]),
+                "high": float(candle["High"]),
+                "low": float(candle["Low"]),
+                "close": float(candle["Close"]),
+                "motivo": "Histórico rechazado por OHLC incoherente",
+            })
 
-    # Eliminamos únicamente las filas incoherentes.
-    if excluded_count:
-        data = data.loc[~invalid_mask].copy()
-
-    if data.empty:
         DOWNLOAD_ERRORS[key] = (
-            "No quedan velas después de excluir "
-            "las velas OHLC incoherentes"
+            f"Histórico rechazado: {invalid_count} "
+            "velas OHLC incoherentes detectadas. "
+            "No se han eliminado individualmente."
         )
+
+        print(
+            f"  {ticker} ({interval}): "
+            f"HISTÓRICO RECHAZADO. "
+            f"{invalid_count} velas OHLC incoherentes."
+        )
+
         return None
 
     validation_error = _ohlc_validation_error(data)
@@ -294,12 +340,10 @@ def download_history(ticker, interval):
         )
         return None
 
-    cleaned_rows = len(data)
-
-    # Excluimos la última vela recibida para evitar
-    # utilizar una vela que pudiera estar incompleta.
+    # Excluimos la última vela recibida para evitar utilizar
+    # una vela que pudiera estar incompleta.
     if len(data) > 1:
-        data = data.iloc[:-1]
+        data = data.iloc[:-1].copy()
 
     final_rows = len(data)
 
@@ -308,22 +352,12 @@ def download_history(ticker, interval):
             f"Histórico insuficiente: se necesitan "
             f"{MIN_BARS} velas y quedan {final_rows}. "
             f"Filas originales: {raw_rows}; "
-            f"filas eliminadas por limpieza: {rows_removed}; "
-            f"velas OHLC incoherentes excluidas: {excluded_count}; "
-            f"filas antes de excluir la última: {cleaned_rows}; "
             f"periodo solicitado: {settings['period']}; "
             f"intervalo: {interval}"
         )
         return None
 
     DOWNLOAD_ERRORS.pop(key, None)
-
-    if excluded_count:
-        print(
-            f"  {ticker} ({interval}): "
-            f"{excluded_count} velas OHLC incoherentes excluidas. "
-            f"Quedan {final_rows} velas."
-        )
 
     return data
 
@@ -344,6 +378,16 @@ def run_backtest(asset, ticker, interval):
 
         return [], diagnostic
 
+    # Segunda validación: protege también frente a datos
+    # proporcionados por otras fuentes o pruebas.
+    validation_error = _ohlc_validation_error(data)
+
+    if validation_error:
+        return [], (
+            f"Histórico rechazado antes de calcular indicadores: "
+            f"{validation_error}"
+        )
+
     try:
         df = add_indicators(data)
 
@@ -356,12 +400,31 @@ def run_backtest(asset, ticker, interval):
     if df is None:
         return [], "El cálculo de indicadores devolvió None"
 
+    if not isinstance(df, pd.DataFrame):
+        return [], "El cálculo de indicadores no devolvió un DataFrame"
+
     if len(df) < MIN_BARS:
         return [], (
             f"Indicadores o histórico insuficientes: "
             f"{len(df)} filas disponibles; "
             f"mínimo requerido: {MIN_BARS}"
         )
+
+    # Comprobamos que los indicadores no hayan alterado
+    # las velas OHLC ni introducido valores inválidos.
+    validation_error = _ohlc_validation_error(df)
+
+    if validation_error:
+        return [], (
+            f"Datos inválidos después de calcular indicadores: "
+            f"{validation_error}"
+        )
+
+    if not df.index.is_monotonic_increasing:
+        return [], "El índice temporal no está ordenado"
+
+    if df.index.has_duplicates:
+        return [], "El índice temporal contiene duplicados"
 
     max_bars = PERIODS[interval]["max_bars"]
 
@@ -376,6 +439,10 @@ def run_backtest(asset, ticker, interval):
             timeframe=interval,
             index=i,
         )
+
+        if not isinstance(signal, dict):
+            i += 1
+            continue
 
         if signal.get("action") != "BUY CANDIDATE":
             i += 1
@@ -406,6 +473,7 @@ def run_backtest(asset, ticker, interval):
             i += 1
             continue
 
+        # Riesgo y objetivo originales.
         stop = entry - 1.5 * atr
         target = entry + 3.0 * atr
 
@@ -437,7 +505,10 @@ def run_backtest(asset, ticker, interval):
                 candle_low = float(candle["Low"])
 
             except (TypeError, ValueError, KeyError):
-                continue
+                return [], (
+                    f"Vela inválida durante la ejecución "
+                    f"en el índice {j}"
+                )
 
             if not all(
                 np.isfinite(value)
@@ -447,20 +518,29 @@ def run_backtest(asset, ticker, interval):
                     candle_low,
                 )
             ):
-                continue
+                return [], (
+                    f"Valores OHLC no finitos durante la ejecución "
+                    f"en el índice {j}"
+                )
 
+            # Gap bajista: la salida se produce al precio
+            # de apertura, aunque la pérdida supere -1R.
             if candle_open <= stop:
                 exit_price = candle_open
                 exit_reason = "STOP_GAP"
                 exit_index = j
                 break
 
+            # Gap alcista: se mantiene la ejecución conservadora
+            # en el precio objetivo.
             if candle_open >= target:
                 exit_price = target
                 exit_reason = "TARGET_GAP"
                 exit_index = j
                 break
 
+            # Si stop y objetivo se alcanzan en la misma vela,
+            # se prioriza el stop por prudencia.
             if candle_low <= stop:
                 exit_price = stop
                 exit_reason = "STOP"
@@ -490,6 +570,9 @@ def run_backtest(asset, ticker, interval):
             continue
 
         pnl_per_unit = exit_price - entry
+
+        # R se calcula siempre respecto al riesgo inicial.
+        # No se limita artificialmente a -1R.
         result_r = pnl_per_unit / initial_risk
 
         if not np.isfinite(result_r):
@@ -512,6 +595,8 @@ def run_backtest(asset, ticker, interval):
                 (entry / signal_close - 1) * 100,
                 4,
             ),
+            "atr_at_signal": round(atr, 6),
+            "initial_risk_per_unit": round(initial_risk, 6),
             "stop": round(stop, 6),
             "target": round(target, 6),
             "exit": round(exit_price, 6),
@@ -882,6 +967,7 @@ def main():
     print("Datos: Yahoo Finance")
     print("Costes: no incluidos ni verificados")
     print("Sizing: desactivado")
+    print("Validación: históricos OHLC incoherentes rechazados")
     print("-" * 50)
 
     for asset, ticker in assets:
@@ -984,7 +1070,7 @@ def main():
     print(f"Combinaciones analizadas: {len(summaries)}")
     print(f"Errores o datos insuficientes: {len(errors)}")
     print(
-        f"Velas OHLC incoherentes excluidas: "
+        f"Velas OHLC incoherentes detectadas: "
         f"{len(EXCLUDED_OHLC_CANDLES)}"
     )
     print(
