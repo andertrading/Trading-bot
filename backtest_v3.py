@@ -190,7 +190,9 @@ def run_backtest(asset, ticker, interval):
     trades = []
     i = MIN_BARS - 1
 
-    while i < len(df) - 1:
+    # Solo evaluamos señales cuando quedan suficientes velas
+    # para completar el horizonte máximo de la operación.
+    while i + max_bars < len(df):
 
         signal = evaluate_signal_at(
             data=df,
@@ -244,10 +246,9 @@ def run_backtest(asset, ticker, interval):
             i += 1
             continue
 
-        last_index = min(
-            entry_index + max_bars - 1,
-            len(df) - 1,
-        )
+        # El horizonte completo está garantizado por el
+        # control del bucle anterior.
+        last_index = entry_index + max_bars - 1
 
         exit_price = None
         exit_reason = None
