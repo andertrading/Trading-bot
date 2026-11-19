@@ -1,7 +1,6 @@
 
 import logging
 import faulthandler
-faulthandler.enable(all_threads=True)
 import threading
 from datetime import datetime, timezone
 from uuid import uuid4
@@ -23,6 +22,8 @@ from data_engine import (
 
 from strategies import evaluate_signal
 
+
+faulthandler.enable(all_threads=True)
 
 app = Flask(__name__)
 
@@ -58,11 +59,36 @@ def no_trade(asset, timeframe, reason):
 
 
 def analyze_asset(asset, timeframe):
+    logger.info(
+        "ANALYSIS START | %s | %s",
+        asset,
+        timeframe,
+    )
+
     try:
+        logger.info(
+            "DATA DOWNLOAD START | %s | %s",
+            asset,
+            timeframe,
+        )
+
         df = download_data(asset, timeframe)
+
+        logger.info(
+            "DATA DOWNLOAD END | %s | %s | rows=%s",
+            asset,
+            timeframe,
+            0 if df is None else len(df),
+        )
 
         if df is None or df.empty:
             return no_trade(asset, timeframe, "Datos no disponibles")
+
+        logger.info(
+            "TIMESTAMP CHECK | %s | %s",
+            asset,
+            timeframe,
+        )
 
         timestamp = get_data_timestamp(df)
 
@@ -97,7 +123,19 @@ def analyze_asset(asset, timeframe):
                 "Datos desactualizados",
             )
 
+        logger.info(
+            "STRATEGY START | %s | %s",
+            asset,
+            timeframe,
+        )
+
         result = evaluate_signal(df, asset, timeframe)
+
+        logger.info(
+            "STRATEGY END | %s | %s",
+            asset,
+            timeframe,
+        )
 
         if not isinstance(result, dict):
             return no_trade(
@@ -113,10 +151,22 @@ def analyze_asset(asset, timeframe):
         result["data_age_minutes"] = round(age_minutes, 2)
         result["mode"] = "PAPER_ONLY"
 
+        logger.info(
+            "ANALYSIS END | %s | %s | action=%s",
+            asset,
+            timeframe,
+            result.get("action"),
+        )
+
         return result
 
     except Exception:
-        logger.exception("Error analizando %s %s", asset, timeframe)
+        logger.exception(
+            "PYTHON ERROR | %s | %s",
+            asset,
+            timeframe,
+        )
+
         return no_trade(
             asset,
             timeframe,
@@ -126,6 +176,8 @@ def analyze_asset(asset, timeframe):
 
 def run_scan():
     results = []
+
+    logger.info("SCAN LOOP START")
 
     for asset, settings in ASSETS.items():
         if not settings.get("enabled", False):
@@ -139,6 +191,12 @@ def run_scan():
                 scan_state["results"] = list(results)
                 scan_state["analyses_completed"] = len(results)
 
+            logger.info(
+                "SCAN PROGRESS | %s/%s",
+                len(results),
+                scan_state["total_analyses"],
+            )
+
     candidates = [
         result for result in results
         if result.get("action") == "BUY CANDIDATE"
@@ -148,6 +206,8 @@ def run_scan():
         result for result in results
         if result.get("action") == "NO TRADE"
     ]
+
+    logger.info("SCAN LOOP END")
 
     return {
         "version": BOT_VERSION,
@@ -165,6 +225,8 @@ def run_scan():
 
 
 def _scan_worker():
+    logger.info("SCAN WORKER START")
+
     try:
         result = run_scan()
 
@@ -175,8 +237,10 @@ def _scan_worker():
                 timezone.utc
             ).isoformat()
 
+        logger.info("SCAN WORKER COMPLETED")
+
     except Exception as exc:
-        logger.exception("Error durante el escaneo")
+        logger.exception("SCAN WORKER PYTHON ERROR")
 
         with state_lock:
             scan_state["status"] = "error"
@@ -208,15 +272,22 @@ def start_scan():
         })
 
     try:
+        logger.info("SCAN REQUEST RECEIVED")
+
         thread = threading.Thread(
             target=_scan_worker,
             daemon=True,
+            name="trading-scan-worker",
         )
+
         thread.start()
+
+        logger.info("SCAN THREAD STARTED")
+
         return True
 
     except Exception as exc:
-        logger.exception("No se pudo iniciar el escaneo")
+        logger.exception("SCAN THREAD START ERROR")
 
         with state_lock:
             scan_state["status"] = "error"
