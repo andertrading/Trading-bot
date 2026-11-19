@@ -360,19 +360,34 @@ def get_data_timestamp(df):
     return timestamp
 
 
-def is_data_fresh(df, max_age_minutes=30):
+def is_data_fresh(df, max_age_minutes=30, asset=None, interval="15m"):
+    """
+    Comprueba la antigüedad de los datos sin confundir
+    el cierre normal de los mercados con un fallo de descarga.
+
+    Las criptomonedas cotizan 24/7.
+    Para acciones y ETF se aplica una tolerancia mayor
+    mientras terminamos de incorporar calendarios bursátiles.
+    """
+
     timestamp = get_data_timestamp(df)
 
     if timestamp is None:
         return False
 
     now = pd.Timestamp.now(tz="UTC")
-
-    age_minutes = (
-        now - timestamp
-    ).total_seconds() / 60
+    age_minutes = (now - timestamp).total_seconds() / 60
 
     if age_minutes < 0:
         return False
 
-    return age_minutes <= max_age_minutes
+    crypto_assets = {"BTC", "ETH", "SOL", "XLM", "XRP"}
+
+    if asset in crypto_assets:
+        limit = 30 if interval == "15m" else 48 * 60
+    else:
+        # Tolerancia provisional para cierres, fines de semana
+        # y festivos. No sustituye al calendario bursátil.
+        limit = max(max_age_minutes, 72 * 60)
+
+    return age_minutes <= limit
