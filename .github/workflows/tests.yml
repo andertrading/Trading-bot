@@ -21,16 +21,17 @@ jobs:
       - name: Configurar Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: "3.13.5"
 
       - name: Instalar dependencias
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Ejecutar pruebas
+      - name: Ejecutar todas las pruebas
         run: |
-          python -m unittest discover -s tests -v
+          python -m unittest discover -s tests -p "test_*.py" -v
+          python -m unittest test_indicators -v
 
       - name: Comprobar arranque de Bot.py
         run: |
