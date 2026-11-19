@@ -34,7 +34,11 @@ class TestStrategies(unittest.TestCase):
             "AAPL", make_valid_data(), "1d"
         )
 
-        self.assertEqual(result["action"], "BUY CANDIDATE")
+        self.assertEqual(
+            result["action"],
+            "BUY CANDIDATE",
+            msg=str(result),
+        )
         self.assertFalse(result.get("validated", False))
 
     def test_unsupported_timeframe_is_rejected(self):
