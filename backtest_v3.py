@@ -10,7 +10,7 @@ from indicators import add_indicators
 from strategies import evaluate_signal_at
 
 
-VERSION = "3.10"
+VERSION = "3.11"
 
 PERIODS = {
     "15m": {"period": "60d", "max_bars": 32},
@@ -46,6 +46,44 @@ RR_REJECTION_COLUMNS = [
     "reason",
 ]
 
+# Diagnóstico general de todas las señales candidatas.
+SIGNAL_DIAGNOSTICS = []
+
+SIGNAL_DIAGNOSTIC_COLUMNS = [
+    "asset",
+    "ticker",
+    "timeframe",
+    "signal_time",
+    "signal_status",
+    "rejection_reason",
+    "score",
+    "signal_reference",
+    "signal_close",
+    "ema20",
+    "ema50",
+    "ema200",
+    "rsi",
+    "macd",
+    "macd_signal",
+    "high20",
+    "relative_volume",
+    "atr",
+    "atr_percent",
+    "entry_time",
+    "entry",
+    "entry_gap_pct",
+    "stop",
+    "target",
+    "initial_risk_per_unit",
+    "actual_reward_per_unit",
+    "actual_rr",
+    "minimum_rr",
+    "exit_time",
+    "exit",
+    "exit_reason",
+    "result_R",
+]
+
 
 # ---------------------------------------------------------
 # CONFIGURACIÓN DE HUECOS TEMPORALES
@@ -58,12 +96,194 @@ INTRADAY_INTERVAL_MINUTES = {
 GAP_TOLERANCE_MULTIPLIER = 1.5
 
 
+# ---------------------------------------------------------
+# FUNCIONES AUXILIARES DE DIAGNÓSTICO
+# ---------------------------------------------------------
+
+def _safe_float(value):
+    """Convierte un valor a float sin propagar errores."""
+
+    try:
+        result = float(value)
+
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+    if not np.isfinite(result):
+        return None
+
+    return result
+
+
+def _first_row_value(row, names):
+    """Obtiene el primer indicador disponible entre varios nombres."""
+
+    for name in names:
+
+        try:
+            value = row.get(name)
+
+        except AttributeError:
+            try:
+                value = row[name]
+            except (KeyError, TypeError, IndexError):
+                continue
+
+        if value is not None:
+            return _safe_float(value)
+
+    return None
+
+
+def _start_signal_diagnostic(
+    asset,
+    ticker,
+    interval,
+    signal_time,
+    signal_row,
+    signal,
+):
+    """Crea el registro inicial de una señal candidata."""
+
+    diagnostic = {
+        "asset": asset,
+        "ticker": ticker,
+        "timeframe": interval,
+        "signal_time": str(signal_time),
+        "signal_status": "PENDING",
+        "rejection_reason": None,
+        "score": None,
+        "signal_reference": None,
+        "signal_close": _first_row_value(
+            signal_row,
+            ["Close"],
+        ),
+        "ema20": _first_row_value(
+            signal_row,
+            ["EMA20", "ema20", "EMA_20", "ema_20"],
+        ),
+        "ema50": _first_row_value(
+            signal_row,
+            ["EMA50", "ema50", "EMA_50", "ema_50"],
+        ),
+        "ema200": _first_row_value(
+            signal_row,
+            ["EMA200", "ema200", "EMA_200", "ema_200"],
+        ),
+        "rsi": _first_row_value(
+            signal_row,
+            ["RSI", "rsi"],
+        ),
+        "macd": _first_row_value(
+            signal_row,
+            ["MACD", "macd"],
+        ),
+        "macd_signal": _first_row_value(
+            signal_row,
+            [
+                "MACD_SIGNAL",
+                "MACD_SIGNAL_LINE",
+                "macd_signal",
+                "macd_signal_line",
+                "MACD Signal",
+            ],
+        ),
+        "high20": _first_row_value(
+            signal_row,
+            ["HIGH20", "high20", "HIGH_20", "high_20"],
+        ),
+        "relative_volume": _first_row_value(
+            signal_row,
+            [
+                "RELATIVE_VOLUME",
+                "relative_volume",
+                "REL_VOLUME",
+            ],
+        ),
+        "atr": _first_row_value(
+            signal_row,
+            ["ATR", "atr", "ATR14", "atr14"],
+        ),
+        "atr_percent": _first_row_value(
+            signal_row,
+            ["ATR_PERCENT", "atr_percent", "ATR_PCT"],
+        ),
+        "entry_time": None,
+        "entry": None,
+        "entry_gap_pct": None,
+        "stop": None,
+        "target": None,
+        "initial_risk_per_unit": None,
+        "actual_reward_per_unit": None,
+        "actual_rr": None,
+        "minimum_rr": MIN_EXECUTION_RR,
+        "exit_time": None,
+        "exit": None,
+        "exit_reason": None,
+        "result_R": None,
+    }
+
+    try:
+        diagnostic["score"] = int(signal["score"])
+    except (KeyError, TypeError, ValueError, OverflowError):
+        pass
+
+    diagnostic["signal_reference"] = _safe_float(
+        signal.get("entry_reference")
+    )
+
+    diagnostic["stop"] = _safe_float(
+        signal.get("stop")
+    )
+
+    diagnostic["target"] = _safe_float(
+        signal.get("target")
+    )
+
+    diagnostic["entry_time"] = None
+
+    SIGNAL_DIAGNOSTICS.append(diagnostic)
+
+    return diagnostic
+
+
+def _finish_signal_diagnostic(
+    diagnostic,
+    status,
+    reason=None,
+):
+    """Actualiza el estado final de una señal candidata."""
+
+    if diagnostic is None:
+        return
+
+    diagnostic["signal_status"] = status
+    diagnostic["rejection_reason"] = reason
+
+
+def _update_signal_diagnostic(diagnostic, **values):
+    """Actualiza los campos disponibles de un diagnóstico."""
+
+    if diagnostic is None:
+        return
+
+    for key, value in values.items():
+
+        if key in SIGNAL_DIAGNOSTIC_COLUMNS:
+            diagnostic[key] = value
+
+
+# ---------------------------------------------------------
+# ACTIVOS
+# ---------------------------------------------------------
+
 def get_assets():
     """Obtiene los activos habilitados en config.py."""
 
     result = []
 
     for name, settings in ASSETS.items():
+
         if not isinstance(settings, dict):
             continue
 
@@ -88,6 +308,10 @@ def _get_asset_type(asset):
 
     return str(settings.get("type", "UNKNOWN")).upper()
 
+
+# ---------------------------------------------------------
+# VALIDACIÓN TEMPORAL
+# ---------------------------------------------------------
 
 def _has_unexpected_gap(
     previous_timestamp,
@@ -148,6 +372,10 @@ def _has_unexpected_gap(
     return True
 
 
+# ---------------------------------------------------------
+# VALIDACIÓN OHLC
+# ---------------------------------------------------------
+
 def _normalize_columns(data):
     """Normaliza columnas de Yahoo Finance."""
 
@@ -163,6 +391,7 @@ def _normalize_columns(data):
     }
 
     for level in range(data.columns.nlevels):
+
         values = set(data.columns.get_level_values(level))
 
         if fields.intersection(values):
@@ -208,6 +437,7 @@ def _ohlc_validation_error(data):
         return f"Faltan columnas OHLC: {missing}"
 
     for column in required:
+
         try:
             values = data[column].to_numpy(dtype=float)
 
@@ -238,6 +468,10 @@ def _valid_ohlc(data):
     return _ohlc_validation_error(data) is None
 
 
+# ---------------------------------------------------------
+# DESCARGA DE HISTÓRICOS
+# ---------------------------------------------------------
+
 def download_history(ticker, interval):
     """
     Descarga y valida el histórico.
@@ -267,6 +501,7 @@ def download_history(ticker, interval):
         )
 
     except Exception as exc:
+
         error = (
             f"Excepción al descargar datos de Yahoo Finance: "
             f"{type(exc).__name__}: {exc}"
@@ -336,7 +571,9 @@ def download_history(ticker, interval):
             )
 
         for column in required:
+
             if data[column].isna().any():
+
                 missing_count = int(data[column].isna().sum())
 
                 DOWNLOAD_ERRORS[key] = (
@@ -353,6 +590,7 @@ def download_history(ticker, interval):
         )
 
         for column in required:
+
             if data[column].isna().any():
                 DOWNLOAD_ERRORS[key] = (
                     f"La columna {column} contiene valores no finitos"
@@ -385,6 +623,7 @@ def download_history(ticker, interval):
         return None
 
     for column in required:
+
         values = data[column].to_numpy(dtype=float)
 
         if not np.isfinite(values).all():
@@ -464,6 +703,10 @@ def download_history(ticker, interval):
     return data
 
 
+# ---------------------------------------------------------
+# VALIDACIÓN DE HUECOS DE EJECUCIÓN
+# ---------------------------------------------------------
+
 def _validate_execution_gaps(
     df,
     start_index,
@@ -490,6 +733,7 @@ def _validate_execution_gaps(
             interval,
             asset_type,
         ):
+
             elapsed = (
                 pd.Timestamp(current_timestamp)
                 - pd.Timestamp(previous_timestamp)
@@ -506,6 +750,10 @@ def _validate_execution_gaps(
 
     return None
 
+
+# ---------------------------------------------------------
+# REGISTRO DE RECHAZOS POR RR
+# ---------------------------------------------------------
 
 def _record_rr_rejection(
     asset,
@@ -541,6 +789,10 @@ def _record_rr_rejection(
     })
 
 
+# ---------------------------------------------------------
+# BACKTEST
+# ---------------------------------------------------------
+
 def run_backtest(asset, ticker, interval):
     """
     Backtest con protección de huecos temporales y filtro RR real.
@@ -550,6 +802,9 @@ def run_backtest(asset, ticker, interval):
 
     Solo acepta operaciones cuyo RR real desde la entrada
     hasta los niveles originales sea igual o superior a 2:1.
+
+    Registra todas las señales BUY CANDIDATE y su resultado
+    en SIGNAL_DIAGNOSTICS.
     """
 
     if interval not in PERIODS:
@@ -558,6 +813,7 @@ def run_backtest(asset, ticker, interval):
     data = download_history(ticker, interval)
 
     if data is None:
+
         diagnostic = DOWNLOAD_ERRORS.get(
             (ticker, interval),
             "Causa desconocida durante la descarga",
@@ -640,6 +896,22 @@ def run_backtest(asset, ticker, interval):
 
         entry_row = df.iloc[entry_index]
 
+        # Crear diagnóstico desde el momento en que existe
+        # una señal candidata.
+        diagnostic = _start_signal_diagnostic(
+            asset=asset,
+            ticker=ticker,
+            interval=interval,
+            signal_time=df.index[i],
+            signal_row=signal_row,
+            signal=signal,
+        )
+
+        _update_signal_diagnostic(
+            diagnostic,
+            entry_time=str(df.index[entry_index]),
+        )
+
         # Comprobar la continuidad entre señal y entrada.
         gap_error = _validate_execution_gaps(
             df,
@@ -650,6 +922,13 @@ def run_backtest(asset, ticker, interval):
         )
 
         if gap_error:
+
+            _finish_signal_diagnostic(
+                diagnostic,
+                "BACKTEST_ABORTED_GAP",
+                gap_error,
+            )
+
             return [], gap_error
 
         try:
@@ -667,8 +946,31 @@ def run_backtest(asset, ticker, interval):
             KeyError,
             OverflowError,
         ):
+
+            _finish_signal_diagnostic(
+                diagnostic,
+                "INVALID_SIGNAL_DATA",
+                "Faltan datos o no se pueden convertir a números",
+            )
+
             i += 1
             continue
+
+        _update_signal_diagnostic(
+            diagnostic,
+            signal_reference=entry_reference,
+            signal_close=signal_close,
+            entry=entry,
+            stop=stop,
+            target=target,
+            score=score,
+            atr=atr,
+            entry_gap_pct=(
+                (entry / entry_reference - 1) * 100
+                if entry_reference > 0
+                else None
+            ),
+        )
 
         if not all(
             np.isfinite(value)
@@ -681,6 +983,13 @@ def run_backtest(asset, ticker, interval):
                 atr,
             )
         ):
+
+            _finish_signal_diagnostic(
+                diagnostic,
+                "NON_FINITE_SIGNAL_DATA",
+                "La señal contiene valores no finitos",
+            )
+
             i += 1
             continue
 
@@ -692,6 +1001,13 @@ def run_backtest(asset, ticker, interval):
             or stop <= 0
             or target <= 0
         ):
+
+            _finish_signal_diagnostic(
+                diagnostic,
+                "INVALID_PRICE_LEVELS",
+                "La señal contiene precios cero o negativos",
+            )
+
             i += 1
             continue
 
@@ -699,21 +1015,43 @@ def run_backtest(asset, ticker, interval):
         if not (
             stop < entry_reference < target
         ):
+
+            _finish_signal_diagnostic(
+                diagnostic,
+                "INVALID_SIGNAL_LEVELS",
+                "Los niveles deben cumplir stop < referencia < objetivo",
+            )
+
             i += 1
             continue
 
         # El riesgo se calcula desde la entrada real.
         initial_risk = entry - stop
 
+        _update_signal_diagnostic(
+            diagnostic,
+            initial_risk_per_unit=initial_risk,
+        )
+
         if not np.isfinite(initial_risk) or initial_risk <= 0:
-            # Si la apertura ya está en el stop o por debajo,
-            # no se simula una entrada.
+
+            _finish_signal_diagnostic(
+                diagnostic,
+                "ENTRY_AT_OR_BELOW_STOP",
+                "La entrada real está en el stop o por debajo",
+            )
+
             i += 1
             continue
 
         if entry >= target:
-            # Si la apertura ya ha alcanzado el objetivo,
-            # no se simula una entrada tardía.
+
+            _finish_signal_diagnostic(
+                diagnostic,
+                "ENTRY_AT_OR_ABOVE_TARGET",
+                "La entrada real ya ha alcanzado o superado el objetivo",
+            )
+
             i += 1
             continue
 
@@ -723,13 +1061,37 @@ def run_backtest(asset, ticker, interval):
 
         actual_reward = target - entry
 
+        _update_signal_diagnostic(
+            diagnostic,
+            actual_reward_per_unit=actual_reward,
+        )
+
         if not np.isfinite(actual_reward) or actual_reward <= 0:
+
+            _finish_signal_diagnostic(
+                diagnostic,
+                "INVALID_REWARD",
+                "La recompensa potencial desde la entrada no es positiva",
+            )
+
             i += 1
             continue
 
         actual_rr = actual_reward / initial_risk
 
+        _update_signal_diagnostic(
+            diagnostic,
+            actual_rr=actual_rr,
+        )
+
         if not np.isfinite(actual_rr):
+
+            _finish_signal_diagnostic(
+                diagnostic,
+                "INVALID_RR",
+                "El ratio riesgo/recompensa no es finito",
+            )
+
             i += 1
             continue
 
@@ -748,6 +1110,15 @@ def run_backtest(asset, ticker, interval):
                 initial_risk=initial_risk,
                 actual_reward=actual_reward,
                 actual_rr=actual_rr,
+            )
+
+            _finish_signal_diagnostic(
+                diagnostic,
+                "RR_REJECTED",
+                (
+                    f"RR real {actual_rr:.4f} inferior "
+                    f"al mínimo {MIN_EXECUTION_RR:.2f}"
+                ),
             )
 
             i += 1
@@ -776,6 +1147,13 @@ def run_backtest(asset, ticker, interval):
                 )
 
                 if gap_error:
+
+                    _finish_signal_diagnostic(
+                        diagnostic,
+                        "BACKTEST_ABORTED_GAP",
+                        gap_error,
+                    )
+
                     return [], gap_error
 
             candle = df.iloc[j]
@@ -786,6 +1164,13 @@ def run_backtest(asset, ticker, interval):
                 candle_low = float(candle["Low"])
 
             except (TypeError, ValueError, KeyError):
+
+                _finish_signal_diagnostic(
+                    diagnostic,
+                    "INVALID_EXECUTION_CANDLE",
+                    f"Vela inválida durante la ejecución en el índice {j}",
+                )
+
                 return [], (
                     f"Vela inválida durante la ejecución "
                     f"en el índice {j}"
@@ -799,6 +1184,13 @@ def run_backtest(asset, ticker, interval):
                     candle_low,
                 )
             ):
+
+                _finish_signal_diagnostic(
+                    diagnostic,
+                    "NON_FINITE_EXECUTION_CANDLE",
+                    f"Valores OHLC no finitos en el índice {j}",
+                )
+
                 return [], (
                     f"Valores OHLC no finitos durante la ejecución "
                     f"en el índice {j}"
@@ -842,12 +1234,26 @@ def run_backtest(asset, ticker, interval):
                 )
 
             except (TypeError, ValueError, KeyError):
+
+                _finish_signal_diagnostic(
+                    diagnostic,
+                    "INVALID_MAX_HOLD_CLOSE",
+                    "No se pudo obtener el cierre de la última vela",
+                )
+
                 i = last_index + 1
                 continue
 
             exit_reason = "MAX_HOLD"
 
         if not np.isfinite(exit_price) or exit_price <= 0:
+
+            _finish_signal_diagnostic(
+                diagnostic,
+                "INVALID_EXIT_PRICE",
+                "El precio de salida no es válido",
+            )
+
             i = exit_index + 1
             continue
 
@@ -856,12 +1262,19 @@ def run_backtest(asset, ticker, interval):
         result_r = pnl_per_unit / initial_risk
 
         if not np.isfinite(result_r):
+
+            _finish_signal_diagnostic(
+                diagnostic,
+                "INVALID_RESULT_R",
+                "El resultado R no es finito",
+            )
+
             i = exit_index + 1
             continue
 
         duration_bars = exit_index - entry_index + 1
 
-        trades.append({
+        trade = {
             "asset": asset,
             "ticker": ticker,
             "timeframe": interval,
@@ -889,12 +1302,32 @@ def run_backtest(asset, ticker, interval):
             "data_source": "Yahoo Finance",
             "costs_included": False,
             "position_sizing_included": False,
-        })
+        }
+
+        trades.append(trade)
+
+        _update_signal_diagnostic(
+            diagnostic,
+            exit_time=str(df.index[exit_index]),
+            exit=round(exit_price, 6),
+            exit_reason=exit_reason,
+            result_R=round(result_r, 4),
+        )
+
+        _finish_signal_diagnostic(
+            diagnostic,
+            "EXECUTED",
+            None,
+        )
 
         i = exit_index + 1
 
     return trades, None
 
+
+# ---------------------------------------------------------
+# MÉTRICAS
+# ---------------------------------------------------------
 
 def _empty_metrics():
     return {
@@ -1022,6 +1455,10 @@ def calculate_metrics(trades):
         ),
     }
 
+
+# ---------------------------------------------------------
+# RESUMEN DE OPERACIONES
+# ---------------------------------------------------------
 
 def generate_operations_summary(trades):
     """Genera un resumen por activo, temporalidad y mes."""
@@ -1247,6 +1684,10 @@ def generate_operations_summary(trades):
     )
 
 
+# ---------------------------------------------------------
+# EJECUCIÓN PRINCIPAL
+# ---------------------------------------------------------
+
 def main():
     all_trades = []
 
@@ -1259,6 +1700,8 @@ def main():
     EXCLUDED_OHLC_CANDLES.clear()
 
     RR_REJECTIONS.clear()
+
+    SIGNAL_DIAGNOSTICS.clear()
 
     assets = get_assets()
 
@@ -1288,6 +1731,8 @@ def main():
     print("Validación: históricos OHLC incoherentes rechazados")
 
     print("Validación: protección frente a huecos temporales")
+
+    print("Diagnóstico: registro de señales candidatas activado")
 
     print("-" * 50)
 
@@ -1400,9 +1845,20 @@ def main():
         index=False,
     )
 
+    # Informe general de todas las señales candidatas.
+    pd.DataFrame(
+        SIGNAL_DIAGNOSTICS,
+        columns=SIGNAL_DIAGNOSTIC_COLUMNS,
+    ).to_csv(
+        "diagnostico_senales_v3.csv",
+        index=False,
+    )
+
     print("-" * 50)
 
     print(f"Operaciones ejecutadas: {len(all_trades)}")
+
+    print(f"Señales candidatas registradas: {len(SIGNAL_DIAGNOSTICS)}")
 
     print(f"Señales rechazadas por RR: {len(RR_REJECTIONS)}")
 
@@ -1423,6 +1879,10 @@ def main():
     )
 
     print("Archivos CSV generados.")
+
+    print(
+        "Nuevo informe: diagnostico_senales_v3.csv"
+    )
 
     print(
         "IMPORTANTE: resultados brutos, sin costes, "
