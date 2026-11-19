@@ -10,7 +10,7 @@ from indicators import add_indicators
 from strategies import evaluate_signal_at
 
 
-VERSION = "3.5"
+VERSION = "3.6"
 
 PERIODS = {
     "15m": {"period": "60d", "max_bars": 32},
@@ -19,8 +19,10 @@ PERIODS = {
 
 MIN_BARS = 220
 
-# Guarda el diagnóstico de la última descarga por activo y temporalidad.
 DOWNLOAD_ERRORS = {}
+
+# Registro de velas OHLC incoherentes excluidas.
+EXCLUDED_OHLC_CANDLES = []
 
 
 def get_assets():
@@ -67,8 +69,20 @@ def _normalize_columns(data):
     return data
 
 
+def _ohlc_incoherent_mask(data):
+    """Identifica velas con relaciones OHLC imposibles."""
+
+    return (
+        (data["High"] < data["Low"])
+        | (data["High"] < data["Open"])
+        | (data["High"] < data["Close"])
+        | (data["Low"] > data["Open"])
+        | (data["Low"] > data["Close"])
+    )
+
+
 def _ohlc_validation_error(data):
-    """Devuelve el motivo concreto y los valores de las velas inválidas."""
+    """Valida los precios OHLC y devuelve el motivo del error."""
 
     required = ["Open", "High", "Low", "Close"]
 
@@ -93,33 +107,12 @@ def _ohlc_validation_error(data):
         if (values <= 0).any():
             return f"La columna {column} contiene precios cero o negativos"
 
-    invalid_candles = (
-        (data["High"] < data["Low"])
-        | (data["High"] < data["Open"])
-        | (data["High"] < data["Close"])
-        | (data["Low"] > data["Open"])
-        | (data["Low"] > data["Close"])
-    )
-
-    invalid_count = int(invalid_candles.sum())
+    invalid_count = int(_ohlc_incoherent_mask(data).sum())
 
     if invalid_count:
-        details = []
-        invalid_rows = data.loc[invalid_candles]
-
-        for timestamp, candle in invalid_rows.head(5).iterrows():
-            details.append(
-                f"Fecha={timestamp}, "
-                f"Open={candle['Open']}, "
-                f"High={candle['High']}, "
-                f"Low={candle['Low']}, "
-                f"Close={candle['Close']}"
-            )
-
         return (
-            f"Se encontraron {invalid_count} velas "
-            f"OHLC incoherentes. "
-            f"Detalle: {' | '.join(details)}"
+            f"Quedan {invalid_count} velas OHLC incoherentes "
+            "después de la limpieza"
         )
 
     return None
@@ -132,7 +125,7 @@ def _valid_ohlc(data):
 
 
 def download_history(ticker, interval):
-    """Descarga y valida el histórico de Yahoo Finance."""
+    """Descarga el histórico y excluye únicamente velas OHLC incoherentes."""
 
     key = (ticker, interval)
     DOWNLOAD_ERRORS.pop(key, None)
@@ -164,9 +157,7 @@ def download_history(ticker, interval):
         return None
 
     if data is None:
-        DOWNLOAD_ERRORS[key] = (
-            "Yahoo Finance devolvió None"
-        )
+        DOWNLOAD_ERRORS[key] = "Yahoo Finance devolvió None"
         return None
 
     if data.empty:
@@ -248,13 +239,58 @@ def download_history(ticker, interval):
         )
         return None
 
+    # Los precios no finitos, cero o negativos siguen
+    # siendo errores. No se excluyen silenciosamente.
+    for column in required:
+        values = data[column].to_numpy(dtype=float)
+
+        if not np.isfinite(values).all():
+            DOWNLOAD_ERRORS[key] = (
+                f"La columna {column} contiene valores no finitos"
+            )
+            return None
+
+        if (values <= 0).any():
+            DOWNLOAD_ERRORS[key] = (
+                f"La columna {column} contiene precios cero o negativos"
+            )
+            return None
+
+    # Identificamos las velas geométricamente incoherentes.
+    invalid_mask = _ohlc_incoherent_mask(data)
+    invalid_rows = data.loc[invalid_mask].copy()
+
+    excluded_count = len(invalid_rows)
+
+    # Registramos cada exclusión sin modificar sus precios.
+    for timestamp, candle in invalid_rows.iterrows():
+        EXCLUDED_OHLC_CANDLES.append({
+            "ticker": ticker,
+            "timeframe": interval,
+            "fecha": str(timestamp),
+            "open": float(candle["Open"]),
+            "high": float(candle["High"]),
+            "low": float(candle["Low"]),
+            "close": float(candle["Close"]),
+            "motivo": "Relaciones OHLC incoherentes",
+        })
+
+    # Eliminamos únicamente las filas incoherentes.
+    if excluded_count:
+        data = data.loc[~invalid_mask].copy()
+
+    if data.empty:
+        DOWNLOAD_ERRORS[key] = (
+            "No quedan velas después de excluir "
+            "las velas OHLC incoherentes"
+        )
+        return None
+
     validation_error = _ohlc_validation_error(data)
 
     if validation_error:
         DOWNLOAD_ERRORS[key] = (
-            f"Histórico OHLC inválido: {validation_error}. "
-            f"Filas recibidas: {raw_rows}; "
-            f"filas válidas tras limpieza: {len(data)}"
+            f"Histórico OHLC inválido: {validation_error}"
         )
         return None
 
@@ -270,10 +306,10 @@ def download_history(ticker, interval):
     if final_rows < MIN_BARS:
         DOWNLOAD_ERRORS[key] = (
             f"Histórico insuficiente: se necesitan "
-            f"{MIN_BARS} velas y quedan {final_rows} "
-            f"después de excluir la última vela. "
+            f"{MIN_BARS} velas y quedan {final_rows}. "
             f"Filas originales: {raw_rows}; "
             f"filas eliminadas por limpieza: {rows_removed}; "
+            f"velas OHLC incoherentes excluidas: {excluded_count}; "
             f"filas antes de excluir la última: {cleaned_rows}; "
             f"periodo solicitado: {settings['period']}; "
             f"intervalo: {interval}"
@@ -282,14 +318,18 @@ def download_history(ticker, interval):
 
     DOWNLOAD_ERRORS.pop(key, None)
 
+    if excluded_count:
+        print(
+            f"  {ticker} ({interval}): "
+            f"{excluded_count} velas OHLC incoherentes excluidas. "
+            f"Quedan {final_rows} velas."
+        )
+
     return data
 
 
 def run_backtest(asset, ticker, interval):
-    """
-    Backtest con los mismos indicadores y reglas de señal
-    que utiliza el análisis en directo.
-    """
+    """Backtest con los indicadores y reglas de señal actuales."""
 
     if interval not in PERIODS:
         return [], "Temporalidad no admitida"
@@ -328,8 +368,6 @@ def run_backtest(asset, ticker, interval):
     trades = []
     i = MIN_BARS - 1
 
-    # Solo evaluamos señales cuando quedan suficientes velas
-    # para completar el horizonte máximo de la operación.
     while i + max_bars < len(df):
 
         signal = evaluate_signal_at(
@@ -368,8 +406,6 @@ def run_backtest(asset, ticker, interval):
             i += 1
             continue
 
-        # Entrada en la apertura de la vela siguiente.
-        # Stop y objetivo se calculan desde el precio real de entrada.
         stop = entry - 1.5 * atr
         target = entry + 3.0 * atr
 
@@ -385,8 +421,6 @@ def run_backtest(asset, ticker, interval):
             i += 1
             continue
 
-        # El horizonte completo está garantizado por el
-        # control del bucle anterior.
         last_index = entry_index + max_bars - 1
 
         exit_price = None
@@ -415,22 +449,18 @@ def run_backtest(asset, ticker, interval):
             ):
                 continue
 
-            # Hueco bajista: salida al precio de apertura.
             if candle_open <= stop:
                 exit_price = candle_open
                 exit_reason = "STOP_GAP"
                 exit_index = j
                 break
 
-            # Hueco alcista: ejecución conservadora al objetivo.
             if candle_open >= target:
                 exit_price = target
                 exit_reason = "TARGET_GAP"
                 exit_index = j
                 break
 
-            # Si se tocan ambos niveles en la misma vela,
-            # se prioriza el stop por prudencia.
             if candle_low <= stop:
                 exit_price = stop
                 exit_reason = "STOP"
@@ -494,7 +524,6 @@ def run_backtest(asset, ticker, interval):
             "position_sizing_included": False,
         })
 
-        # Una sola operación simultánea por activo y temporalidad.
         i = exit_index + 1
 
     return trades, None
@@ -623,12 +652,7 @@ def calculate_metrics(trades):
 
 
 def generate_operations_summary(trades):
-    """
-    Genera un resumen por activo, temporalidad y mes.
-
-    El drawdown corresponde a operaciones cerradas.
-    No representa el drawdown de una cartera real.
-    """
+    """Genera un resumen por activo, temporalidad y mes."""
 
     columns = [
         "tipo",
@@ -687,8 +711,6 @@ def generate_operations_summary(trades):
         errors="coerce",
     )
 
-    # Acepta formatos de fecha distintos en operaciones
-    # intradía y diarias, normalizando todas a UTC.
     df["exit_time"] = pd.to_datetime(
         df["exit_time"],
         format="mixed",
@@ -742,12 +764,10 @@ def generate_operations_summary(trades):
         for result in results:
             if result < 0:
                 current_losing_streak += 1
-
                 max_losing_streak = max(
                     max_losing_streak,
                     current_losing_streak,
                 )
-
             else:
                 current_losing_streak = 0
 
@@ -815,7 +835,6 @@ def generate_operations_summary(trades):
             "MAX_HOLD": int(reasons.get("MAX_HOLD", 0)),
         })
 
-    # Resumen por activo y temporalidad.
     for (asset, timeframe), group in df.groupby(
         ["asset", "timeframe"]
     ):
@@ -827,7 +846,6 @@ def generate_operations_summary(trades):
             "TOTAL",
         )
 
-    # Resumen mensual por activo y temporalidad.
     df["month"] = df["exit_time"].dt.strftime("%Y-%m")
 
     for (asset, timeframe, month), group in df.groupby(
@@ -851,6 +869,9 @@ def main():
     all_trades = []
     summaries = []
     errors = []
+
+    DOWNLOAD_ERRORS.clear()
+    EXCLUDED_OHLC_CANDLES.clear()
 
     assets = get_assets()
 
@@ -939,10 +960,33 @@ def main():
         index=False,
     )
 
+    excluded_columns = [
+        "ticker",
+        "timeframe",
+        "fecha",
+        "open",
+        "high",
+        "low",
+        "close",
+        "motivo",
+    ]
+
+    pd.DataFrame(
+        EXCLUDED_OHLC_CANDLES,
+        columns=excluded_columns,
+    ).to_csv(
+        "velas_ohlc_excluidas_v3.csv",
+        index=False,
+    )
+
     print("-" * 50)
     print(f"Operaciones totales: {len(all_trades)}")
     print(f"Combinaciones analizadas: {len(summaries)}")
     print(f"Errores o datos insuficientes: {len(errors)}")
+    print(
+        f"Velas OHLC incoherentes excluidas: "
+        f"{len(EXCLUDED_OHLC_CANDLES)}"
+    )
     print(
         f"Filas del resumen detallado: {len(operations_summary)}"
     )
