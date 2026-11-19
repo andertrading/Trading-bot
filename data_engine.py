@@ -141,14 +141,14 @@ def _observed_us_holiday(day):
 def _us_holidays(year):
     holidays = {
         _observed_us_holiday(date(year, 1, 1)),
-        _nth_weekday(year, 1, 0, 3),       # Martin Luther King Jr.
-        _nth_weekday(year, 2, 0, 3),       # Presidents' Day
-        _easter_sunday(year) - timedelta(days=2),  # Good Friday
-        _last_weekday(year, 5, 0),         # Memorial Day
-        _observed_us_holiday(date(year, 6, 19)),   # Juneteenth
+        _nth_weekday(year, 1, 0, 3),
+        _nth_weekday(year, 2, 0, 3),
+        _easter_sunday(year) - timedelta(days=2),
+        _last_weekday(year, 5, 0),
+        _observed_us_holiday(date(year, 6, 19)),
         _observed_us_holiday(date(year, 7, 4)),
-        _nth_weekday(year, 9, 0, 1),       # Labor Day
-        _nth_weekday(year, 11, 3, 4),      # Thanksgiving
+        _nth_weekday(year, 9, 0, 1),
+        _nth_weekday(year, 11, 3, 4),
         _observed_us_holiday(date(year, 12, 25)),
     }
 
@@ -181,11 +181,11 @@ def _uk_holidays(year):
 
     holidays = _uk_substitute_holidays(year)
     holidays.update({
-        easter - timedelta(days=2),       # Good Friday
-        easter + timedelta(days=1),       # Easter Monday
-        _nth_weekday(year, 5, 0, 1),      # Early May bank holiday
-        _last_weekday(year, 5, 0),        # Spring bank holiday
-        _last_weekday(year, 8, 0),        # Summer bank holiday
+        easter - timedelta(days=2),
+        easter + timedelta(days=1),
+        _nth_weekday(year, 5, 0, 1),
+        _last_weekday(year, 5, 0),
+        _last_weekday(year, 8, 0),
     })
 
     return holidays
@@ -219,6 +219,10 @@ def _is_market_holiday(day, asset):
 
 
 def _is_trading_day(day, asset):
+    # Las criptomonedas cotizan todos los días del año.
+    if asset in CRYPTO_ASSETS:
+        return True
+
     return (
         day.weekday() < 5
         and not _is_market_holiday(day, asset)
@@ -234,7 +238,6 @@ def _previous_trading_day(day, asset):
     return candidate
 
 
-# Compatibilidad con el nombre utilizado anteriormente.
 def _previous_weekday(day):
     candidate = day - timedelta(days=1)
 
@@ -369,7 +372,6 @@ def _normalise_dataframe(df):
             errors="coerce",
         )
 
-    # El volumen no es obligatorio.
     df["Volume"] = df["Volume"].replace(
         [np.inf, -np.inf],
         np.nan,
@@ -377,7 +379,6 @@ def _normalise_dataframe(df):
     df["Volume"] = df["Volume"].fillna(0.0)
     df.loc[df["Volume"] < 0, "Volume"] = 0.0
 
-    # Los precios OHLC son obligatorios y no se pueden reparar.
     for col in required:
         values = df[col].to_numpy(dtype=float)
 
@@ -395,7 +396,6 @@ def _normalise_dataframe(df):
             )
             return None
 
-    # Normalización del índice temporal.
     try:
         if not isinstance(df.index, pd.DatetimeIndex):
             parsed_index = pd.to_datetime(
@@ -419,7 +419,6 @@ def _normalise_dataframe(df):
         )
         return None
 
-    # Los duplicados solo se aceptan si son idénticos.
     duplicated = df.index.duplicated(keep=False)
 
     if duplicated.any():
@@ -570,8 +569,6 @@ def _remove_incomplete_candle(df, interval, asset=None):
         return df[df.index <= last_completed_start]
 
     if interval == "1d":
-        # Se utiliza la fecha UTC como etiqueta de sesión del proveedor.
-        # La vela del día UTC actual se excluye conservadoramente.
         return df[df.index.date < now.date()]
 
     return df
@@ -1192,8 +1189,6 @@ def download_data(asset, interval="15m"):
     cached = _get_cached_data(asset, interval)
 
     if cached is not None:
-        # Defensa adicional: la caché también debe superar
-        # la normalización antes de volver al escáner.
         validated = _normalise_dataframe(cached)
 
         if validated is not None:
@@ -1338,9 +1333,6 @@ def is_data_fresh(
             asset,
         )
 
-        # Los proveedores pueden etiquetar la vela diaria a
-        # las 00:00 UTC o a la apertura local. Se usa la fecha UTC
-        # como etiqueta de sesión, no la hora.
         timestamp_date = timestamp_dt.date()
 
         is_fresh = timestamp_date == expected_date
