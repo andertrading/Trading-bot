@@ -35,6 +35,8 @@ INTERVAL_MAP = {
 
 COLUMNS = ["Open", "High", "Low", "Close", "Volume"]
 
+CRYPTO_ASSETS = {"BTC", "ETH", "SOL", "XLM", "XRP"}
+
 
 def _asset_config(asset):
     config = ASSETS.get(asset)
@@ -59,8 +61,14 @@ def _normalise_dataframe(df):
 
     df.columns = [str(col).strip().title() for col in df.columns]
 
-    if not all(col in df.columns for col in COLUMNS):
+    required = ["Open", "High", "Low", "Close"]
+
+    if not all(col in df.columns for col in required):
+        logger.error("Faltan columnas OHLC")
         return None
+
+    if "Volume" not in df.columns:
+        df["Volume"] = 0.0
 
     df = df[COLUMNS].copy()
 
@@ -69,18 +77,28 @@ def _normalise_dataframe(df):
 
     df = df.dropna(subset=["Open", "High", "Low", "Close"])
 
-    df = df[~df.index.duplicated(keep="last")]
-    df = df.sort_index()
+    if not isinstance(df.index, pd.DatetimeIndex):
+        df.index = pd.to_datetime(df.index, utc=True, errors="coerce")
+
+    df = df[~df.index.isna()]
+
+    if df.empty:
+        return None
 
     if df.index.tz is None:
         df.index = df.index.tz_localize("UTC")
     else:
         df.index = df.index.tz_convert("UTC")
 
-    df = df[df["Open"] > 0]
-    df = df[df["High"] > 0]
-    df = df[df["Low"] > 0]
-    df = df[df["Close"] > 0]
+    df = df[~df.index.duplicated(keep="last")]
+    df = df.sort_index()
+
+    df = df[
+        (df["Open"] > 0)
+        & (df["High"] > 0)
+        & (df["Low"] > 0)
+        & (df["Close"] > 0)
+    ]
 
     valid_ohlc = (
         (df["High"] >= df["Low"])
@@ -102,11 +120,15 @@ def _remove_incomplete_candle(df, interval):
     now = datetime.now(timezone.utc)
 
     if interval == "15m":
-        cutoff = pd.Timestamp(now - timedelta(minutes=15))
+        cutoff = pd.Timestamp(
+            now - timedelta(minutes=15)
+        )
+
         return df[df.index <= cutoff]
 
     if interval == "1d":
         today = now.date()
+
         return df[df.index.date < today]
 
     return df
@@ -119,13 +141,9 @@ def _download_twelvedata(asset, config, interval):
         logger.error("Falta TWELVE_DATA_API_KEY")
         return None
 
-    symbol = str(config.get("ticker", asset)).strip()
-
-    if asset in {"BTC", "ETH", "SOL", "XLM", "XRP"}:
-        symbol = symbol.replace("-USD", "/USD").replace("-USDT", "/USD")
-
-        if "/" not in symbol:
-            symbol = f"{symbol}/USD"
+    # Los símbolos se consultan directamente por su ticker.
+    # En nuestra prueba anterior estos símbolos funcionaron.
+    symbol = asset
 
     params = {
         "symbol": symbol,
@@ -139,21 +157,26 @@ def _download_twelvedata(asset, config, interval):
         response = requests.get(
             TWELVE_DATA_URL,
             params=params,
-            timeout=25,
+            timeout=30,
         )
 
         response.raise_for_status()
+
         payload = response.json()
 
         if "values" not in payload:
             logger.error(
-                "Twelve Data error para %s: %s",
+                "Twelve Data rechazó %s: %s",
                 asset,
-                payload.get("message", payload),
+                payload.get("message", payload.get("code", payload)),
             )
             return None
 
         df = pd.DataFrame(payload["values"])
+
+        if df.empty:
+            logger.error("Twelve Data devolvió datos vacíos para %s", asset)
+            return None
 
         df = df.rename(
             columns={
@@ -167,6 +190,7 @@ def _download_twelvedata(asset, config, interval):
         )
 
         if "datetime" not in df.columns:
+            logger.error("No hay fechas en los datos de %s", asset)
             return None
 
         df["datetime"] = pd.to_datetime(
@@ -175,7 +199,9 @@ def _download_twelvedata(asset, config, interval):
             errors="coerce",
         )
 
+        df = df.dropna(subset=["datetime"])
         df = df.set_index("datetime")
+
         df = _normalise_dataframe(df)
 
         if df is None:
@@ -183,19 +209,42 @@ def _download_twelvedata(asset, config, interval):
 
         df = _remove_incomplete_candle(df, interval)
 
-        return df if len(df) >= 220 else None
+        if df is None or len(df) < 220:
+            logger.warning(
+                "Histórico insuficiente para %s %s",
+                asset,
+                interval,
+            )
+            return None
+
+        logger.info(
+            "Twelve Data OK: %s %s, %s velas",
+            asset,
+            interval,
+            len(df),
+        )
+
+        return df
 
     except requests.RequestException as exc:
-        logger.error("Error de conexión Twelve Data (%s): %s", asset, exc)
+        logger.error(
+            "Error de conexión Twelve Data para %s: %s",
+            asset,
+            exc,
+        )
         return None
 
     except Exception:
-        logger.exception("Error procesando Twelve Data para %s", asset)
+        logger.exception(
+            "Error procesando Twelve Data para %s",
+            asset,
+        )
         return None
 
 
 def _download_yahoo(asset, config, interval):
-    ticker = config.get("ticker")
+    # En config.py el campo correcto es yahoo, no ticker.
+    ticker = config.get("yahoo")
 
     if not ticker:
         logger.error("No hay ticker de Yahoo para %s", asset)
@@ -211,19 +260,51 @@ def _download_yahoo(asset, config, interval):
             auto_adjust=False,
             progress=False,
             threads=False,
+            timeout=30,
         )
+
+        if raw is None or raw.empty:
+            logger.error(
+                "Yahoo no devolvió datos para %s (%s)",
+                asset,
+                ticker,
+            )
+            return None
 
         df = _normalise_dataframe(raw)
 
         if df is None:
+            logger.error(
+                "Datos de Yahoo no válidos para %s",
+                asset,
+            )
             return None
 
         df = _remove_incomplete_candle(df, interval)
 
-        return df if len(df) >= 220 else None
+        if df is None or len(df) < 220:
+            logger.warning(
+                "Histórico insuficiente en Yahoo para %s %s",
+                asset,
+                interval,
+            )
+            return None
+
+        logger.info(
+            "Yahoo OK: %s (%s) %s, %s velas",
+            asset,
+            ticker,
+            interval,
+            len(df),
+        )
+
+        return df
 
     except Exception:
-        logger.exception("Error descargando Yahoo Finance para %s", asset)
+        logger.exception(
+            "Error descargando Yahoo Finance para %s",
+            asset,
+        )
         return None
 
 
@@ -235,18 +316,33 @@ def download_data(asset, interval="15m"):
     config = _asset_config(asset)
 
     if config is None:
-        logger.warning("Activo desconocido o desactivado: %s", asset)
+        logger.warning(
+            "Activo desconocido o desactivado: %s",
+            asset,
+        )
         return None
 
     provider = PROVIDER_MAP.get(asset)
 
     if provider == "twelvedata":
-        return _download_twelvedata(asset, config, interval)
+        return _download_twelvedata(
+            asset,
+            config,
+            interval,
+        )
 
     if provider == "yahoo":
-        return _download_yahoo(asset, config, interval)
+        return _download_yahoo(
+            asset,
+            config,
+            interval,
+        )
 
-    logger.error("No hay proveedor definido para %s", asset)
+    logger.error(
+        "No hay proveedor definido para %s",
+        asset,
+    )
+
     return None
 
 
@@ -271,6 +367,12 @@ def is_data_fresh(df, max_age_minutes=30):
         return False
 
     now = pd.Timestamp.now(tz="UTC")
-    age = (now - timestamp).total_seconds() / 60
 
-    return 0 <= age <= max_age_minutes
+    age_minutes = (
+        now - timestamp
+    ).total_seconds() / 60
+
+    if age_minutes < 0:
+        return False
+
+    return age_minutes <= max_age_minutes
