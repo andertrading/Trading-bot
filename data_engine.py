@@ -183,13 +183,24 @@ def _remove_incomplete_candle(df, interval):
     now = datetime.now(timezone.utc)
 
     if interval == "15m":
-        cutoff = pd.Timestamp(
-            now - timedelta(minutes=15)
+        # Las velas llevan como timestamp su hora de inicio.
+        # Conservamos únicamente velas cuyo periodo de 15m
+        # ya ha terminado.
+        current_period_start = now.replace(
+            minute=(now.minute // 15) * 15,
+            second=0,
+            microsecond=0,
         )
 
-        return df[df.index <= cutoff]
+        last_completed_start = pd.Timestamp(
+            current_period_start - timedelta(minutes=15)
+        )
+
+        return df[df.index <= last_completed_start]
 
     if interval == "1d":
+        # Las velas diarias están etiquetadas a las 00:00 UTC.
+        # Excluimos la vela del día que todavía está en curso.
         today = now.date()
         return df[df.index.date < today]
 
@@ -518,6 +529,11 @@ def is_data_fresh(
     timestamp = get_data_timestamp(df)
 
     if timestamp is None:
+        logger.warning(
+            "DATA FRESHNESS REJECTED | %s | %s | sin timestamp",
+            asset,
+            interval,
+        )
         return False
 
     now = pd.Timestamp.now(tz="UTC")
@@ -527,11 +543,32 @@ def is_data_fresh(
     ).total_seconds() / 60
 
     if age_minutes < 0:
+        logger.warning(
+            "DATA FRESHNESS REJECTED | %s | %s | timestamp futuro: %s",
+            asset,
+            interval,
+            timestamp,
+        )
         return False
 
     if asset in CRYPTO_ASSETS:
-        limit = 30 if interval == "15m" else 48 * 60
+        # El timestamp representa el inicio de la vela.
+        # Damos margen para el cierre y la publicación del proveedor.
+        limit = 45 if interval == "15m" else 48 * 60
     else:
+        # Los mercados tradicionales pueden estar cerrados.
         limit = max(max_age_minutes, 72 * 60)
 
-    return age_minutes <= limit
+    is_fresh = age_minutes <= limit
+
+    logger.info(
+        "DATA FRESHNESS | %s | %s | timestamp=%s | age=%.1f min | limit=%.1f min | fresh=%s",
+        asset,
+        interval,
+        timestamp.isoformat(),
+        age_minutes,
+        limit,
+        is_fresh,
+    )
+
+    return is_fresh
