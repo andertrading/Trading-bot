@@ -10,7 +10,7 @@ from indicators import add_indicators
 from strategies import evaluate_signal_at
 
 
-VERSION = "3.2"
+VERSION = "3.3"
 
 PERIODS = {
     "15m": {"period": "60d", "max_bars": 32},
@@ -22,6 +22,7 @@ MIN_BARS = 220
 
 def get_assets():
     """Obtiene los activos habilitados en config.py."""
+
     result = []
 
     for name, settings in ASSETS.items():
@@ -39,8 +40,63 @@ def get_assets():
     return result
 
 
+def _normalize_columns(data):
+    """Normaliza columnas de Yahoo Finance."""
+
+    if not isinstance(data.columns, pd.MultiIndex):
+        return data
+
+    fields = {
+        "Open",
+        "High",
+        "Low",
+        "Close",
+        "Volume",
+    }
+
+    for level in range(data.columns.nlevels):
+        values = set(data.columns.get_level_values(level))
+        if fields.intersection(values):
+            data.columns = data.columns.get_level_values(level)
+            return data
+
+    return data
+
+
+def _valid_ohlc(data):
+    """Comprueba que los precios OHLC sean válidos."""
+
+    required = ["Open", "High", "Low", "Close"]
+
+    if not all(column in data.columns for column in required):
+        return False
+
+    for column in required:
+        values = data[column].to_numpy(dtype=float)
+
+        if not np.isfinite(values).all():
+            return False
+
+        if (values <= 0).any():
+            return False
+
+    invalid_candles = (
+        (data["High"] < data["Low"])
+        | (data["High"] < data["Open"])
+        | (data["High"] < data["Close"])
+        | (data["Low"] > data["Open"])
+        | (data["Low"] > data["Close"])
+    )
+
+    return not invalid_candles.any()
+
+
 def download_history(ticker, interval):
-    """Descarga histórico de Yahoo Finance."""
+    """Descarga y valida el histórico de Yahoo Finance."""
+
+    if interval not in PERIODS:
+        return None
+
     settings = PERIODS[interval]
 
     try:
@@ -59,27 +115,45 @@ def download_history(ticker, interval):
     if data is None or data.empty:
         return None
 
-    if isinstance(data.columns, pd.MultiIndex):
-        data.columns = data.columns.get_level_values(0)
+    data = _normalize_columns(data)
 
-    required = ["Open", "High", "Low", "Close", "Volume"]
+    required = ["Open", "High", "Low", "Close"]
 
     if not all(column in data.columns for column in required):
         return None
 
-    data = data[required].copy()
+    columns = required.copy()
 
-    for column in required:
+    if "Volume" in data.columns:
+        columns.append("Volume")
+
+    data = data[columns].copy()
+
+    for column in columns:
         data[column] = pd.to_numeric(
-            data[column], errors="coerce"
+            data[column],
+            errors="coerce",
         )
 
-    data = data.replace([np.inf, -np.inf], np.nan)
+    data = data.replace(
+        [np.inf, -np.inf],
+        np.nan,
+    )
+
+    # Los precios son obligatorios; el volumen es opcional.
     data = data.dropna(subset=required)
-    data = data[~data.index.duplicated(keep="last")]
+
+    data = data[
+        ~data.index.duplicated(keep="last")
+    ]
+
     data = data.sort_index()
 
-    # Excluimos la última vela por si está incompleta.
+    if not _valid_ohlc(data):
+        return None
+
+    # Excluimos la última vela recibida para evitar
+    # utilizar una vela que pudiera estar incompleta.
     if len(data) > 1:
         data = data.iloc[:-1]
 
@@ -94,6 +168,9 @@ def run_backtest(asset, ticker, interval):
     Backtest con los mismos indicadores y reglas de señal
     que utiliza el análisis en directo.
     """
+
+    if interval not in PERIODS:
+        return [], "Temporalidad no admitida"
 
     data = download_history(ticker, interval)
 
@@ -114,6 +191,7 @@ def run_backtest(asset, ticker, interval):
     i = MIN_BARS - 1
 
     while i < len(df) - 1:
+
         signal = evaluate_signal_at(
             data=df,
             asset=asset,
@@ -130,27 +208,39 @@ def run_backtest(asset, ticker, interval):
         entry_row = df.iloc[entry_index]
 
         try:
+            signal_close = float(signal_row["Close"])
             entry = float(entry_row["Open"])
             atr = float(signal_row["ATR"])
-        except (TypeError, ValueError, KeyError):
+            score = int(signal["score"])
+        except (TypeError, ValueError, KeyError, OverflowError):
             i += 1
             continue
 
-        if (
-            not np.isfinite(entry)
-            or not np.isfinite(atr)
-            or entry <= 0
-            or atr <= 0
+        if not all(
+            np.isfinite(value)
+            for value in (signal_close, entry, atr)
         ):
             i += 1
             continue
 
+        if signal_close <= 0 or entry <= 0 or atr <= 0:
+            i += 1
+            continue
+
         # Entrada en la apertura de la vela siguiente.
+        # Stop y objetivo se calculan desde el precio real de entrada.
         stop = entry - 1.5 * atr
         target = entry + 3.0 * atr
+
         initial_risk = entry - stop
 
-        if initial_risk <= 0 or stop <= 0:
+        if (
+            not np.isfinite(stop)
+            or not np.isfinite(target)
+            or initial_risk <= 0
+            or stop <= 0
+            or target <= entry
+        ):
             i += 1
             continue
 
@@ -164,6 +254,7 @@ def run_backtest(asset, ticker, interval):
         exit_index = last_index
 
         for j in range(entry_index, last_index + 1):
+
             candle = df.iloc[j]
 
             try:
@@ -183,7 +274,7 @@ def run_backtest(asset, ticker, interval):
             ):
                 continue
 
-            # Hueco bajista: ejecución al precio de apertura.
+            # Hueco bajista: salida al precio de apertura.
             if candle_open <= stop:
                 exit_price = candle_open
                 exit_reason = "STOP_GAP"
@@ -197,8 +288,8 @@ def run_backtest(asset, ticker, interval):
                 exit_index = j
                 break
 
-            # Si se alcanzan ambos niveles en la misma vela,
-            # se prioriza el stop.
+            # Si se tocan ambos niveles en la misma vela,
+            # se prioriza el stop por prudencia.
             if candle_low <= stop:
                 exit_price = stop
                 exit_reason = "STOP"
@@ -212,15 +303,25 @@ def run_backtest(asset, ticker, interval):
                 break
 
         if exit_price is None:
-            exit_price = float(df.iloc[last_index]["Close"])
+            try:
+                exit_price = float(df.iloc[last_index]["Close"])
+            except (TypeError, ValueError, KeyError):
+                i = last_index + 1
+                continue
+
             exit_reason = "MAX_HOLD"
 
-        if not np.isfinite(exit_price):
-            i += 1
+        if not np.isfinite(exit_price) or exit_price <= 0:
+            i = exit_index + 1
             continue
 
         pnl_per_unit = exit_price - entry
         result_r = pnl_per_unit / initial_risk
+
+        if not np.isfinite(result_r):
+            i = exit_index + 1
+            continue
+
         duration_bars = exit_index - entry_index + 1
 
         trades.append({
@@ -230,8 +331,13 @@ def run_backtest(asset, ticker, interval):
             "signal_time": str(df.index[i]),
             "entry_time": str(df.index[entry_index]),
             "exit_time": str(df.index[exit_index]),
-            "score": signal.get("score"),
+            "score": score,
+            "signal_reference": round(signal_close, 6),
             "entry": round(entry, 6),
+            "entry_gap_pct": round(
+                (entry / signal_close - 1) * 100,
+                4,
+            ),
             "stop": round(stop, 6),
             "target": round(target, 6),
             "exit": round(exit_price, 6),
@@ -250,50 +356,71 @@ def run_backtest(asset, ticker, interval):
     return trades, None
 
 
-def calculate_metrics(trades):
-    """Calcula métricas de una secuencia independiente."""
+def _empty_metrics():
+    return {
+        "trades": 0,
+        "wins": 0,
+        "losses": 0,
+        "win_rate_pct": 0,
+        "total_R": 0,
+        "average_R": 0,
+        "profit_factor_R": None,
+        "max_drawdown_R": 0,
+        "average_duration_bars": 0,
+    }
 
-    if not trades:
-        return {
-            "trades": 0,
-            "wins": 0,
-            "losses": 0,
-            "win_rate_pct": 0,
-            "total_R": 0,
-            "average_R": 0,
-            "profit_factor_R": None,
-            "max_drawdown_R": 0,
-            "average_duration_bars": 0,
-        }
 
-    results = np.array(
-        [trade["result_R"] for trade in trades],
-        dtype=float,
-    )
-
-    results = results[np.isfinite(results)]
+def _calculate_drawdown(results):
+    """Drawdown de la secuencia de operaciones cerradas."""
 
     if len(results) == 0:
-        return {
-            "trades": 0,
-            "wins": 0,
-            "losses": 0,
-            "win_rate_pct": 0,
-            "total_R": 0,
-            "average_R": 0,
-            "profit_factor_R": None,
-            "max_drawdown_R": 0,
-            "average_duration_bars": 0,
-        }
-
-    wins = results[results > 0]
-    losses = results[results < 0]
+        return 0.0
 
     equity = np.cumsum(results)
     peaks = np.maximum.accumulate(
         np.maximum(equity, 0)
     )
+
     drawdown = peaks - equity
+
+    return float(drawdown.max())
+
+
+def calculate_metrics(trades):
+    """Calcula métricas de una secuencia independiente."""
+
+    if not trades:
+        return _empty_metrics()
+
+    valid_trades = []
+
+    for trade in trades:
+        try:
+            result = float(trade["result_R"])
+            duration = float(trade["duration_bars"])
+        except (TypeError, ValueError, KeyError):
+            continue
+
+        if not np.isfinite(result) or not np.isfinite(duration):
+            continue
+
+        valid_trades.append((result, duration))
+
+    if not valid_trades:
+        return _empty_metrics()
+
+    results = np.array(
+        [item[0] for item in valid_trades],
+        dtype=float,
+    )
+
+    durations = np.array(
+        [item[1] for item in valid_trades],
+        dtype=float,
+    )
+
+    wins = results[results > 0]
+    losses = results[results < 0]
 
     gross_profit = float(wins.sum())
     gross_loss = abs(float(losses.sum()))
@@ -304,18 +431,13 @@ def calculate_metrics(trades):
         else None
     )
 
-    durations = [
-        trade["duration_bars"]
-        for trade in trades
-        if np.isfinite(trade["duration_bars"])
-    ]
-
     return {
         "trades": len(results),
         "wins": len(wins),
         "losses": len(losses),
         "win_rate_pct": round(
-            len(wins) / len(results) * 100, 2
+            len(wins) / len(results) * 100,
+            2,
         ),
         "total_R": round(float(results.sum()), 4),
         "average_R": round(float(results.mean()), 4),
@@ -325,20 +447,22 @@ def calculate_metrics(trades):
             else None
         ),
         "max_drawdown_R": round(
-            float(drawdown.max()), 4
+            _calculate_drawdown(results),
+            4,
         ),
         "average_duration_bars": round(
-            float(np.mean(durations)), 2
-        ) if durations else 0,
+            float(durations.mean()),
+            2,
+        ),
     }
 
 
 def generate_operations_summary(trades):
     """
-    Genera un resumen compacto por activo, temporalidad y mes.
+    Genera un resumen por activo, temporalidad y mes.
 
-    El drawdown se calcula sobre la secuencia de operaciones
-    de cada grupo, no como drawdown de una cartera real.
+    El drawdown corresponde a operaciones cerradas.
+    No representa el drawdown de una cartera real.
     """
 
     columns = [
@@ -372,7 +496,8 @@ def generate_operations_summary(trades):
     df = pd.DataFrame(trades)
 
     df["result_R"] = pd.to_numeric(
-        df["result_R"], errors="coerce"
+        df["result_R"],
+        errors="coerce",
     )
 
     df["exit_time"] = pd.to_datetime(
@@ -381,27 +506,39 @@ def generate_operations_summary(trades):
         utc=True,
     )
 
-    df = df.dropna(subset=["result_R", "exit_time"])
+    df = df.dropna(
+        subset=["result_R", "exit_time"]
+    )
+
+    df = df[
+        np.isfinite(df["result_R"].to_numpy(dtype=float))
+    ]
+
     df = df.sort_values("exit_time")
 
     summaries = []
 
     def summarize(group, summary_type, asset, timeframe, period):
+
         group = group.sort_values("exit_time")
 
         results = pd.to_numeric(
-            group["result_R"], errors="coerce"
+            group["result_R"],
+            errors="coerce",
         ).dropna()
+
+        if results.empty:
+            return
+
+        results = results[
+            np.isfinite(results.to_numpy(dtype=float))
+        ]
 
         if results.empty:
             return
 
         wins = results[results > 0]
         losses = results[results < 0]
-
-        equity = results.cumsum()
-        peaks = equity.cummax().clip(lower=0)
-        drawdown = peaks - equity
 
         max_losing_streak = 0
         current_losing_streak = 0
@@ -436,7 +573,8 @@ def generate_operations_summary(trades):
             "ganadoras": len(wins),
             "perdedoras": len(losses),
             "acierto_pct": round(
-                len(wins) / len(results) * 100, 2
+                len(wins) / len(results) * 100,
+                2,
             ),
             "resultado_R": round(float(results.sum()), 4),
             "media_R": round(float(results.mean()), 4),
@@ -449,17 +587,23 @@ def generate_operations_summary(trades):
                 if len(losses) else None
             ),
             "mejor_operacion_R": round(
-                float(results.max()), 4
+                float(results.max()),
+                4,
             ),
             "peor_operacion_R": round(
-                float(results.min()), 4
+                float(results.min()),
+                4,
             ),
             "profit_factor": (
                 round(profit_factor, 4)
-                if profit_factor is not None else None
+                if profit_factor is not None
+                else None
             ),
             "drawdown_max_R": round(
-                float(drawdown.max()), 4
+                _calculate_drawdown(
+                    results.to_numpy(dtype=float)
+                ),
+                4,
             ),
             "racha_perdedora_max": max_losing_streak,
             "STOP": int(reasons.get("STOP", 0)),
@@ -495,7 +639,10 @@ def generate_operations_summary(trades):
             month,
         )
 
-    return pd.DataFrame(summaries, columns=columns)
+    return pd.DataFrame(
+        summaries,
+        columns=columns,
+    )
 
 
 def main():
@@ -516,6 +663,7 @@ def main():
 
     for asset, ticker in assets:
         for interval in ("15m", "1d"):
+
             print(f"Analizando {asset} ({interval})...")
 
             try:
@@ -531,6 +679,7 @@ def main():
                         "timeframe": interval,
                         "error": error,
                     })
+
                     print(f"  Sin resultados: {error}")
                     continue
 
@@ -555,27 +704,24 @@ def main():
                     "timeframe": interval,
                     "error": str(exc),
                 })
+
                 print(f"  Error: {exc}")
 
-    # CSV detallado de operaciones.
     pd.DataFrame(all_trades).to_csv(
         "operaciones_backtest_v3.csv",
         index=False,
     )
 
-    # CSV de métricas por activo y temporalidad.
     pd.DataFrame(summaries).to_csv(
         "resultados_backtest_v3.csv",
         index=False,
     )
 
-    # CSV de errores.
     pd.DataFrame(errors).to_csv(
         "errores_backtest_v3.csv",
         index=False,
     )
 
-    # Nuevo CSV compacto de análisis.
     operations_summary = generate_operations_summary(
         all_trades
     )
