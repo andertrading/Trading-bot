@@ -33,12 +33,31 @@ class TestRiskManager(unittest.TestCase):
             float("nan"),
             float("inf"),
             float("-inf"),
+            -1,
+            101,
+            True,
         ):
             with self.subTest(score=score):
                 self.assertEqual(
                     risk_pct_for_score(score),
                     0.0,
                 )
+
+    def test_string_score_is_supported(self):
+        self.assertEqual(
+            risk_pct_for_score("85"),
+            0.005,
+        )
+
+    def test_risk_tier_cannot_exceed_hard_limit(self):
+        with patch(
+            "risk_manager.RISK_TIERS",
+            {"A": 0.05},
+        ):
+            self.assertEqual(
+                risk_pct_for_score(95),
+                0.01,
+            )
 
     def test_position_sizing_is_disabled(self):
         result = calculate_position_size(
@@ -47,6 +66,7 @@ class TestRiskManager(unittest.TestCase):
             score=85,
             quote_to_usd=1,
             portfolio_risk_usd=0,
+            costs_per_unit_quote=0,
         )
 
         self.assertEqual(result["status"], "BLOCKED")
@@ -60,6 +80,19 @@ class TestRiskManager(unittest.TestCase):
                 score=85,
                 quote_to_usd=None,
                 portfolio_risk_usd=0,
+                costs_per_unit_quote=0,
+            )
+
+        self.assertEqual(result["status"], "BLOCKED")
+
+    def test_missing_costs_blocks_size(self):
+        with patch("risk_manager.ALLOW_POSITION_SIZING", True):
+            result = calculate_position_size(
+                entry=100,
+                stop=95,
+                score=85,
+                quote_to_usd=1,
+                portfolio_risk_usd=0,
             )
 
         self.assertEqual(result["status"], "BLOCKED")
@@ -69,6 +102,8 @@ class TestRiskManager(unittest.TestCase):
             float("nan"),
             float("inf"),
             float("-inf"),
+            0,
+            -1,
         )
 
         with patch("risk_manager.ALLOW_POSITION_SIZING", True):
@@ -80,12 +115,128 @@ class TestRiskManager(unittest.TestCase):
                         score=85,
                         quote_to_usd=1,
                         portfolio_risk_usd=0,
+                        costs_per_unit_quote=0,
                     )
 
                     self.assertEqual(
                         result["status"],
                         "BLOCKED",
                     )
+
+    def test_invalid_costs_block_position_size(self):
+        invalid_values = (
+            float("nan"),
+            float("inf"),
+            float("-inf"),
+            -1,
+        )
+
+        with patch("risk_manager.ALLOW_POSITION_SIZING", True):
+            for value in invalid_values:
+                with self.subTest(value=value):
+                    result = calculate_position_size(
+                        entry=100,
+                        stop=95,
+                        score=85,
+                        quote_to_usd=1,
+                        portfolio_risk_usd=0,
+                        costs_per_unit_quote=value,
+                    )
+
+                    self.assertEqual(
+                        result["status"],
+                        "BLOCKED",
+                    )
+
+    def test_theoretical_position_size_in_usd(self):
+        with patch("risk_manager.ALLOW_POSITION_SIZING", True):
+            result = calculate_position_size(
+                entry=100,
+                stop=95,
+                score=85,
+                capital_usd=1000,
+                quote_to_usd=1,
+                portfolio_risk_usd=0,
+                costs_per_unit_quote=0,
+            )
+
+        self.assertEqual(
+            result["status"],
+            "SIMULACION_NO_VALIDADA",
+        )
+        self.assertFalse(result["validated"])
+        self.assertEqual(result["currency"], "USD")
+        self.assertAlmostEqual(result["risk_pct"], 0.005)
+        self.assertAlmostEqual(result["risk_amount_usd"], 5)
+        self.assertAlmostEqual(result["position_size"], 1)
+
+    def test_position_size_includes_costs(self):
+        with patch("risk_manager.ALLOW_POSITION_SIZING", True):
+            result = calculate_position_size(
+                entry=100,
+                stop=95,
+                score=85,
+                capital_usd=1000,
+                quote_to_usd=1,
+                portfolio_risk_usd=0,
+                costs_per_unit_quote=1,
+            )
+
+        self.assertAlmostEqual(
+            result["risk_per_unit_usd"],
+            6,
+        )
+        self.assertAlmostEqual(
+            result["position_size"],
+            5 / 6,
+        )
+
+    def test_position_size_respects_remaining_portfolio_risk(self):
+        with patch("risk_manager.ALLOW_POSITION_SIZING", True):
+            result = calculate_position_size(
+                entry=100,
+                stop=95,
+                score=85,
+                capital_usd=1000,
+                quote_to_usd=1,
+                portfolio_risk_usd=28,
+                costs_per_unit_quote=0,
+            )
+
+        self.assertAlmostEqual(
+            result["max_portfolio_risk_usd"],
+            30,
+        )
+        self.assertAlmostEqual(
+            result["remaining_portfolio_risk_usd"],
+            2,
+        )
+        self.assertAlmostEqual(
+            result["risk_amount_usd"],
+            2,
+        )
+        self.assertAlmostEqual(
+            result["position_size"],
+            0.4,
+        )
+
+    def test_portfolio_limit_cannot_exceed_three_percent(self):
+        with patch("risk_manager.ALLOW_POSITION_SIZING", True):
+            with patch("risk_manager.MAX_PORTFOLIO_RISK", 0.10):
+                result = calculate_position_size(
+                    entry=100,
+                    stop=95,
+                    score=85,
+                    capital_usd=1000,
+                    quote_to_usd=1,
+                    portfolio_risk_usd=0,
+                    costs_per_unit_quote=0,
+                )
+
+        self.assertAlmostEqual(
+            result["max_portfolio_risk_usd"],
+            30,
+        )
 
     def test_unknown_portfolio_blocks_trading(self):
         result = get_portfolio_status(
