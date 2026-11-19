@@ -6,7 +6,11 @@ import pandas as pd
 def calculate_rsi(series, period=14):
     """Calcula RSI mediante suavizado de Wilder."""
 
-    delta = series.diff()
+    if period <= 0:
+        raise ValueError("El periodo RSI debe ser positivo.")
+
+    values = pd.to_numeric(series, errors="coerce")
+    delta = values.diff()
 
     gains = delta.clip(lower=0)
     losses = -delta.clip(upper=0)
@@ -14,39 +18,41 @@ def calculate_rsi(series, period=14):
     avg_gain = gains.ewm(
         alpha=1 / period,
         min_periods=period,
-        adjust=False
+        adjust=False,
     ).mean()
 
     avg_loss = losses.ewm(
         alpha=1 / period,
         min_periods=period,
-        adjust=False
+        adjust=False,
     ).mean()
 
     rs = avg_gain / avg_loss
-
     rsi = 100 - (100 / (1 + rs))
 
     rsi = rsi.mask(
         (avg_loss == 0) & (avg_gain > 0),
-        100
+        100,
     )
 
     rsi = rsi.mask(
         (avg_gain == 0) & (avg_loss > 0),
-        0
+        0,
     )
 
     rsi = rsi.mask(
         (avg_gain == 0) & (avg_loss == 0),
-        50
+        50,
     )
 
     return rsi
 
 
 def calculate_atr(df, period=14):
-    """Calcula Average True Range."""
+    """Calcula Average True Range mediante suavizado de Wilder."""
+
+    if period <= 0:
+        raise ValueError("El periodo ATR debe ser positivo.")
 
     previous_close = df["Close"].shift(1)
 
@@ -56,7 +62,7 @@ def calculate_atr(df, period=14):
             (df["High"] - previous_close).abs(),
             (df["Low"] - previous_close).abs(),
         ],
-        axis=1
+        axis=1,
     )
 
     true_range = ranges.max(axis=1)
@@ -64,7 +70,7 @@ def calculate_atr(df, period=14):
     return true_range.ewm(
         alpha=1 / period,
         min_periods=period,
-        adjust=False
+        adjust=False,
     ).mean()
 
 
@@ -72,16 +78,42 @@ def add_indicators(df):
     """
     Añade indicadores técnicos al histórico.
     No modifica el DataFrame original.
+    El volumen es opcional.
     """
 
-    if df is None or df.empty:
+    if df is None or not isinstance(df, pd.DataFrame) or df.empty:
         return None
 
     result = df.copy()
 
-    required = ["Open", "High", "Low", "Close", "Volume"]
+    required = ["Open", "High", "Low", "Close"]
 
     if not all(column in result.columns for column in required):
+        return None
+
+    # Validación y conversión de precios.
+    for column in required:
+        result[column] = pd.to_numeric(
+            result[column],
+            errors="coerce",
+        )
+
+        if not np.isfinite(result[column].to_numpy(dtype=float)).all():
+            return None
+
+        if (result[column] <= 0).any():
+            return None
+
+    # Coherencia de las velas OHLC.
+    invalid_candles = (
+        (result["High"] < result["Low"])
+        | (result["High"] < result["Open"])
+        | (result["High"] < result["Close"])
+        | (result["Low"] > result["Open"])
+        | (result["Low"] > result["Close"])
+    )
+
+    if invalid_candles.any():
         return None
 
     close = result["Close"]
@@ -89,17 +121,17 @@ def add_indicators(df):
     # Medias móviles exponenciales.
     result["EMA20"] = close.ewm(
         span=20,
-        adjust=False
+        adjust=False,
     ).mean()
 
     result["EMA50"] = close.ewm(
         span=50,
-        adjust=False
+        adjust=False,
     ).mean()
 
     result["EMA200"] = close.ewm(
         span=200,
-        adjust=False
+        adjust=False,
     ).mean()
 
     # RSI.
@@ -108,19 +140,19 @@ def add_indicators(df):
     # MACD.
     ema12 = close.ewm(
         span=12,
-        adjust=False
+        adjust=False,
     ).mean()
 
     ema26 = close.ewm(
         span=26,
-        adjust=False
+        adjust=False,
     ).mean()
 
     result["MACD"] = ema12 - ema26
 
     result["MACD_SIGNAL"] = result["MACD"].ewm(
         span=9,
-        adjust=False
+        adjust=False,
     ).mean()
 
     result["MACD_HIST"] = (
@@ -134,14 +166,31 @@ def add_indicators(df):
         result["ATR"] / close
     ) * 100
 
-    # Volumen relativo.
-    result["VOLUME_AVG20"] = (
-        result["Volume"].rolling(20).mean()
-    )
+    # Volumen relativo: opcional.
+    if "Volume" in result.columns:
+        result["Volume"] = pd.to_numeric(
+            result["Volume"],
+            errors="coerce",
+        )
 
-    result["RELATIVE_VOLUME"] = (
-        result["Volume"] / result["VOLUME_AVG20"].replace(0, np.nan)
-    )
+        valid_volume = (
+            np.isfinite(result["Volume"].to_numpy(dtype=float))
+            & (result["Volume"] >= 0).to_numpy()
+        )
+
+        result.loc[~valid_volume, "Volume"] = np.nan
+
+        result["VOLUME_AVG20"] = (
+            result["Volume"].rolling(20).mean()
+        )
+
+        result["RELATIVE_VOLUME"] = (
+            result["Volume"]
+            / result["VOLUME_AVG20"].replace(0, np.nan)
+        )
+    else:
+        result["VOLUME_AVG20"] = np.nan
+        result["RELATIVE_VOLUME"] = np.nan
 
     # Máximos y mínimos de las 20 velas anteriores.
     # Se desplazan una vela para evitar anticipar información.
