@@ -33,10 +33,13 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Ejecutar todas las pruebas
+      - name: Ejecutar tests de la raíz
+        run: |
+          python -m unittest discover -s . -p "test_*.py" -v
+
+      - name: Ejecutar tests de la carpeta tests
         run: |
           python -m unittest discover -s tests -p "test_*.py" -v
-          python -m unittest test_indicators -v
 
       - name: Comprobar arranque de Bot.py
         run: |
