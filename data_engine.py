@@ -3,7 +3,13 @@ import logging
 import os
 import threading
 import time
-from datetime import datetime, timedelta, time as datetime_time, timezone
+from datetime import (
+    date,
+    datetime,
+    timedelta,
+    time as datetime_time,
+    timezone,
+)
 from zoneinfo import ZoneInfo
 
 import numpy as np
@@ -82,9 +88,167 @@ _api_lock = threading.Lock()
 _last_api_request = 0.0
 
 
-def _asset_config(asset):
-    """Solo permite activos habilitados expresamente."""
+# ---------------------------------------------------------------------
+# CALENDARIOS DE MERCADO
+# ---------------------------------------------------------------------
 
+def _nth_weekday(year, month, weekday, occurrence):
+    first = date(year, month, 1)
+    offset = (weekday - first.weekday()) % 7
+    return first + timedelta(days=offset + 7 * (occurrence - 1))
+
+
+def _last_weekday(year, month, weekday):
+    if month == 12:
+        last = date(year + 1, 1, 1) - timedelta(days=1)
+    else:
+        last = date(year, month + 1, 1) - timedelta(days=1)
+
+    return last - timedelta(days=(last.weekday() - weekday) % 7)
+
+
+def _easter_sunday(year):
+    """Algoritmo gregoriano de Pascua."""
+
+    a = year % 19
+    b = year // 100
+    c = year % 100
+    d = b // 4
+    e = b % 4
+    f = (b + 8) // 25
+    g = (b - f + 1) // 3
+    h = (19 * a + b - d - g + 15) % 30
+    i = c // 4
+    k = c % 4
+    l = (32 + 2 * e + 2 * i - h - k) % 7
+    m = (a + 11 * h + 22 * l) // 451
+    month = (h + l - 7 * m + 114) // 31
+    day = ((h + l - 7 * m + 114) % 31) + 1
+
+    return date(year, month, day)
+
+
+def _observed_us_holiday(day):
+    if day.weekday() == 5:
+        return day - timedelta(days=1)
+
+    if day.weekday() == 6:
+        return day + timedelta(days=1)
+
+    return day
+
+
+def _us_holidays(year):
+    holidays = {
+        _observed_us_holiday(date(year, 1, 1)),
+        _nth_weekday(year, 1, 0, 3),       # Martin Luther King Jr.
+        _nth_weekday(year, 2, 0, 3),       # Presidents' Day
+        _easter_sunday(year) - timedelta(days=2),  # Good Friday
+        _last_weekday(year, 5, 0),         # Memorial Day
+        _observed_us_holiday(date(year, 6, 19)),   # Juneteenth
+        _observed_us_holiday(date(year, 7, 4)),
+        _nth_weekday(year, 9, 0, 1),       # Labor Day
+        _nth_weekday(year, 11, 3, 4),      # Thanksgiving
+        _observed_us_holiday(date(year, 12, 25)),
+    }
+
+    if year < 2022:
+        holidays.discard(
+            _observed_us_holiday(date(year, 6, 19))
+        )
+
+    return holidays
+
+
+def _uk_substitute_holidays(year):
+    holidays = set()
+
+    for month, day in ((1, 1), (12, 25), (12, 26)):
+        original = date(year, month, day)
+
+        if original.weekday() == 5:
+            holidays.add(original + timedelta(days=2))
+        elif original.weekday() == 6:
+            holidays.add(original + timedelta(days=2))
+        else:
+            holidays.add(original)
+
+    return holidays
+
+
+def _uk_holidays(year):
+    easter = _easter_sunday(year)
+
+    holidays = _uk_substitute_holidays(year)
+    holidays.update({
+        easter - timedelta(days=2),       # Good Friday
+        easter + timedelta(days=1),       # Easter Monday
+        _nth_weekday(year, 5, 0, 1),      # Early May bank holiday
+        _last_weekday(year, 5, 0),        # Spring bank holiday
+        _last_weekday(year, 8, 0),        # Summer bank holiday
+    })
+
+    return holidays
+
+
+def _market_for_asset(asset):
+    if asset in LONDON_ASSETS:
+        return MARKET_CONFIG["LONDON"]
+
+    return MARKET_CONFIG["US"]
+
+
+def _session_for_asset(asset):
+    market = _market_for_asset(asset)
+
+    return (
+        ZoneInfo(market["timezone"]),
+        market["open"],
+        market["close"],
+    )
+
+
+def _is_market_holiday(day, asset):
+    if asset in CRYPTO_ASSETS:
+        return False
+
+    if asset in LONDON_ASSETS:
+        return day in _uk_holidays(day.year)
+
+    return day in _us_holidays(day.year)
+
+
+def _is_trading_day(day, asset):
+    return (
+        day.weekday() < 5
+        and not _is_market_holiday(day, asset)
+    )
+
+
+def _previous_trading_day(day, asset):
+    candidate = day - timedelta(days=1)
+
+    while not _is_trading_day(candidate, asset):
+        candidate -= timedelta(days=1)
+
+    return candidate
+
+
+# Compatibilidad con el nombre utilizado anteriormente.
+def _previous_weekday(day):
+    candidate = day - timedelta(days=1)
+
+    while candidate.weekday() >= 5:
+        candidate -= timedelta(days=1)
+
+    return candidate
+
+
+# ---------------------------------------------------------------------
+# CONFIGURACION Y CACHÉ
+# ---------------------------------------------------------------------
+
+def _asset_config(asset):
     config = ASSETS.get(asset)
 
     if not isinstance(config, dict):
@@ -94,13 +258,6 @@ def _asset_config(asset):
         return None
 
     return config
-
-
-def _market_for_asset(asset):
-    if asset in LONDON_ASSETS:
-        return MARKET_CONFIG["LONDON"]
-
-    return MARKET_CONFIG["US"]
 
 
 def _get_cached_data(asset, interval):
@@ -134,10 +291,26 @@ def _save_cached_data(asset, interval, dataframe):
         )
 
 
-def _normalise_dataframe(df):
-    """Normaliza y valida los datos OHLCV."""
+# ---------------------------------------------------------------------
+# NORMALIZACION E INTEGRIDAD OHLCV
+# ---------------------------------------------------------------------
 
-    if df is None or df.empty:
+def _normalise_dataframe(df):
+    """
+    Normaliza OHLCV.
+
+    Política estricta:
+    - Una sola vela OHLC inválida rechaza el histórico.
+    - Un timestamp inválido rechaza el histórico.
+    - Duplicados idénticos se consolidan.
+    - Duplicados contradictorios rechazan el histórico.
+    - El volumen ausente o inválido se sustituye por cero.
+    """
+
+    if df is None or not isinstance(df, pd.DataFrame):
+        return None
+
+    if df.empty:
         return None
 
     df = df.copy()
@@ -175,11 +348,9 @@ def _normalise_dataframe(df):
         for col in df.columns
     ]
 
-    # Evitar columnas duplicadas tras normalizar los nombres.
-    df = df.loc[
-        :,
-        ~pd.Index(df.columns).duplicated(keep="last"),
-    ]
+    if pd.Index(df.columns).duplicated().any():
+        logger.error("Columnas duplicadas tras normalización")
+        return None
 
     required = ["Open", "High", "Low", "Close"]
 
@@ -198,56 +369,73 @@ def _normalise_dataframe(df):
             errors="coerce",
         )
 
-    # Evitar que precios infinitos contaminen los indicadores.
-    df = df.replace(
+    # El volumen no es obligatorio.
+    df["Volume"] = df["Volume"].replace(
         [np.inf, -np.inf],
         np.nan,
     )
-
-    # Los precios OHLC son obligatorios.
-    df = df.dropna(
-        subset=required,
-    )
-
-    # El volumen puede faltar, pero no debe ser negativo
-    # ni contener valores infinitos.
     df["Volume"] = df["Volume"].fillna(0.0)
     df.loc[df["Volume"] < 0, "Volume"] = 0.0
 
-    if not isinstance(df.index, pd.DatetimeIndex):
-        df.index = pd.to_datetime(
-            df.index,
-            utc=True,
-            errors="coerce",
-        )
-
-    df = df[~df.index.isna()]
-
-    if df.empty:
-        return None
-
-    if df.index.tz is None:
-        df.index = df.index.tz_localize("UTC")
-    else:
-        df.index = df.index.tz_convert("UTC")
-
-    df = df[
-        ~df.index.duplicated(keep="last")
-    ]
-
-    df = df.sort_index()
-
-    # Todos los precios deben ser finitos y positivos.
+    # Los precios OHLC son obligatorios y no se pueden reparar.
     for col in required:
         values = df[col].to_numpy(dtype=float)
 
         if not np.isfinite(values).all():
+            logger.error(
+                "HISTÓRICO RECHAZADO: precios ausentes o no finitos en %s",
+                col,
+            )
             return None
 
-        df = df[df[col] > 0]
+        if (values <= 0).any():
+            logger.error(
+                "HISTÓRICO RECHAZADO: precios no positivos en %s",
+                col,
+            )
+            return None
 
-    if df.empty:
+    # Normalización del índice temporal.
+    try:
+        if not isinstance(df.index, pd.DatetimeIndex):
+            parsed_index = pd.to_datetime(
+                df.index,
+                utc=True,
+                errors="coerce",
+            )
+            df.index = parsed_index
+        elif df.index.tz is None:
+            df.index = df.index.tz_localize("UTC")
+        else:
+            df.index = df.index.tz_convert("UTC")
+
+    except Exception:
+        logger.exception("No se pudo normalizar el índice temporal")
         return None
+
+    if df.index.isna().any():
+        logger.error(
+            "HISTÓRICO RECHAZADO: timestamps inválidos"
+        )
+        return None
+
+    # Los duplicados solo se aceptan si son idénticos.
+    duplicated = df.index.duplicated(keep=False)
+
+    if duplicated.any():
+        duplicate_rows = df.loc[duplicated]
+
+        for timestamp, group in duplicate_rows.groupby(level=0):
+            if len(group.drop_duplicates()) > 1:
+                logger.error(
+                    "HISTÓRICO RECHAZADO: timestamp duplicado conflictivo %s",
+                    timestamp,
+                )
+                return None
+
+        df = df[~df.index.duplicated(keep="last")]
+
+    df = df.sort_index()
 
     valid_ohlc = (
         (df["High"] >= df["Low"])
@@ -257,35 +445,44 @@ def _normalise_dataframe(df):
         & (df["Low"] <= df["Close"])
     )
 
-    df = df[valid_ohlc]
+    if not valid_ohlc.all():
+        invalid_count = int((~valid_ohlc).sum())
 
-    return df if not df.empty else None
+        logger.error(
+            "HISTÓRICO RECHAZADO: %s velas OHLC incoherentes",
+            invalid_count,
+        )
+        return None
 
-
-def _previous_weekday(day):
-    day = day - timedelta(days=1)
-
-    while day.weekday() >= 5:
-        day -= timedelta(days=1)
-
-    return day
+    return df[COLUMNS]
 
 
-def _session_for_asset(asset):
-    market = _market_for_asset(asset)
-
-    return (
-        ZoneInfo(market["timezone"]),
-        market["open"],
-        market["close"],
-    )
-
+# ---------------------------------------------------------------------
+# VELAS INCOMPLETAS Y HORARIOS
+# ---------------------------------------------------------------------
 
 def _last_expected_intraday_timestamp(asset, now_utc):
     tz, opening, closing = _session_for_asset(asset)
 
     now_local = now_utc.astimezone(tz)
     session_date = now_local.date()
+
+    if (
+        now_local.weekday() >= 5
+        or _is_market_holiday(session_date, asset)
+    ):
+        previous_day = _previous_trading_day(
+            session_date,
+            asset,
+        )
+
+        previous_close = datetime.combine(
+            previous_day,
+            closing,
+            tzinfo=tz,
+        )
+
+        return previous_close - timedelta(minutes=15)
 
     open_dt = datetime.combine(
         session_date,
@@ -299,30 +496,11 @@ def _last_expected_intraday_timestamp(asset, now_utc):
         tzinfo=tz,
     )
 
-    if now_local.weekday() >= 5 or now_local < open_dt:
-        previous_day = _previous_weekday(session_date)
-
-        while True:
-            previous_close = datetime.combine(
-                previous_day,
-                closing,
-                tzinfo=tz,
-            )
-
-            if previous_close.weekday() < 5:
-                return previous_close - timedelta(minutes=15)
-
-            previous_day = _previous_weekday(previous_day)
-
-    if now_local >= close_dt:
-        return close_dt - timedelta(minutes=15)
-
-    elapsed = (now_local - open_dt).total_seconds()
-
-    completed_intervals = int(elapsed // 900)
-
-    if completed_intervals <= 0:
-        previous_day = _previous_weekday(session_date)
+    if now_local < open_dt:
+        previous_day = _previous_trading_day(
+            session_date,
+            asset,
+        )
 
         previous_close = datetime.combine(
             previous_day,
@@ -332,12 +510,30 @@ def _last_expected_intraday_timestamp(asset, now_utc):
 
         return previous_close - timedelta(minutes=15)
 
-    expected = (
+    if now_local >= close_dt:
+        return close_dt - timedelta(minutes=15)
+
+    elapsed = (now_local - open_dt).total_seconds()
+    completed_intervals = int(elapsed // 900)
+
+    if completed_intervals <= 0:
+        previous_day = _previous_trading_day(
+            session_date,
+            asset,
+        )
+
+        previous_close = datetime.combine(
+            previous_day,
+            closing,
+            tzinfo=tz,
+        )
+
+        return previous_close - timedelta(minutes=15)
+
+    return (
         open_dt
         + timedelta(minutes=15 * (completed_intervals - 1))
     )
-
-    return expected
 
 
 def _remove_incomplete_candle(df, interval, asset=None):
@@ -374,14 +570,109 @@ def _remove_incomplete_candle(df, interval, asset=None):
         return df[df.index <= last_completed_start]
 
     if interval == "1d":
-        if asset is None:
-            return df
-
-        # Se excluye la vela correspondiente al día UTC actual.
+        # Se utiliza la fecha UTC como etiqueta de sesión del proveedor.
+        # La vela del día UTC actual se excluye conservadoramente.
         return df[df.index.date < now.date()]
 
     return df
 
+
+# ---------------------------------------------------------------------
+# DETECCION DE HUECOS INTRADIA
+# ---------------------------------------------------------------------
+
+def _has_intraday_gaps(df, asset):
+    """
+    Comprueba continuidad de velas de 15 minutos.
+
+    Cripto: mercado continuo 24/7.
+    Acciones y ETF: comprueba huecos dentro de cada sesión.
+    No exige velas durante noches, fines de semana ni festivos.
+    """
+
+    if df is None or df.empty:
+        return True
+
+    if len(df) < 2:
+        return False
+
+    timestamps = df.index.sort_values()
+
+    if asset in CRYPTO_ASSETS:
+        differences = timestamps.to_series().diff().dropna()
+
+        if not (differences == pd.Timedelta(minutes=15)).all():
+            logger.error(
+                "HUECO INTRADIA | %s | mercado cripto",
+                asset,
+            )
+            return True
+
+        return False
+
+    tz, opening, closing = _session_for_asset(asset)
+
+    local_index = timestamps.tz_convert(tz)
+    local_dates = pd.Series(
+        local_index.date,
+        index=timestamps,
+    )
+
+    for session_date, group in local_dates.groupby(local_dates):
+        if not _is_trading_day(session_date, asset):
+            logger.error(
+                "HISTÓRICO RECHAZADO: vela en día no hábil | %s | %s",
+                asset,
+                session_date,
+            )
+            return True
+
+        session_timestamps = pd.DatetimeIndex(
+            group.index
+        ).sort_values()
+
+        if len(session_timestamps) < 2:
+            continue
+
+        differences = session_timestamps.to_series().diff().dropna()
+
+        if not (differences == pd.Timedelta(minutes=15)).all():
+            logger.error(
+                "HUECO INTRADIA | %s | sesión=%s",
+                asset,
+                session_date,
+            )
+            return True
+
+        local_first = session_timestamps[0].tz_convert(tz)
+        local_last = session_timestamps[-1].tz_convert(tz)
+
+        open_dt = datetime.combine(
+            session_date,
+            opening,
+            tzinfo=tz,
+        )
+
+        close_dt = datetime.combine(
+            session_date,
+            closing,
+            tzinfo=tz,
+        )
+
+        if local_first < open_dt or local_last >= close_dt:
+            logger.error(
+                "HORARIO INTRADIA INVÁLIDO | %s | %s",
+                asset,
+                session_date,
+            )
+            return True
+
+    return False
+
+
+# ---------------------------------------------------------------------
+# REGISTRO DE DATOS
+# ---------------------------------------------------------------------
 
 def _log_dataframe_timestamps(provider, asset, interval, df):
     if df is None or df.empty:
@@ -411,6 +702,10 @@ def _log_dataframe_timestamps(provider, asset, interval, df):
         len(df),
     )
 
+
+# ---------------------------------------------------------------------
+# TWELVE DATA
+# ---------------------------------------------------------------------
 
 def _twelvedata_request(params):
     global _last_api_request
@@ -474,9 +769,8 @@ def _download_twelvedata(asset, config, interval):
 
         if not isinstance(meta, dict):
             logger.error(
-                "MONEDA NO VERIFICABLE | %s | %s | falta metadata",
+                "MONEDA NO VERIFICABLE | %s | falta metadata",
                 asset,
-                symbol,
             )
             return None
 
@@ -484,24 +778,16 @@ def _download_twelvedata(asset, config, interval):
 
         if not provider_symbol:
             logger.error(
-                "SÍMBOLO NO VERIFICABLE | %s | %s | falta meta.symbol",
+                "SÍMBOLO NO VERIFICABLE | %s | falta meta.symbol",
                 asset,
-                symbol,
             )
             return None
 
         normalised_provider_symbol = (
-            str(provider_symbol)
-            .upper()
-            .replace(" ", "")
-            .strip()
+            str(provider_symbol).upper().replace(" ", "").strip()
         )
-
         normalised_requested_symbol = (
-            str(symbol)
-            .upper()
-            .replace(" ", "")
-            .strip()
+            str(symbol).upper().replace(" ", "").strip()
         )
 
         if normalised_provider_symbol != normalised_requested_symbol:
@@ -517,63 +803,39 @@ def _download_twelvedata(asset, config, interval):
 
         if not configured_currency:
             logger.error(
-                "MONEDA NO VERIFICABLE | %s | %s | falta moneda configurada",
+                "MONEDA NO VERIFICABLE | %s | falta moneda configurada",
                 asset,
-                symbol,
             )
             return None
 
-        configured_currency = (
-            str(configured_currency).upper().strip()
-        )
+        configured_currency = str(configured_currency).upper().strip()
 
         if asset in CRYPTO_ASSETS:
             provider_currency = meta.get("currency_quote")
-
-            if not provider_currency:
-                logger.error(
-                    "MONEDA NO VERIFICABLE | %s | %s | "
-                    "meta.currency_quote ausente | claves_metadata=%s",
-                    asset,
-                    symbol,
-                    sorted(meta.keys()),
-                )
-                return None
-
-            provider_currency = (
-                str(provider_currency).upper().strip()
-            )
-
-            currency_aliases = {
-                "USD": "USD",
-                "US DOLLAR": "USD",
-                "UNITED STATES DOLLAR": "USD",
-            }
-
-            provider_currency = currency_aliases.get(
-                provider_currency,
-                provider_currency,
-            )
-
             currency_field = "currency_quote"
-
         else:
             provider_currency = meta.get("currency")
-
-            if not provider_currency:
-                logger.error(
-                    "MONEDA NO VERIFICABLE | %s | %s | "
-                    "meta.currency ausente",
-                    asset,
-                    symbol,
-                )
-                return None
-
-            provider_currency = (
-                str(provider_currency).upper().strip()
-            )
-
             currency_field = "currency"
+
+        if not provider_currency:
+            logger.error(
+                "MONEDA NO VERIFICABLE | %s | metadata=%s",
+                asset,
+                sorted(meta.keys()),
+            )
+            return None
+
+        provider_currency = str(provider_currency).upper().strip()
+
+        currency_aliases = {
+            "US DOLLAR": "USD",
+            "UNITED STATES DOLLAR": "USD",
+        }
+
+        provider_currency = currency_aliases.get(
+            provider_currency,
+            provider_currency,
+        )
 
         logger.info(
             "TWELVE DATA METADATA | %s | symbol=%s | %s=%s | configured=%s",
@@ -586,10 +848,8 @@ def _download_twelvedata(asset, config, interval):
 
         if provider_currency != configured_currency:
             logger.error(
-                "MONEDA INCOMPATIBLE | %s | %s | "
-                "Twelve Data=%s | Config=%s",
+                "MONEDA INCOMPATIBLE | %s | Twelve Data=%s | Config=%s",
                 asset,
-                symbol,
                 provider_currency,
                 configured_currency,
             )
@@ -599,9 +859,8 @@ def _download_twelvedata(asset, config, interval):
 
         if not values:
             logger.warning(
-                "Twelve Data devolvió una lista vacía para %s (%s)",
+                "Twelve Data devolvió una lista vacía para %s",
                 asset,
-                symbol,
             )
             return None
 
@@ -609,9 +868,8 @@ def _download_twelvedata(asset, config, interval):
 
         if "datetime" not in df.columns:
             logger.error(
-                "Twelve Data no devolvió fechas para %s (%s)",
+                "Twelve Data no devolvió fechas para %s",
                 asset,
-                symbol,
             )
             return None
 
@@ -631,14 +889,13 @@ def _download_twelvedata(asset, config, interval):
             errors="coerce",
         )
 
-        df = df.dropna(subset=["datetime"])
         df = df.set_index("datetime")
 
         df = _normalise_dataframe(df)
 
         if df is None:
-            logger.warning(
-                "No se pudieron normalizar los datos de %s",
+            logger.error(
+                "HISTÓRICO RECHAZADO | Twelve Data | %s",
                 asset,
             )
             return None
@@ -664,6 +921,14 @@ def _download_twelvedata(asset, config, interval):
             )
             return None
 
+        if interval == "15m" and _has_intraday_gaps(df, asset):
+            logger.error(
+                "HISTÓRICO RECHAZADO POR HUECOS | %s | %s",
+                asset,
+                interval,
+            )
+            return None
+
         _log_dataframe_timestamps(
             "Twelve Data FINAL",
             asset,
@@ -682,8 +947,6 @@ def _download_twelvedata(asset, config, interval):
         return df
 
     except requests.RequestException:
-        # No imprimir la excepción completa: puede contener
-        # la URL con la clave API en los parámetros.
         logger.error(
             "Error de conexión Twelve Data para %s",
             asset,
@@ -697,6 +960,10 @@ def _download_twelvedata(asset, config, interval):
         )
         return None
 
+
+# ---------------------------------------------------------------------
+# YAHOO FINANCE
+# ---------------------------------------------------------------------
 
 def _download_yahoo(asset, config, interval):
     ticker = config.get("yahoo")
@@ -780,10 +1047,8 @@ def _download_yahoo(asset, config, interval):
 
         if not yahoo_currency or not configured_currency:
             logger.error(
-                "Moneda no verificable para %s: Yahoo=%s config=%s",
+                "Moneda no verificable para %s",
                 asset,
-                yahoo_currency,
-                configured_currency,
             )
             return None
 
@@ -809,6 +1074,20 @@ def _download_yahoo(asset, config, interval):
 
         quote = quotes[0]
 
+        try:
+            index = pd.to_datetime(
+                timestamps,
+                unit="s",
+                utc=True,
+                errors="coerce",
+            )
+        except Exception:
+            logger.exception(
+                "Yahoo devolvió timestamps inválidos para %s",
+                ticker,
+            )
+            return None
+
         df = pd.DataFrame(
             {
                 "Open": quote.get("open", []),
@@ -817,18 +1096,14 @@ def _download_yahoo(asset, config, interval):
                 "Close": quote.get("close", []),
                 "Volume": quote.get("volume", []),
             },
-            index=pd.to_datetime(
-                timestamps,
-                unit="s",
-                utc=True,
-            ),
+            index=index,
         )
 
         df = _normalise_dataframe(df)
 
         if df is None:
-            logger.warning(
-                "Yahoo no devolvió datos válidos para %s",
+            logger.error(
+                "HISTÓRICO RECHAZADO | Yahoo | %s",
                 ticker,
             )
             return None
@@ -850,6 +1125,14 @@ def _download_yahoo(asset, config, interval):
             logger.warning(
                 "Histórico insuficiente en Yahoo para %s %s",
                 ticker,
+                interval,
+            )
+            return None
+
+        if interval == "15m" and _has_intraday_gaps(df, asset):
+            logger.error(
+                "HISTÓRICO RECHAZADO POR HUECOS | %s | %s",
+                asset,
                 interval,
             )
             return None
@@ -885,6 +1168,10 @@ def _download_yahoo(asset, config, interval):
         return None
 
 
+# ---------------------------------------------------------------------
+# DESCARGA PRINCIPAL
+# ---------------------------------------------------------------------
+
 def download_data(asset, interval="15m"):
     if interval not in INTERVAL_MAP:
         logger.error(
@@ -905,7 +1192,25 @@ def download_data(asset, interval="15m"):
     cached = _get_cached_data(asset, interval)
 
     if cached is not None:
-        return cached
+        # Defensa adicional: la caché también debe superar
+        # la normalización antes de volver al escáner.
+        validated = _normalise_dataframe(cached)
+
+        if validated is not None:
+            if interval != "15m" or not _has_intraday_gaps(
+                validated,
+                asset,
+            ):
+                return validated
+
+        logger.warning(
+            "Caché rechazada por validación | %s | %s",
+            asset,
+            interval,
+        )
+
+        with _cache_lock:
+            _data_cache.pop((asset, interval), None)
 
     provider = PROVIDER_MAP.get(asset)
 
@@ -940,6 +1245,10 @@ def download_data(asset, interval="15m"):
     return dataframe
 
 
+# ---------------------------------------------------------------------
+# TIMESTAMP Y FRESCURA
+# ---------------------------------------------------------------------
+
 def get_data_timestamp(df):
     if df is None or df.empty:
         return None
@@ -970,8 +1279,13 @@ def is_data_fresh(
         )
         return False
 
-    now = datetime.now(timezone.utc)
+    if interval not in INTERVAL_MAP:
+        return False
 
+    if _asset_config(asset) is None:
+        return False
+
+    now = datetime.now(timezone.utc)
     timestamp_dt = timestamp.to_pydatetime()
 
     if timestamp_dt > now:
@@ -986,11 +1300,10 @@ def is_data_fresh(
         now - timestamp_dt
     ).total_seconds() / 60
 
-    if asset in CRYPTO_ASSETS:
-        limit = 45 if interval == "15m" else 48 * 60
-
-    else:
-        if interval == "15m":
+    if interval == "15m":
+        if asset in CRYPTO_ASSETS:
+            is_fresh = age_minutes <= 45
+        else:
             expected = _last_expected_intraday_timestamp(
                 asset,
                 now,
@@ -1016,35 +1329,42 @@ def is_data_fresh(
 
             return is_fresh
 
-        if interval == "1d":
-            expected_date = _previous_weekday(now.date())
-            timestamp_utc_date = timestamp_dt.date()
+    elif interval == "1d":
+        market_tz, _, _ = _session_for_asset(asset)
+        market_today = now.astimezone(market_tz).date()
 
-            is_fresh = timestamp_utc_date == expected_date
+        expected_date = _previous_trading_day(
+            market_today,
+            asset,
+        )
 
-            logger.info(
-                "DATA FRESHNESS | %s | %s | timestamp=%s | timestamp_utc_date=%s | expected_date=%s | fresh=%s",
-                asset,
-                interval,
-                timestamp.isoformat(),
-                timestamp_utc_date,
-                expected_date,
-                is_fresh,
-            )
+        # Los proveedores pueden etiquetar la vela diaria a
+        # las 00:00 UTC o a la apertura local. Se usa la fecha UTC
+        # como etiqueta de sesión, no la hora.
+        timestamp_date = timestamp_dt.date()
 
-            return is_fresh
+        is_fresh = timestamp_date == expected_date
 
-        limit = max_age_minutes
+        logger.info(
+            "DATA FRESHNESS | %s | %s | timestamp=%s | expected_session=%s | fresh=%s",
+            asset,
+            interval,
+            timestamp.isoformat(),
+            expected_date,
+            is_fresh,
+        )
 
-    is_fresh = age_minutes <= limit
+        return is_fresh
+
+    else:
+        is_fresh = age_minutes <= max_age_minutes
 
     logger.info(
-        "DATA FRESHNESS | %s | %s | timestamp=%s | age=%.1f min | limit=%.1f min | fresh=%s",
+        "DATA FRESHNESS | %s | %s | timestamp=%s | age=%.1f min | fresh=%s",
         asset,
         interval,
         timestamp.isoformat(),
         age_minutes,
-        limit,
         is_fresh,
     )
 
