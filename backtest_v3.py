@@ -1,3 +1,4 @@
+
 import warnings
 
 import numpy as np
@@ -9,7 +10,7 @@ from indicators import add_indicators
 from strategies import evaluate_signal_at
 
 
-VERSION = "3.8"
+VERSION = "3.9"
 
 PERIODS = {
     "15m": {"period": "60d", "max_bars": 32},
@@ -31,8 +32,6 @@ INTRADAY_INTERVAL_MINUTES = {
     "15m": 15,
 }
 
-# Tolerancia para evitar falsos positivos por pequeñas
-# diferencias de timestamp del proveedor.
 GAP_TOLERANCE_MULTIPLIER = 1.5
 
 
@@ -73,21 +72,7 @@ def _has_unexpected_gap(
     interval,
     asset_type,
 ):
-    """
-    Detecta discontinuidades temporales anómalas.
-
-    CRYPTO:
-        Cotización continua.
-        Se comprueba la continuidad temporal.
-
-    STOCK / ETF:
-        En 15m se comprueban huecos dentro del mismo día.
-        Los cierres nocturnos no se consideran anomalías.
-
-    Temporalidad diaria de acciones y ETF:
-        No se comprueba automáticamente porque no disponemos
-        de un calendario bursátil con festivos.
-    """
+    """Detecta discontinuidades temporales anómalas."""
 
     try:
         previous = pd.Timestamp(previous_timestamp)
@@ -106,10 +91,6 @@ def _has_unexpected_gap(
 
     asset_type = str(asset_type).upper()
 
-    # -----------------------------------------------------
-    # CRIPTOMONEDAS
-    # -----------------------------------------------------
-
     if asset_type == "CRYPTO":
 
         if interval == "15m":
@@ -125,16 +106,10 @@ def _has_unexpected_gap(
 
         return elapsed > maximum
 
-    # -----------------------------------------------------
-    # ACCIONES Y ETF
-    # -----------------------------------------------------
-
     if asset_type in ("STOCK", "ETF"):
 
         if interval == "15m":
 
-            # Los cierres nocturnos y cambios de fecha
-            # no se consideran huecos anómalos.
             if previous.date() != current.date():
                 return False
 
@@ -145,11 +120,8 @@ def _has_unexpected_gap(
             return elapsed > maximum
 
         if interval == "1d":
-            # No se puede distinguir con seguridad un festivo
-            # de una sesión ausente sin calendario bursátil.
             return False
 
-    # Tipo desconocido: no asumimos continuidad.
     return True
 
 
@@ -476,11 +448,7 @@ def _validate_execution_gaps(
     interval,
     asset_type,
 ):
-    """
-    Comprueba los huecos temporales de un tramo del histórico.
-
-    Devuelve un mensaje de error si encuentra una discontinuidad.
-    """
+    """Comprueba los huecos temporales de un tramo del histórico."""
 
     if start_index < 0 or end_index >= len(df):
         return "Índices fuera del histórico al comprobar huecos"
@@ -517,7 +485,12 @@ def _validate_execution_gaps(
 
 
 def run_backtest(asset, ticker, interval):
-    """Backtest con protección de huecos temporales."""
+    """
+    Backtest con protección de huecos temporales.
+
+    Conserva los niveles stop y target originales de la señal.
+    La entrada se ejecuta en la apertura de la vela siguiente.
+    """
 
     if interval not in PERIODS:
         return [], "Temporalidad no admitida"
@@ -607,7 +580,7 @@ def run_backtest(asset, ticker, interval):
 
         entry_row = df.iloc[entry_index]
 
-        # Comprobar también el tramo entre señal y entrada.
+        # Comprobar la continuidad entre señal y entrada.
         gap_error = _validate_execution_gaps(
             df,
             i,
@@ -621,38 +594,66 @@ def run_backtest(asset, ticker, interval):
 
         try:
             signal_close = float(signal_row["Close"])
+            entry_reference = float(signal["entry_reference"])
+            stop = float(signal["stop"])
+            target = float(signal["target"])
             entry = float(entry_row["Open"])
             atr = float(signal_row["ATR"])
             score = int(signal["score"])
 
-        except (TypeError, ValueError, KeyError, OverflowError):
+        except (
+            TypeError,
+            ValueError,
+            KeyError,
+            OverflowError,
+        ):
             i += 1
             continue
 
         if not all(
             np.isfinite(value)
-            for value in (signal_close, entry, atr)
+            for value in (
+                signal_close,
+                entry_reference,
+                stop,
+                target,
+                entry,
+                atr,
+            )
         ):
             i += 1
             continue
-
-        if signal_close <= 0 or entry <= 0 or atr <= 0:
-            i += 1
-            continue
-
-        stop = entry - 1.5 * atr
-
-        target = entry + 3.0 * atr
-
-        initial_risk = entry - stop
 
         if (
-            not np.isfinite(stop)
-            or not np.isfinite(target)
-            or initial_risk <= 0
+            signal_close <= 0
+            or entry_reference <= 0
+            or entry <= 0
+            or atr <= 0
             or stop <= 0
-            or target <= entry
+            or target <= 0
         ):
+            i += 1
+            continue
+
+        # Los niveles originales deben tener sentido.
+        if not (
+            stop < entry_reference < target
+        ):
+            i += 1
+            continue
+
+        # El riesgo se calcula desde la entrada real.
+        initial_risk = entry - stop
+
+        if not np.isfinite(initial_risk) or initial_risk <= 0:
+            # Si la apertura ya está en el stop o por debajo,
+            # no se simula una entrada.
+            i += 1
+            continue
+
+        if entry >= target:
+            # Si la apertura ya ha alcanzado el objetivo,
+            # no se simula una entrada tardía.
             i += 1
             continue
 
@@ -664,8 +665,6 @@ def run_backtest(asset, ticker, interval):
 
         for j in range(entry_index, last_index + 1):
 
-            # Comprobar la continuidad antes de utilizar
-            # cada nueva vela de ejecución.
             if j > entry_index:
 
                 gap_error = _validate_execution_gaps(
@@ -705,12 +704,16 @@ def run_backtest(asset, ticker, interval):
                     f"en el índice {j}"
                 )
 
+            # Si el mercado abre por debajo del stop,
+            # se utiliza la apertura real como precio de salida.
             if candle_open <= stop:
                 exit_price = candle_open
                 exit_reason = "STOP_GAP"
                 exit_index = j
                 break
 
+            # Si abre por encima del objetivo, se conserva
+            # el objetivo como precio conservador de ejecución.
             if candle_open >= target:
                 exit_price = target
                 exit_reason = "TARGET_GAP"
@@ -766,10 +769,11 @@ def run_backtest(asset, ticker, interval):
             "entry_time": str(df.index[entry_index]),
             "exit_time": str(df.index[exit_index]),
             "score": score,
-            "signal_reference": round(signal_close, 6),
+            "signal_reference": round(entry_reference, 6),
+            "signal_close": round(signal_close, 6),
             "entry": round(entry, 6),
             "entry_gap_pct": round(
-                (entry / signal_close - 1) * 100,
+                (entry / entry_reference - 1) * 100,
                 4,
             ),
             "atr_at_signal": round(atr, 6),
@@ -1168,6 +1172,10 @@ def main():
     print("Costes: no incluidos ni verificados")
 
     print("Sizing: desactivado")
+
+    print("Ejecución: entrada en apertura de vela siguiente")
+
+    print("Stop y objetivo: niveles originales de la señal")
 
     print("Validación: históricos OHLC incoherentes rechazados")
 
