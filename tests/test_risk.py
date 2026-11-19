@@ -1,5 +1,4 @@
 
-import math
 import unittest
 
 from risk_manager import (
@@ -83,7 +82,7 @@ class TestRiskManager(unittest.TestCase):
                     positions_confirmed=True,
                     capital_eur=1000,
                 )
-                self.assertEqual(result["status"], "UNKNOWN")
+                self.assertEqual(result["status"], "BLOCKED")
                 self.assertFalse(result["can_open_trade"])
 
     def test_trade_cannot_exceed_remaining_risk(self):
