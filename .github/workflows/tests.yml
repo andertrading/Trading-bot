@@ -31,3 +31,21 @@ jobs:
       - name: Ejecutar pruebas
         run: |
           python -m unittest discover -s tests -v
+
+      - name: Comprobar arranque de Bot.py
+        run: |
+          python - <<'PY'
+          import Bot
+
+          assert Bot.app is not None
+
+          client = Bot.app.test_client()
+
+          response = client.get("/")
+          assert response.status_code == 200, response.status_code
+
+          response = client.get("/health")
+          assert response.status_code == 200, response.status_code
+
+          print("OK: Bot.py arranca y las rutas principales responden.")
+          PY
