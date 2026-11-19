@@ -10,7 +10,7 @@ from indicators import add_indicators
 from strategies import evaluate_signal_at
 
 
-VERSION = "3.9"
+VERSION = "3.10"
 
 PERIODS = {
     "15m": {"period": "60d", "max_bars": 32},
@@ -19,9 +19,32 @@ PERIODS = {
 
 MIN_BARS = 220
 
+# RR mínimo exigido después de ejecutar la entrada real.
+MIN_EXECUTION_RR = 2.0
+
 DOWNLOAD_ERRORS = {}
 
 EXCLUDED_OHLC_CANDLES = []
+
+# Diagnóstico de señales rechazadas por RR real insuficiente.
+RR_REJECTIONS = []
+
+RR_REJECTION_COLUMNS = [
+    "asset",
+    "ticker",
+    "timeframe",
+    "signal_time",
+    "entry_time",
+    "signal_reference",
+    "entry",
+    "stop",
+    "target",
+    "risk_per_unit",
+    "reward_per_unit",
+    "actual_rr",
+    "minimum_rr",
+    "reason",
+]
 
 
 # ---------------------------------------------------------
@@ -484,12 +507,49 @@ def _validate_execution_gaps(
     return None
 
 
+def _record_rr_rejection(
+    asset,
+    ticker,
+    interval,
+    signal_time,
+    entry_time,
+    entry_reference,
+    entry,
+    stop,
+    target,
+    initial_risk,
+    actual_reward,
+    actual_rr,
+):
+    """Registra una señal rechazada por RR real insuficiente."""
+
+    RR_REJECTIONS.append({
+        "asset": asset,
+        "ticker": ticker,
+        "timeframe": interval,
+        "signal_time": str(signal_time),
+        "entry_time": str(entry_time),
+        "signal_reference": round(entry_reference, 6),
+        "entry": round(entry, 6),
+        "stop": round(stop, 6),
+        "target": round(target, 6),
+        "risk_per_unit": round(initial_risk, 6),
+        "reward_per_unit": round(actual_reward, 6),
+        "actual_rr": round(actual_rr, 6),
+        "minimum_rr": MIN_EXECUTION_RR,
+        "reason": "RR real inferior al mínimo",
+    })
+
+
 def run_backtest(asset, ticker, interval):
     """
-    Backtest con protección de huecos temporales.
+    Backtest con protección de huecos temporales y filtro RR real.
 
     Conserva los niveles stop y target originales de la señal.
     La entrada se ejecuta en la apertura de la vela siguiente.
+
+    Solo acepta operaciones cuyo RR real desde la entrada
+    hasta los niveles originales sea igual o superior a 2:1.
     """
 
     if interval not in PERIODS:
@@ -657,6 +717,46 @@ def run_backtest(asset, ticker, interval):
             i += 1
             continue
 
+        # -------------------------------------------------
+        # FILTRO RR REAL DE EJECUCIÓN
+        # -------------------------------------------------
+
+        actual_reward = target - entry
+
+        if not np.isfinite(actual_reward) or actual_reward <= 0:
+            i += 1
+            continue
+
+        actual_rr = actual_reward / initial_risk
+
+        if not np.isfinite(actual_rr):
+            i += 1
+            continue
+
+        if actual_rr < MIN_EXECUTION_RR:
+
+            _record_rr_rejection(
+                asset=asset,
+                ticker=ticker,
+                interval=interval,
+                signal_time=df.index[i],
+                entry_time=df.index[entry_index],
+                entry_reference=entry_reference,
+                entry=entry,
+                stop=stop,
+                target=target,
+                initial_risk=initial_risk,
+                actual_reward=actual_reward,
+                actual_rr=actual_rr,
+            )
+
+            i += 1
+            continue
+
+        # -------------------------------------------------
+        # EJECUCIÓN DE LA OPERACIÓN ACEPTADA
+        # -------------------------------------------------
+
         last_index = entry_index + max_bars - 1
 
         exit_price = None
@@ -780,6 +880,7 @@ def run_backtest(asset, ticker, interval):
             "initial_risk_per_unit": round(initial_risk, 6),
             "stop": round(stop, 6),
             "target": round(target, 6),
+            "execution_rr": round(actual_rr, 6),
             "exit": round(exit_price, 6),
             "exit_reason": exit_reason,
             "duration_bars": duration_bars,
@@ -1157,6 +1258,8 @@ def main():
 
     EXCLUDED_OHLC_CANDLES.clear()
 
+    RR_REJECTIONS.clear()
+
     assets = get_assets()
 
     print(f"Trading Bot {VERSION} - Backtest")
@@ -1176,6 +1279,11 @@ def main():
     print("Ejecución: entrada en apertura de vela siguiente")
 
     print("Stop y objetivo: niveles originales de la señal")
+
+    print(
+        f"Filtro de ejecución: RR real mínimo "
+        f"{MIN_EXECUTION_RR:.2f}:1"
+    )
 
     print("Validación: históricos OHLC incoherentes rechazados")
 
@@ -1283,9 +1391,22 @@ def main():
         index=False,
     )
 
+    # Informe independiente de rechazos por RR real.
+    pd.DataFrame(
+        RR_REJECTIONS,
+        columns=RR_REJECTION_COLUMNS,
+    ).to_csv(
+        "rechazos_rr_backtest_v3.csv",
+        index=False,
+    )
+
     print("-" * 50)
 
-    print(f"Operaciones totales: {len(all_trades)}")
+    print(f"Operaciones ejecutadas: {len(all_trades)}")
+
+    print(f"Señales rechazadas por RR: {len(RR_REJECTIONS)}")
+
+    print(f"RR mínimo exigido: {MIN_EXECUTION_RR:.2f}:1")
 
     print(f"Combinaciones analizadas: {len(summaries)}")
 
