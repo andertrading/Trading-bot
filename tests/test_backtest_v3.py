@@ -104,6 +104,10 @@ class TestBacktestV3(unittest.TestCase):
                 "15m",
             )
 
+    # ---------------------------------------------------------
+    # VALIDACIÓN OHLC
+    # ---------------------------------------------------------
+
     def test_valid_ohlc_data(self):
         self.assertTrue(
             backtest_v3._valid_ohlc(self.make_data())
@@ -136,6 +140,89 @@ class TestBacktestV3(unittest.TestCase):
 
         self.assertIsNotNone(cleaned)
         self.assertFalse(cleaned.index.has_duplicates)
+
+    def test_download_rejects_incoherent_history(self):
+        data = self.make_data()
+        data.loc[data.index[10], "High"] = 1.0
+
+        backtest_v3.EXCLUDED_OHLC_CANDLES.clear()
+
+        with patch.object(
+            backtest_v3.yf,
+            "download",
+            return_value=data,
+        ):
+            result = backtest_v3.download_history(
+                "AAPL",
+                "15m",
+            )
+
+        self.assertIsNone(result)
+
+        self.assertIn(
+            "OHLC incoherentes",
+            backtest_v3.DOWNLOAD_ERRORS[("AAPL", "15m")],
+        )
+
+        self.assertEqual(
+            len(backtest_v3.EXCLUDED_OHLC_CANDLES),
+            1,
+        )
+
+    def test_download_rejects_missing_ohlc_instead_of_dropping_row(self):
+        data = self.make_data()
+        data.iloc[10, data.columns.get_loc("Close")] = float("nan")
+
+        with patch.object(
+            backtest_v3.yf,
+            "download",
+            return_value=data,
+        ):
+            result = backtest_v3.download_history(
+                "AAPL",
+                "15m",
+            )
+
+        self.assertIsNone(result)
+
+        self.assertIn(
+            "valores ausentes",
+            backtest_v3.DOWNLOAD_ERRORS[("AAPL", "15m")],
+        )
+
+    def test_run_backtest_rejects_invalid_history_before_indicators(self):
+        data = self.make_execution_data()
+        data.iloc[6, data.columns.get_loc("High")] = 1.0
+
+        with (
+            patch.object(
+                backtest_v3,
+                "MIN_BARS",
+                5,
+            ),
+            patch.object(
+                backtest_v3,
+                "download_history",
+                return_value=data,
+            ),
+            patch.object(
+                backtest_v3,
+                "add_indicators",
+            ) as indicators_mock,
+        ):
+            trades, error = backtest_v3.run_backtest(
+                "AAPL",
+                "AAPL",
+                "15m",
+            )
+
+        self.assertEqual(trades, [])
+        self.assertIsNotNone(error)
+        indicators_mock.assert_not_called()
+
+    # ---------------------------------------------------------
+    # MÉTRICAS
+    # ---------------------------------------------------------
 
     def test_metrics_with_no_trades(self):
         result = backtest_v3.calculate_metrics(
@@ -228,6 +315,10 @@ class TestBacktestV3(unittest.TestCase):
         result = backtest_v3._calculate_drawdown(results)
 
         self.assertAlmostEqual(result, 1.0)
+
+    # ---------------------------------------------------------
+    # RESUMEN DE OPERACIONES
+    # ---------------------------------------------------------
 
     def test_operations_summary_with_valid_trades(self):
         trades = [
@@ -532,6 +623,87 @@ class TestBacktestV3(unittest.TestCase):
             pd.Timestamp(trades[1]["signal_time"]),
             data.index[8],
         )
+
+    # ---------------------------------------------------------
+    # PRUEBAS ADICIONALES DEL CÁLCULO DE R
+    # ---------------------------------------------------------
+
+    def test_stop_gap_result_r_can_be_below_minus_one(self):
+        data = self.make_execution_data()
+
+        data.iloc[5, data.columns.get_loc("High")] = 102.0
+        data.iloc[5, data.columns.get_loc("Low")] = 100.0
+
+        data.iloc[6, data.columns.get_loc("Open")] = 95.0
+        data.iloc[6, data.columns.get_loc("High")] = 96.0
+        data.iloc[6, data.columns.get_loc("Low")] = 94.0
+        data.iloc[6, data.columns.get_loc("Close")] = 95.0
+
+        trades, error = self.run_execution_test(data)
+
+        self.assertIsNone(error)
+        self.assertEqual(len(trades), 1)
+
+        trade = trades[0]
+
+        self.assertEqual(trade["exit_reason"], "STOP_GAP")
+        self.assertAlmostEqual(trade["exit"], 95.0)
+        self.assertAlmostEqual(trade["result_R"], -2.0)
+
+    def test_target_gap_result_r_is_two(self):
+        data = self.make_execution_data()
+
+        data.iloc[5, data.columns.get_loc("High")] = 102.0
+        data.iloc[5, data.columns.get_loc("Low")] = 100.0
+
+        data.iloc[6, data.columns.get_loc("Open")] = 108.0
+        data.iloc[6, data.columns.get_loc("High")] = 109.0
+        data.iloc[6, data.columns.get_loc("Low")] = 107.5
+        data.iloc[6, data.columns.get_loc("Close")] = 108.0
+
+        trades, error = self.run_execution_test(data)
+
+        self.assertIsNone(error)
+        self.assertEqual(len(trades), 1)
+        self.assertEqual(trades[0]["exit_reason"], "TARGET_GAP")
+        self.assertAlmostEqual(trades[0]["result_R"], 2.0)
+
+    def test_intrabar_stop_result_is_minus_one_r(self):
+        data = self.make_execution_data()
+
+        data.iloc[5, data.columns.get_loc("Low")] = 97.5
+
+        trades, error = self.run_execution_test(data)
+
+        self.assertIsNone(error)
+        self.assertEqual(len(trades), 1)
+        self.assertEqual(trades[0]["exit_reason"], "STOP")
+        self.assertAlmostEqual(trades[0]["result_R"], -1.0)
+
+    def test_intrabar_target_result_is_plus_two_r(self):
+        data = self.make_execution_data()
+
+        data.iloc[5, data.columns.get_loc("High")] = 107.5
+
+        trades, error = self.run_execution_test(data)
+
+        self.assertIsNone(error)
+        self.assertEqual(len(trades), 1)
+        self.assertEqual(trades[0]["exit_reason"], "TARGET")
+        self.assertAlmostEqual(trades[0]["result_R"], 2.0)
+
+    def test_stop_priority_result_is_minus_one_r(self):
+        data = self.make_execution_data()
+
+        data.iloc[5, data.columns.get_loc("Low")] = 97.5
+        data.iloc[5, data.columns.get_loc("High")] = 107.5
+
+        trades, error = self.run_execution_test(data)
+
+        self.assertIsNone(error)
+        self.assertEqual(len(trades), 1)
+        self.assertEqual(trades[0]["exit_reason"], "STOP")
+        self.assertAlmostEqual(trades[0]["result_R"], -1.0)
 
 
 if __name__ == "__main__":
