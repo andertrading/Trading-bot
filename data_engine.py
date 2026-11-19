@@ -215,11 +215,6 @@ def _previous_weekday(day):
     return day
 
 
-def _last_completed_session_date(now_local):
-    market = now_local.time()
-    opening = MARKET_CONFIG_FOR_DATE["open"] if False else None
-
-
 def _session_for_asset(asset):
     market = _market_for_asset(asset)
 
@@ -323,16 +318,13 @@ def _remove_incomplete_candle(df, interval, asset=None):
         return df[df.index <= last_completed_start]
 
     if interval == "1d":
-        if asset in CRYPTO_ASSETS:
-            return df[df.index.date < now.date()]
-
         if asset is None:
             return df
 
-        tz, _, _ = _session_for_asset(asset)
-        today_local = now.astimezone(tz).date()
-
-        return df[df.index.tz_convert(tz).date < today_local]
+        # Los datos diarios se normalizan y comparan en UTC.
+        # Se excluye siempre la vela correspondiente al día UTC actual,
+        # que puede estar todavía en formación.
+        return df[df.index.date < now.date()]
 
     return df
 
@@ -819,9 +811,6 @@ def is_data_fresh(
         limit = 45 if interval == "15m" else 48 * 60
 
     else:
-        tz, _, _ = _session_for_asset(asset)
-        now_local = now.astimezone(tz)
-
         if interval == "15m":
             expected = _last_expected_intraday_timestamp(
                 asset,
@@ -849,17 +838,19 @@ def is_data_fresh(
             return is_fresh
 
         if interval == "1d":
-            expected_date = _previous_weekday(now_local.date())
+            # Las marcas diarias de los proveedores se comparan
+            # por su fecha UTC, sin convertirlas a hora local.
+            expected_date = _previous_weekday(now.date())
+            timestamp_utc_date = timestamp_dt.date()
 
-            timestamp_local_date = timestamp_dt.astimezone(tz).date()
-
-            is_fresh = timestamp_local_date == expected_date
+            is_fresh = timestamp_utc_date == expected_date
 
             logger.info(
-                "DATA FRESHNESS | %s | %s | timestamp=%s | expected_date=%s | fresh=%s",
+                "DATA FRESHNESS | %s | %s | timestamp=%s | timestamp_utc_date=%s | expected_date=%s | fresh=%s",
                 asset,
                 interval,
                 timestamp.isoformat(),
+                timestamp_utc_date,
                 expected_date,
                 is_fresh,
             )
