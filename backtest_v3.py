@@ -10,7 +10,7 @@ from indicators import add_indicators
 from strategies import evaluate_signal_at
 
 
-VERSION = "3.4"
+VERSION = "3.5"
 
 PERIODS = {
     "15m": {"period": "60d", "max_bars": 32},
@@ -18,6 +18,9 @@ PERIODS = {
 }
 
 MIN_BARS = 220
+
+# Guarda el diagnóstico de la última descarga por activo y temporalidad.
+DOWNLOAD_ERRORS = {}
 
 
 def get_assets():
@@ -64,22 +67,31 @@ def _normalize_columns(data):
     return data
 
 
-def _valid_ohlc(data):
-    """Comprueba que los precios OHLC sean válidos."""
+def _ohlc_validation_error(data):
+    """Devuelve el motivo concreto si los precios OHLC son inválidos."""
 
     required = ["Open", "High", "Low", "Close"]
 
-    if not all(column in data.columns for column in required):
-        return False
+    missing = [
+        column
+        for column in required
+        if column not in data.columns
+    ]
+
+    if missing:
+        return f"Faltan columnas OHLC: {missing}"
 
     for column in required:
-        values = data[column].to_numpy(dtype=float)
+        try:
+            values = data[column].to_numpy(dtype=float)
+        except (TypeError, ValueError) as exc:
+            return f"No se puede convertir {column} a números: {exc}"
 
         if not np.isfinite(values).all():
-            return False
+            return f"La columna {column} contiene valores no finitos"
 
         if (values <= 0).any():
-            return False
+            return f"La columna {column} contiene precios cero o negativos"
 
     invalid_candles = (
         (data["High"] < data["Low"])
@@ -89,13 +101,31 @@ def _valid_ohlc(data):
         | (data["Low"] > data["Close"])
     )
 
-    return not invalid_candles.any()
+    invalid_count = int(invalid_candles.sum())
+
+    if invalid_count:
+        return (
+            f"Se encontraron {invalid_count} velas "
+            "con valores OHLC incoherentes"
+        )
+
+    return None
+
+
+def _valid_ohlc(data):
+    """Comprueba que los precios OHLC sean válidos."""
+
+    return _ohlc_validation_error(data) is None
 
 
 def download_history(ticker, interval):
     """Descarga y valida el histórico de Yahoo Finance."""
 
+    key = (ticker, interval)
+    DOWNLOAD_ERRORS.pop(key, None)
+
     if interval not in PERIODS:
+        DOWNLOAD_ERRORS[key] = "Temporalidad no admitida"
         return None
 
     settings = PERIODS[interval]
@@ -109,18 +139,54 @@ def download_history(ticker, interval):
             progress=False,
             threads=False,
         )
+
     except Exception as exc:
-        warnings.warn(f"Error descargando {ticker}: {exc}")
+        error = (
+            f"Excepción al descargar datos de Yahoo Finance: "
+            f"{type(exc).__name__}: {exc}"
+        )
+
+        DOWNLOAD_ERRORS[key] = error
+        warnings.warn(f"{ticker} ({interval}): {error}")
         return None
 
-    if data is None or data.empty:
+    if data is None:
+        DOWNLOAD_ERRORS[key] = (
+            "Yahoo Finance devolvió None"
+        )
         return None
 
-    data = _normalize_columns(data)
+    if data.empty:
+        DOWNLOAD_ERRORS[key] = (
+            "Yahoo Finance devolvió un histórico vacío"
+        )
+        return None
+
+    raw_rows = len(data)
+
+    try:
+        data = _normalize_columns(data)
+
+    except Exception as exc:
+        DOWNLOAD_ERRORS[key] = (
+            f"Error normalizando columnas: "
+            f"{type(exc).__name__}: {exc}"
+        )
+        return None
 
     required = ["Open", "High", "Low", "Close"]
 
-    if not all(column in data.columns for column in required):
+    missing = [
+        column
+        for column in required
+        if column not in data.columns
+    ]
+
+    if missing:
+        DOWNLOAD_ERRORS[key] = (
+            f"Columnas ausentes: {missing}. "
+            f"Columnas recibidas: {list(data.columns)}"
+        )
         return None
 
     columns = required.copy()
@@ -128,37 +194,80 @@ def download_history(ticker, interval):
     if "Volume" in data.columns:
         columns.append("Volume")
 
-    data = data[columns].copy()
+    try:
+        data = data[columns].copy()
 
-    for column in columns:
-        data[column] = pd.to_numeric(
-            data[column],
-            errors="coerce",
+        for column in columns:
+            data[column] = pd.to_numeric(
+                data[column],
+                errors="coerce",
+            )
+
+        data = data.replace(
+            [np.inf, -np.inf],
+            np.nan,
         )
 
-    data = data.replace(
-        [np.inf, -np.inf],
-        np.nan,
-    )
+        rows_before_cleaning = len(data)
 
-    data = data.dropna(subset=required)
+        data = data.dropna(subset=required)
 
-    data = data[
-        ~data.index.duplicated(keep="last")
-    ]
+        rows_removed = rows_before_cleaning - len(data)
 
-    data = data.sort_index()
+        data = data[
+            ~data.index.duplicated(keep="last")
+        ]
 
-    if not _valid_ohlc(data):
+        data = data.sort_index()
+
+    except Exception as exc:
+        DOWNLOAD_ERRORS[key] = (
+            f"Error limpiando histórico: "
+            f"{type(exc).__name__}: {exc}"
+        )
         return None
+
+    if data.empty:
+        DOWNLOAD_ERRORS[key] = (
+            "No quedan velas después de eliminar "
+            "valores OHLC ausentes o inválidos. "
+            f"Filas recibidas: {raw_rows}"
+        )
+        return None
+
+    validation_error = _ohlc_validation_error(data)
+
+    if validation_error:
+        DOWNLOAD_ERRORS[key] = (
+            f"Histórico OHLC inválido: {validation_error}. "
+            f"Filas recibidas: {raw_rows}; "
+            f"filas válidas tras limpieza: {len(data)}"
+        )
+        return None
+
+    cleaned_rows = len(data)
 
     # Excluimos la última vela recibida para evitar
     # utilizar una vela que pudiera estar incompleta.
     if len(data) > 1:
         data = data.iloc[:-1]
 
-    if len(data) < MIN_BARS:
+    final_rows = len(data)
+
+    if final_rows < MIN_BARS:
+        DOWNLOAD_ERRORS[key] = (
+            f"Histórico insuficiente: se necesitan "
+            f"{MIN_BARS} velas y quedan {final_rows} "
+            f"después de excluir la última vela. "
+            f"Filas originales: {raw_rows}; "
+            f"filas eliminadas por limpieza: {rows_removed}; "
+            f"filas antes de excluir la última: {cleaned_rows}; "
+            f"periodo solicitado: {settings['period']}; "
+            f"intervalo: {interval}"
+        )
         return None
+
+    DOWNLOAD_ERRORS.pop(key, None)
 
     return data
 
@@ -175,15 +284,31 @@ def run_backtest(asset, ticker, interval):
     data = download_history(ticker, interval)
 
     if data is None:
-        return [], "Datos insuficientes o no disponibles"
+        diagnostic = DOWNLOAD_ERRORS.get(
+            (ticker, interval),
+            "Causa desconocida durante la descarga",
+        )
+
+        return [], diagnostic
 
     try:
         df = add_indicators(data)
-    except Exception as exc:
-        return [], f"Error calculando indicadores: {exc}"
 
-    if df is None or len(df) < MIN_BARS:
-        return [], "Indicadores o histórico insuficientes"
+    except Exception as exc:
+        return [], (
+            f"Error calculando indicadores: "
+            f"{type(exc).__name__}: {exc}"
+        )
+
+    if df is None:
+        return [], "El cálculo de indicadores devolvió None"
+
+    if len(df) < MIN_BARS:
+        return [], (
+            f"Indicadores o histórico insuficientes: "
+            f"{len(df)} filas disponibles; "
+            f"mínimo requerido: {MIN_BARS}"
+        )
 
     max_bars = PERIODS[interval]["max_bars"]
 
@@ -214,6 +339,7 @@ def run_backtest(asset, ticker, interval):
             entry = float(entry_row["Open"])
             atr = float(signal_row["ATR"])
             score = int(signal["score"])
+
         except (TypeError, ValueError, KeyError, OverflowError):
             i += 1
             continue
@@ -262,6 +388,7 @@ def run_backtest(asset, ticker, interval):
                 candle_open = float(candle["Open"])
                 candle_high = float(candle["High"])
                 candle_low = float(candle["Low"])
+
             except (TypeError, ValueError, KeyError):
                 continue
 
@@ -305,7 +432,10 @@ def run_backtest(asset, ticker, interval):
 
         if exit_price is None:
             try:
-                exit_price = float(df.iloc[last_index]["Close"])
+                exit_price = float(
+                    df.iloc[last_index]["Close"]
+                )
+
             except (TypeError, ValueError, KeyError):
                 i = last_index + 1
                 continue
@@ -378,6 +508,7 @@ def _calculate_drawdown(results):
         return 0.0
 
     equity = np.cumsum(results)
+
     peaks = np.maximum.accumulate(
         np.maximum(equity, 0)
     )
@@ -402,6 +533,7 @@ def calculate_metrics(trades):
     else:
         try:
             records = list(trades)
+
         except (TypeError, ValueError):
             return _empty_metrics()
 
@@ -414,6 +546,7 @@ def calculate_metrics(trades):
         try:
             result = float(trade["result_R"])
             duration = float(trade["duration_bars"])
+
         except (TypeError, ValueError, KeyError, OverflowError):
             continue
 
@@ -521,6 +654,7 @@ def generate_operations_summary(trades):
     else:
         try:
             df = pd.DataFrame(list(trades))
+
         except (TypeError, ValueError):
             return pd.DataFrame(columns=columns)
 
@@ -550,11 +684,18 @@ def generate_operations_summary(trades):
     )
 
     df = df.dropna(
-        subset=["result_R", "exit_time", "asset", "timeframe"]
+        subset=[
+            "result_R",
+            "exit_time",
+            "asset",
+            "timeframe",
+        ]
     )
 
     df = df[
-        np.isfinite(df["result_R"].to_numpy(dtype=float))
+        np.isfinite(
+            df["result_R"].to_numpy(dtype=float)
+        )
     ]
 
     if df.empty:
@@ -564,7 +705,13 @@ def generate_operations_summary(trades):
 
     summaries = []
 
-    def summarize(group, summary_type, asset, timeframe, period):
+    def summarize(
+        group,
+        summary_type,
+        asset,
+        timeframe,
+        period,
+    ):
 
         group = group.sort_values("exit_time")
 
@@ -582,10 +729,12 @@ def generate_operations_summary(trades):
         for result in results:
             if result < 0:
                 current_losing_streak += 1
+
                 max_losing_streak = max(
                     max_losing_streak,
                     current_losing_streak,
                 )
+
             else:
                 current_losing_streak = 0
 
@@ -612,8 +761,14 @@ def generate_operations_summary(trades):
                 len(wins) / len(results) * 100,
                 2,
             ),
-            "resultado_R": round(float(results.sum()), 4),
-            "media_R": round(float(results.mean()), 4),
+            "resultado_R": round(
+                float(results.sum()),
+                4,
+            ),
+            "media_R": round(
+                float(results.mean()),
+                4,
+            ),
             "media_ganadoras_R": (
                 round(float(wins.mean()), 4)
                 if len(wins) else None
@@ -710,6 +865,7 @@ def main():
                 if error:
                     errors.append({
                         "asset": asset,
+                        "ticker": ticker,
                         "timeframe": interval,
                         "error": error,
                     })
@@ -733,13 +889,18 @@ def main():
                 )
 
             except Exception as exc:
+                error_message = (
+                    f"{type(exc).__name__}: {exc}"
+                )
+
                 errors.append({
                     "asset": asset,
+                    "ticker": ticker,
                     "timeframe": interval,
-                    "error": str(exc),
+                    "error": error_message,
                 })
 
-                print(f"  Error: {exc}")
+                print(f"  Error: {error_message}")
 
     pd.DataFrame(all_trades).to_csv(
         "operaciones_backtest_v3.csv",
