@@ -68,7 +68,7 @@ def _normalize_columns(data):
 
 
 def _ohlc_validation_error(data):
-    """Devuelve el motivo concreto si los precios OHLC son inválidos."""
+    """Devuelve el motivo concreto y los valores de las velas inválidas."""
 
     required = ["Open", "High", "Low", "Close"]
 
@@ -104,9 +104,22 @@ def _ohlc_validation_error(data):
     invalid_count = int(invalid_candles.sum())
 
     if invalid_count:
+        details = []
+        invalid_rows = data.loc[invalid_candles]
+
+        for timestamp, candle in invalid_rows.head(5).iterrows():
+            details.append(
+                f"Fecha={timestamp}, "
+                f"Open={candle['Open']}, "
+                f"High={candle['High']}, "
+                f"Low={candle['Low']}, "
+                f"Close={candle['Close']}"
+            )
+
         return (
             f"Se encontraron {invalid_count} velas "
-            "con valores OHLC incoherentes"
+            f"OHLC incoherentes. "
+            f"Detalle: {' | '.join(details)}"
         )
 
     return None
