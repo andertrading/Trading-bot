@@ -297,6 +297,7 @@ jobs:
                       try:
                           history = api_get("time_series", params)
                           validate_history(asset, interval, history)
+                          time.sleep(9)
                           history_ok = True
                           break
                       except Exception as error:
