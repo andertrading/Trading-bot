@@ -1,11 +1,8 @@
-
-name: Trading Bot Backtesting
+name: LEGACY - Backtest (deprecated)
 
 on:
-  push:
-    branches:
-      - main
   workflow_dispatch:
+
 permissions:
   contents: read
 
@@ -28,14 +25,14 @@ jobs:
           python -m pip install --upgrade pip
           pip install yfinance pandas numpy
 
-      - name: Ejecutar backtesting
+      - name: Ejecutar backtesting histórico (legacy)
         run: python backtest.py
 
-      - name: Guardar resultados
+      - name: Guardar resultados históricos (legacy)
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: resultados-backtest
+          name: legacy-resultados-backtest
           path: |
             resultados_backtest.csv
             operaciones_backtest.csv
