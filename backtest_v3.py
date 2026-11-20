@@ -16,7 +16,7 @@ from indicators import add_indicators
 from strategies import evaluate_signal_at
 
 
-VERSION = "3.15"
+VERSION = "3.16"
 
 PERIODS = {
     "15m": {"period": "60d", "max_bars": 32},
@@ -32,9 +32,12 @@ RR_TOLERANCE = 1e-6
 # REPRODUCIBILIDAD
 # ---------------------------------------------------------
 
+# Por defecto se reproduce el último histórico guardado.
+# Para descargar históricos nuevos habrá que establecer
+# BACKTEST_DATA_MODE=download expresamente.
 BACKTEST_DATA_MODE = os.getenv(
     "BACKTEST_DATA_MODE",
-    "download",
+    "replay",
 ).strip().lower()
 
 SNAPSHOT_DIR = Path(
@@ -1664,7 +1667,6 @@ def run_backtest(asset, ticker, interval):
         entry_index = candidate["entry_index"]
         diagnostic = candidate["diagnostic"]
 
-        # V3.15:
         # Se compara la vela de ENTRADA prevista con la vela
         # de SALIDA de la operación anterior.
         #
@@ -2079,7 +2081,7 @@ def main():
     print(f"Activos habilitados: {len(assets)}")
     print("Modo: histórico, compras únicamente")
     print("Estrategia: sin cambios")
-    print("Datos: Yahoo Finance")
+    print("Datos: Yahoo Finance (snapshots guardados)")
     print(f"Modo de datos: {BACKTEST_DATA_MODE}")
     print(f"Directorio de históricos: {SNAPSHOT_DIR}")
     print("Costes: no incluidos ni verificados")
@@ -2091,6 +2093,12 @@ def main():
     print("Diagnóstico: todas las candidatas")
     print("Simulación: sin operaciones solapadas")
     print("Filtro de solapamiento: comparación con entry_index")
+
+    if BACKTEST_DATA_MODE == "replay":
+        print("SEGURIDAD: no se descargarán ni sobrescribirán snapshots.")
+    else:
+        print("ATENCIÓN: el modo download puede sustituir snapshots existentes.")
+
     print("-" * 60)
 
     for asset, ticker in assets:
@@ -2241,22 +2249,28 @@ def main():
         index=False,
     )
 
-    try:
-        _write_snapshot_manifest()
-    except Exception as exc:
-        errors.append({
-            "asset": "SYSTEM",
-            "ticker": "",
-            "timeframe": "",
-            "error": (
-                f"No se pudo escribir el manifiesto: {exc}"
-            ),
-        })
+    # En download se genera el manifiesto con los snapshots
+    # recién guardados. En replay se conserva el manifiesto
+    # original para no modificar los históricos de referencia.
+    if BACKTEST_DATA_MODE == "download":
+        try:
+            _write_snapshot_manifest()
+        except Exception as exc:
+            errors.append({
+                "asset": "SYSTEM",
+                "ticker": "",
+                "timeframe": "",
+                "error": (
+                    f"No se pudo escribir el manifiesto: {exc}"
+                ),
+            })
 
-        pd.DataFrame(errors).to_csv(
-            "errores_backtest_v3.csv",
-            index=False,
-        )
+            pd.DataFrame(errors).to_csv(
+                "errores_backtest_v3.csv",
+                index=False,
+            )
+    else:
+        print("Manifiesto original conservado; no se ha sobrescrito.")
 
     # -----------------------------------------------------
     # COMPROBACIÓN DEL REGISTRO DE SOLAPAMIENTOS
@@ -2269,6 +2283,7 @@ def main():
     )
 
     print("-" * 60)
+    print(f"Versión: {VERSION}")
     print(f"Modo de datos: {BACKTEST_DATA_MODE}")
     print(f"Operaciones ejecutadas: {len(all_trades)}")
     print(
@@ -2291,13 +2306,19 @@ def main():
         f"{len(EXCLUDED_OHLC_CANDLES)}"
     )
     print(
-        f"Históricos registrados: {len(SNAPSHOT_MANIFEST)}"
+        f"Históricos reproducidos/registrados: "
+        f"{len(SNAPSHOT_MANIFEST)}"
     )
     print("Archivos CSV generados.")
     print(
         "IMPORTANTE: resultados brutos, sin costes, "
         "sin sizing y sin simulación de cartera."
     )
+
+    if BACKTEST_DATA_MODE == "replay":
+        print(
+            "Los snapshots originales no se han modificado."
+        )
 
 
 if __name__ == "__main__":
