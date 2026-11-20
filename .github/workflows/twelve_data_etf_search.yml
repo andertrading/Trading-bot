@@ -64,13 +64,27 @@ jobs:
                   response.raise_for_status()
                   payload = response.json()
               except requests.HTTPError as error:
+                  response = error.response
                   status_code = (
-                      error.response.status_code
-                      if error.response is not None
+                      response.status_code
+                      if response is not None
                       else "desconocido"
                   )
+                  detail = "sin cuerpo de respuesta"
+                  if response is not None:
+                      try:
+                          error_payload = response.json()
+                          if isinstance(error_payload, dict):
+                              detail = (
+                                  f"code={error_payload.get('code', '-')}; "
+                                  f"message={error_payload.get('message', '-')}"
+                              )
+                          else:
+                              detail = str(error_payload)[:250]
+                      except ValueError:
+                          detail = (response.text or "respuesta vacía")[:250]
                   raise RuntimeError(
-                      f"HTTP {status_code}"
+                      f"HTTP {status_code}: {detail}"
                   ) from None
               except requests.RequestException as error:
                   raise RuntimeError(
@@ -258,29 +272,45 @@ jobs:
               for interval in ("15min", "1day"):
                   print(f"CONSULTANDO HISTÓRICO {asset} | {interval}")
 
-                  try:
-                      history = api_get(
-                          "time_series",
-                          {
-                              "symbol": asset,
-                              "interval": interval,
-                              "mic_code": EXPECTED_MIC,
-                              "type": "ETF",
-                              "outputsize": OUTPUT_SIZE,
-                              "timezone": "UTC",
-                              "order": "desc",
-                          },
-                      )
-                      validate_history(asset, interval, history)
+                  # Twelve Data documenta mic_code y exchange como filtros
+                  # opcionales. Probamos por separado para detectar si uno
+                  # de ellos provoca el 404. La validación final sigue
+                  # exigiendo exactamente XLON y USD.
+                  attempts = (
+                      ("MIC XLON", {"mic_code": EXPECTED_MIC}),
+                      ("exchange LSE", {"exchange": "LSE"}),
+                      ("símbolo sin filtro de mercado", {}),
+                  )
+                  history_ok = False
+                  attempt_errors = []
 
-                  except Exception as error:
-                      print(
-                          f"ERROR HISTÓRICO {asset} {interval}: "
-                          f"{type(error).__name__}: {error}"
-                      )
-                      failures.append(f"{asset} {interval}: histórico fallido")
+                  for attempt_name, market_filter in attempts:
+                      params = {
+                          "symbol": asset,
+                          "interval": interval,
+                          "outputsize": OUTPUT_SIZE,
+                          "timezone": "UTC",
+                          **market_filter,
+                      }
+                      print(f"  Intento: {attempt_name}")
 
-                  time.sleep(9)
+                      try:
+                          history = api_get("time_series", params)
+                          validate_history(asset, interval, history)
+                          history_ok = True
+                          break
+                      except Exception as error:
+                          message = f"{type(error).__name__}: {error}"
+                          attempt_errors.append(f"{attempt_name}: {message}")
+                          print(f"  Fallido: {message}")
+
+                      time.sleep(9)
+
+                  if not history_ok:
+                      failures.append(
+                          f"{asset} {interval}: histórico fallido "
+                          f"({'; '.join(attempt_errors)})"
+                      )
 
           print("\n===============================================")
           print("RESUMEN DEL DIAGNÓSTICO")
