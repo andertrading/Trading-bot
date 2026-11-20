@@ -199,16 +199,27 @@ def send_telegram_message(message):
         logger.info("TELEGRAM MESSAGE SENT")
         return True
 
-    except requests.RequestException:
-        logger.exception("TELEGRAM CONNECTION ERROR")
+    except requests.RequestException as exc:
+        # No registrar la excepción: su URL puede incluir el token
+        # del bot de Telegram en la ruta de la petición.
+        logger.error(
+            "TELEGRAM CONNECTION ERROR | %s",
+            type(exc).__name__,
+        )
         return False
 
-    except ValueError:
-        logger.exception("TELEGRAM INVALID RESPONSE")
+    except ValueError as exc:
+        logger.error(
+            "TELEGRAM INVALID RESPONSE | %s",
+            type(exc).__name__,
+        )
         return False
 
-    except Exception:
-        logger.exception("TELEGRAM UNEXPECTED ERROR")
+    except Exception as exc:
+        logger.error(
+            "TELEGRAM UNEXPECTED ERROR | %s",
+            type(exc).__name__,
+        )
         return False
 
 
@@ -255,16 +266,25 @@ def send_telegram_photo(image_bytes, caption):
         logger.info("TELEGRAM CHART SENT")
         return True
 
-    except requests.RequestException:
-        logger.exception("TELEGRAM PHOTO CONNECTION ERROR")
+    except requests.RequestException as exc:
+        logger.error(
+            "TELEGRAM PHOTO CONNECTION ERROR | %s",
+            type(exc).__name__,
+        )
         return False
 
-    except ValueError:
-        logger.exception("TELEGRAM PHOTO INVALID RESPONSE")
+    except ValueError as exc:
+        logger.error(
+            "TELEGRAM PHOTO INVALID RESPONSE | %s",
+            type(exc).__name__,
+        )
         return False
 
-    except Exception:
-        logger.exception("TELEGRAM PHOTO UNEXPECTED ERROR")
+    except Exception as exc:
+        logger.error(
+            "TELEGRAM PHOTO UNEXPECTED ERROR | %s",
+            type(exc).__name__,
+        )
         return False
 
 
