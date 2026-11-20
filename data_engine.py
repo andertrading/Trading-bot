@@ -686,13 +686,15 @@ def _remove_incomplete_candle(df, interval, asset=None):
 
 def _has_intraday_gaps(df, asset):
     """
-    Comprueba continuidad de velas de 15 minutos.
+    Comprueba la continuidad de velas de 15 minutos.
 
     Cripto:
     - Comprueba continuidad de 15 minutos durante todo el histórico.
 
     Acciones y ETF:
+    - Rechaza sesiones con una sola vela.
     - Comprueba intervalos de 15 minutos dentro de cada sesión.
+    - Detecta sesiones bursátiles completas ausentes entre fechas.
     - Comprueba apertura cuando puede determinarse que la sesión
       está completa.
     - Comprueba cierre en sesiones históricas completas.
@@ -705,11 +707,9 @@ def _has_intraday_gaps(df, asset):
     if df is None or df.empty:
         return True
 
-    if len(df) < 2:
-        return False
-
     timestamps = df.index.sort_values()
 
+    # Criptomonedas: mercado continuo.
     if asset in CRYPTO_ASSETS:
         differences = timestamps.to_series().diff().dropna()
 
@@ -724,6 +724,7 @@ def _has_intraday_gaps(df, asset):
 
         return False
 
+    # Acciones y ETF.
     tz, opening, _ = _session_for_asset(asset)
 
     local_index = timestamps.tz_convert(tz)
@@ -738,12 +739,42 @@ def _has_intraday_gaps(df, asset):
     if not sessions:
         return True
 
-    first_session_date = sessions[0][0]
+    session_dates = [
+        session_date
+        for session_date, _ in sessions
+    ]
 
-    now_local = datetime.now(timezone.utc).astimezone(tz)
+    first_session_date = session_dates[0]
+
+    now_local = (
+        datetime.now(timezone.utc).astimezone(tz)
+    )
+
     current_session_date = now_local.date()
 
+    # Detectar sesiones bursátiles completas ausentes.
+    for previous_date, current_date in zip(
+        session_dates,
+        session_dates[1:],
+    ):
+        missing_date = previous_date + timedelta(days=1)
+
+        while missing_date < current_date:
+            if _is_trading_day(missing_date, asset):
+                logger.error(
+                    "SESIÓN BURSÁTIL AUSENTE | %s | fecha=%s | anterior=%s | siguiente=%s",
+                    asset,
+                    missing_date,
+                    previous_date,
+                    current_date,
+                )
+                return True
+
+            missing_date += timedelta(days=1)
+
+    # Validar cada sesión representada.
     for session_date, group in sessions:
+
         if not _is_trading_day(session_date, asset):
             logger.error(
                 "HISTÓRICO RECHAZADO: vela en día no hábil | %s | %s",
@@ -756,6 +787,8 @@ def _has_intraday_gaps(df, asset):
             group.index
         ).sort_values()
 
+        # Una sesión con una única vela no permite verificar
+        # la continuidad intradía y se considera incompleta.
         if len(session_timestamps) < 2:
             logger.error(
                 "HISTÓRICO RECHAZADO: sesión con una sola vela | %s | %s",
@@ -764,6 +797,7 @@ def _has_intraday_gaps(df, asset):
             )
             return True
 
+        # Comprobar continuidad entre velas.
         differences = (
             session_timestamps.to_series()
             .diff()
@@ -800,7 +834,11 @@ def _has_intraday_gaps(df, asset):
             tzinfo=tz,
         )
 
-        if local_first < open_dt or local_last >= close_dt:
+        # Comprobar que las velas están dentro del horario.
+        if (
+            local_first < open_dt
+            or local_last >= close_dt
+        ):
             logger.error(
                 "HORARIO INTRADIA INVÁLIDO | %s | %s",
                 asset,
@@ -808,11 +846,9 @@ def _has_intraday_gaps(df, asset):
             )
             return True
 
-        # Si el histórico contiene varias sesiones, el primer día
-        # puede estar parcialmente descargado por el límite del
-        # proveedor. No exigimos su primera vela en ese caso.
-        #
-        # Si solo hay una sesión, sí comprobamos su apertura.
+        # Comprobar apertura.
+        # El primer día de un histórico multidía puede estar
+        # parcialmente descargado por el límite del proveedor.
         check_open = (
             session_date != first_session_date
             or len(sessions) == 1
@@ -828,11 +864,7 @@ def _has_intraday_gaps(df, asset):
             )
             return True
 
-        # Una sesión anterior a la fecha local actual debe estar
-        # completa. La sesión actual puede seguir abierta.
-        #
-        # Si la sesión actual ya ha cerrado, también exigimos
-        # la última vela correspondiente a su horario.
+        # Comprobar cierre en sesiones completas.
         session_is_complete = (
             session_date < current_session_date
             or (
@@ -842,7 +874,9 @@ def _has_intraday_gaps(df, asset):
         )
 
         if session_is_complete:
-            expected_last = close_dt - timedelta(minutes=15)
+            expected_last = (
+                close_dt - timedelta(minutes=15)
+            )
 
             if local_last != expected_last:
                 logger.error(
