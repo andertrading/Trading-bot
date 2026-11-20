@@ -55,13 +55,27 @@ jobs:
               request_params = dict(params)
               request_params["apikey"] = API_KEY
 
-              response = SESSION.get(
-                  f"{BASE_URL}/{endpoint}",
-                  params=request_params,
-                  timeout=35,
-              )
-              response.raise_for_status()
-              payload = response.json()
+              try:
+                  response = SESSION.get(
+                      f"{BASE_URL}/{endpoint}",
+                      params=request_params,
+                      timeout=35,
+                  )
+                  response.raise_for_status()
+                  payload = response.json()
+              except requests.HTTPError as error:
+                  status_code = (
+                      error.response.status_code
+                      if error.response is not None
+                      else "desconocido"
+                  )
+                  raise RuntimeError(
+                      f"HTTP {status_code}"
+                  ) from None
+              except requests.RequestException as error:
+                  raise RuntimeError(
+                      type(error).__name__
+                  ) from None
 
               if not isinstance(payload, dict):
                   raise ValueError("Respuesta API no válida")
@@ -220,7 +234,7 @@ jobs:
                       )
                       continue
 
-                  access = listing.get("access", {})
+                  access = listing.get("access") or {}
                   print(
                       "LISTING EXACTO:",
                       f"symbol={listing.get('symbol')}",
