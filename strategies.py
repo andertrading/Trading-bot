@@ -41,6 +41,8 @@ def _no_trade(asset, timeframe, reason, score=None):
         "reason": reason,
         "asset": asset,
         "timeframe": timeframe,
+        "tradable": False,
+        "validated": False,
     }
 
     if score is not None:
@@ -63,10 +65,12 @@ def evaluate_signal_at(data, asset, timeframe, index=-1):
     """
     Evalúa una vela concreta utilizando indicadores ya calculados.
 
-    Admite tanto (data, asset, timeframe) como
-    (asset, data, timeframe).
+    Admite tanto:
+        (data, asset, timeframe)
+        (asset, data, timeframe)
 
-    Esta función es compartida por el análisis habitual y el backtest.
+    Se utiliza tanto en el análisis habitual como en el backtest.
+
     No ejecuta operaciones ni calcula tamaño de posición.
     """
 
@@ -193,6 +197,20 @@ def evaluate_signal_at(data, asset, timeframe, index=-1):
             "Volatilidad excesiva",
         )
 
+    # FILTRO OBLIGATORIO DE TENDENCIA PRINCIPAL.
+    #
+    # Antes esta condición solamente sumaba 20 puntos.
+    # Ahora es imprescindible para permitir una candidata.
+    #
+    # EMA50 debe estar estrictamente por encima de EMA200.
+
+    if ema50 <= ema200:
+        return _no_trade(
+            asset,
+            timeframe,
+            "Tendencia principal no alcista: EMA50 no supera EMA200",
+        )
+
     score = 0
     reasons = []
 
@@ -206,6 +224,7 @@ def evaluate_signal_at(data, asset, timeframe, index=-1):
         score += 15
         reasons.append("EMA20 sobre EMA50")
 
+    # Esta condición también puntúa, pero ya es obligatoria.
     if ema50 > ema200:
         score += 20
         reasons.append("Tendencia principal alcista")
@@ -221,13 +240,13 @@ def evaluate_signal_at(data, asset, timeframe, index=-1):
         reasons.append("MACD alcista")
 
     # Ruptura de máximos anteriores.
-    # HIGH20 debe calcularse con desplazamiento de una vela.
+    # HIGH20 debe calcularse desplazando una vela.
 
     if price > high20:
         score += 10
         reasons.append("Ruptura de máximos de 20 velas")
 
-    # El volumen es opcional.
+    # El volumen continúa siendo opcional.
 
     relative_volume = row.get(
         "RELATIVE_VOLUME",
@@ -317,6 +336,8 @@ def evaluate_signal_at(data, asset, timeframe, index=-1):
         "reasons": reasons,
         "duration_estimate": None,
         "status": "PENDING_VALIDATION",
+        "tradable": False,
+        "validated": False,
     }
 
 
@@ -324,8 +345,9 @@ def evaluate_signal(df, asset, timeframe):
     """
     Evalúa la última vela disponible para el escáner habitual.
 
-    Admite tanto (df, asset, timeframe) como
-    (asset, df, timeframe).
+    Admite tanto:
+        (df, asset, timeframe)
+        (asset, df, timeframe)
     """
 
     df, asset = _normalize_arguments(df, asset)
