@@ -1,82 +1,302 @@
-
-name: Twelve Data - ETF Symbol Search
+name: Twelve Data - ETF Symbol and History Diagnostic
 
 on:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
-  search-etfs:
+  diagnose-etfs:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
 
     steps:
-      - name: Search ETF symbols
+      - name: Descargar repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Instalar dependencias
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests==2.32.4
+
+      - name: Comprobar símbolos LSE/USD y sus históricos
         env:
           TWELVE_DATA_API_KEY: ${{ secrets.TWELVE_DATA_API_KEY }}
         run: |
-          python - <<'PY'
+          python -u - <<'PY'
+          import math
           import os
-          import json
-          import time
-          import urllib.request
-          import urllib.parse
           import sys
+          import time
 
-          api_key = os.environ.get("TWELVE_DATA_API_KEY")
+          import requests
 
-          if not api_key:
-              print("ERROR: API key missing")
-              sys.exit(1)
+          BASE_URL = "https://api.twelvedata.com"
+          API_KEY = os.environ.get("TWELVE_DATA_API_KEY")
+          EXPECTED_MIC = "XLON"
+          EXPECTED_CURRENCY = "USD"
+          EXPECTED_BARS = 220
+          OUTPUT_SIZE = 250
+          SESSION = requests.Session()
+          failures = []
 
-          searches = [
-              "CSPX",
-              "CNDX",
-              "iShares Core S&P 500 UCITS ETF",
-              "iShares NASDAQ 100 UCITS ETF"
-          ]
+          ASSETS = {
+              "CSPX": "iShares Core S&P 500 UCITS ETF",
+              "CNDX": "iShares NASDAQ 100 UCITS ETF",
+          }
 
-          for term in searches:
-              params = urllib.parse.urlencode({
-                  "symbol": term,
-                  "outputsize": 30,
-                  "show_plan": "true",
-                  "apikey": api_key
-              })
-
-              url = "https://api.twelvedata.com/symbol_search?" + params
-
-              print("\nSEARCH:", term)
+          def api_get(endpoint, params):
+              request_params = dict(params)
+              request_params["apikey"] = API_KEY
 
               try:
-                  request = urllib.request.Request(url)
+                  response = SESSION.get(
+                      f"{BASE_URL}/{endpoint}",
+                      params=request_params,
+                      timeout=35,
+                  )
+                  response.raise_for_status()
+                  payload = response.json()
+              except requests.HTTPError as error:
+                  status_code = (
+                      error.response.status_code
+                      if error.response is not None
+                      else "desconocido"
+                  )
+                  raise RuntimeError(
+                      f"HTTP {status_code}"
+                  ) from None
+              except requests.RequestException as error:
+                  raise RuntimeError(
+                      type(error).__name__
+                  ) from None
 
-                  with urllib.request.urlopen(request, timeout=30) as response:
-                      data = json.loads(response.read().decode())
+              if not isinstance(payload, dict):
+                  raise ValueError("Respuesta API no válida")
 
-                  matches = data.get("data", [])
+              if payload.get("status") == "error" or payload.get("code"):
+                  code = payload.get("code", "sin código")
+                  message = payload.get("message", "sin detalle")
+                  raise RuntimeError(f"API code={code}: {message}")
 
-                  if not matches:
-                      print("NO MATCHES")
-                      print("Message:", data.get("message", "No details"))
-                  else:
+              return payload
+
+          def exact_listing(asset, matches):
+              candidates = [
+                  item for item in matches
+                  if str(item.get("symbol", "")).upper() == asset
+              ]
+
+              for item in candidates:
+                  mic = str(item.get("mic_code", "")).upper()
+                  currency = str(item.get("currency", "")).upper()
+                  instrument_type = str(
+                      item.get("instrument_type", "")
+                  ).upper()
+
+                  if (
+                      mic == EXPECTED_MIC
+                      and currency == EXPECTED_CURRENCY
+                      and instrument_type == "ETF"
+                  ):
+                      return item
+
+              return None
+
+          def validate_history(asset, interval, payload):
+              meta = payload.get("meta")
+              values = payload.get("values")
+
+              if not isinstance(meta, dict):
+                  raise ValueError("Falta metadata del histórico")
+
+              checks = {
+                  "symbol": str(meta.get("symbol", "")).upper() == asset,
+                  "currency": (
+                      str(meta.get("currency", "")).upper()
+                      == EXPECTED_CURRENCY
+                  ),
+                  "MIC": (
+                      str(meta.get("mic_code", "")).upper()
+                      == EXPECTED_MIC
+                  ),
+              }
+
+              failed_checks = [
+                  name for name, passed in checks.items() if not passed
+              ]
+              if failed_checks:
+                  raise ValueError(
+                      "Metadata incompatible o incompleta: "
+                      + ", ".join(failed_checks)
+                  )
+
+              if not isinstance(values, list):
+                  raise ValueError(
+                      payload.get("message", "La API no devolvió values")
+                  )
+
+              valid = 0
+              invalid = 0
+
+              for candle in values:
+                  try:
+                      open_price = float(candle["open"])
+                      high = float(candle["high"])
+                      low = float(candle["low"])
+                      close = float(candle["close"])
+
+                      prices = (open_price, high, low, close)
+                      coherent = (
+                          all(math.isfinite(value) and value > 0
+                              for value in prices)
+                          and high >= max(open_price, low, close)
+                          and low <= min(open_price, high, close)
+                      )
+
+                      if coherent:
+                          valid += 1
+                      else:
+                          invalid += 1
+                  except (KeyError, TypeError, ValueError):
+                      invalid += 1
+
+              if invalid:
+                  raise ValueError(
+                      f"{invalid} velas OHLC inválidas; "
+                      "no se descartan silenciosamente"
+                  )
+
+              if valid < EXPECTED_BARS:
+                  raise ValueError(
+                      f"Histórico insuficiente: {valid} velas "
+                      f"(mínimo {EXPECTED_BARS})"
+                  )
+
+              timestamps = [
+                  candle.get("datetime")
+                  for candle in values
+                  if isinstance(candle, dict)
+              ]
+              print(
+                  f"  HISTÓRICO OK | {asset} | {interval} | "
+                  f"{valid} velas | desde={timestamps[-1] if timestamps else '-'} "
+                  f"| hasta={timestamps[0] if timestamps else '-'}"
+              )
+
+          if not API_KEY:
+              raise SystemExit(
+                  "ERROR: falta el secreto TWELVE_DATA_API_KEY"
+              )
+
+          print("DIAGNÓSTICO TWELVE DATA PARA ETF LSE/USD")
+          print(
+              "Requisitos estrictos: ticker exacto, ETF, MIC XLON y moneda USD"
+          )
+          print(f"Histórico mínimo: {EXPECTED_BARS} velas por temporalidad")
+          print("-----------------------------------------------")
+
+          for asset, expected_name in ASSETS.items():
+              print(f"\nBUSCANDO {asset} | {expected_name}")
+
+              try:
+                  search = api_get(
+                      "symbol_search",
+                      {
+                          "symbol": asset,
+                          "outputsize": 30,
+                          "show_plan": "true",
+                      },
+                  )
+                  matches = search.get("data", [])
+                  listing = exact_listing(asset, matches)
+
+                  if listing is None:
+                      print("NO HAY LISTING EXACTO VERIFICADO")
                       for item in matches:
-                          access = item.get("access", {})
+                          if str(item.get("symbol", "")).upper() == asset:
+                              print(
+                                  "  Candidato:",
+                                  "exchange=", item.get("exchange"),
+                                  "| MIC=", item.get("mic_code"),
+                                  "| tipo=", item.get("instrument_type"),
+                                  "| moneda=", item.get("currency"),
+                                  "| plan=", item.get("access", {}).get("plan"),
+                              )
+                      failures.append(
+                          f"{asset}: sin listing exacto ETF/XLON/USD"
+                      )
+                      continue
 
-                          print(
-                              "Symbol:", item.get("symbol"),
-                              "| Name:", item.get("instrument_name"),
-                              "| Exchange:", item.get("exchange"),
-                              "| MIC:", item.get("mic_code"),
-                              "| Type:", item.get("instrument_type"),
-                              "| Country:", item.get("country"),
-                              "| Currency:", item.get("currency"),
-                              "| Basic access:", access.get("plan", "Not reported")
-                          )
+                  access = listing.get("access") or {}
+                  print(
+                      "LISTING EXACTO:",
+                      f"symbol={listing.get('symbol')}",
+                      f"| name={listing.get('instrument_name')}",
+                      f"| exchange={listing.get('exchange')}",
+                      f"| MIC={listing.get('mic_code')}",
+                      f"| currency={listing.get('currency')}",
+                      f"| plan={access.get('plan', 'no informado')}",
+                  )
 
               except Exception as error:
-                  print("ERROR:", type(error).__name__)
+                  print(
+                      f"ERROR EN BÚSQUEDA {asset}: "
+                      f"{type(error).__name__}: {error}"
+                  )
+                  failures.append(f"{asset}: búsqueda fallida")
+                  continue
 
-              time.sleep(10)
+              time.sleep(9)
 
-          print("\nETF SYMBOL SEARCH COMPLETED")
+              for interval in ("15min", "1day"):
+                  print(f"CONSULTANDO HISTÓRICO {asset} | {interval}")
+
+                  try:
+                      history = api_get(
+                          "time_series",
+                          {
+                              "symbol": asset,
+                              "interval": interval,
+                              "mic_code": EXPECTED_MIC,
+                              "type": "ETF",
+                              "outputsize": OUTPUT_SIZE,
+                              "timezone": "UTC",
+                              "order": "desc",
+                          },
+                      )
+                      validate_history(asset, interval, history)
+
+                  except Exception as error:
+                      print(
+                          f"ERROR HISTÓRICO {asset} {interval}: "
+                          f"{type(error).__name__}: {error}"
+                      )
+                      failures.append(f"{asset} {interval}: histórico fallido")
+
+                  time.sleep(9)
+
+          print("\n===============================================")
+          print("RESUMEN DEL DIAGNÓSTICO")
+          if failures:
+              print(f"RESULTADO: {len(failures)} comprobaciones fallidas")
+              for failure in failures:
+                  print("-", failure)
+              print(
+                  "No se ha cambiado PROVIDER_MAP ni la configuración "
+                  "de los activos."
+              )
+              sys.exit(1)
+
+          print("RESULTADO: ambos ETF tienen listing e históricos válidos.")
+          print(
+              "Esto permite evaluar el cambio de proveedor, pero no lo "
+              "aplica automáticamente."
+          )
           PY
