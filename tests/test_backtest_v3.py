@@ -1,4 +1,3 @@
-
 import unittest
 from unittest.mock import patch
 from contextlib import redirect_stdout
@@ -136,10 +135,22 @@ class TestBacktestV3(unittest.TestCase):
         data = self.make_data()
         duplicated = pd.concat([data, data.iloc[[-1]]])
 
-        with patch.object(
-            backtest_v3.yf,
-            "download",
-            return_value=duplicated,
+        with (
+            patch.object(
+                backtest_v3,
+                "BACKTEST_DATA_MODE",
+                "download",
+            ),
+            patch.object(
+                backtest_v3.yf,
+                "download",
+                return_value=duplicated,
+            ),
+            patch.object(
+                backtest_v3,
+                "_save_snapshot",
+                return_value=None,
+            ),
         ):
             cleaned = backtest_v3.download_history(
                 "AAPL",
@@ -159,6 +170,11 @@ class TestBacktestV3(unittest.TestCase):
         # El test sigue comprobando el rechazo, pero evita
         # imprimir un falso error de AAPL en la consola.
         with (
+            patch.object(
+                backtest_v3,
+                "BACKTEST_DATA_MODE",
+                "download",
+            ),
             patch.object(
                 backtest_v3.yf,
                 "download",
@@ -187,10 +203,17 @@ class TestBacktestV3(unittest.TestCase):
         data = self.make_data()
         data.iloc[10, data.columns.get_loc("Close")] = float("nan")
 
-        with patch.object(
-            backtest_v3.yf,
-            "download",
-            return_value=data,
+        with (
+            patch.object(
+                backtest_v3,
+                "BACKTEST_DATA_MODE",
+                "download",
+            ),
+            patch.object(
+                backtest_v3.yf,
+                "download",
+                return_value=data,
+            ),
         ):
             result = backtest_v3.download_history(
                 "AAPL",
