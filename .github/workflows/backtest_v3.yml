@@ -23,6 +23,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
+    env:
+      BACKTEST_DATA_MODE: download
+      BACKTEST_SNAPSHOT_DIR: historicos_backtest_v3
+
     steps:
       - name: Descargar repositorio
         uses: actions/checkout@v4
@@ -47,18 +51,74 @@ jobs:
 
       - name: Comprobar resultados
         run: |
+          set -e
+
           test -f operaciones_backtest_v3.csv
           test -f resultados_backtest_v3.csv
           test -f errores_backtest_v3.csv
           test -f resumen_operaciones_v3.csv
           test -f diagnostico_senales_v3.csv
+          test -f velas_ohlc_excluidas_v3.csv
+          test -f rechazos_rr_backtest_v3.csv
+          test -f senales_solapadas_v3.csv
+
+          echo "Todos los CSV obligatorios están disponibles."
+
+      - name: Comprobar históricos reproducibles
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          directory = Path("historicos_backtest_v3")
+          manifest = directory / "manifest.json"
+
+          if not manifest.is_file():
+              raise SystemExit(
+                  "No se ha generado historicos_backtest_v3/manifest.json"
+              )
+
+          with open(manifest, encoding="utf-8") as file:
+              snapshots = json.load(file)
+
+          if not isinstance(snapshots, list):
+              raise SystemExit("El manifiesto no contiene una lista.")
+
+          if not snapshots:
+              raise SystemExit("El manifiesto no contiene históricos.")
+
+          for item in snapshots:
+              csv_path = directory / item["csv_file"]
+              metadata_path = directory / (
+                  item["asset"] + "__" + item["timeframe"] + ".json"
+              )
+
+              if not csv_path.is_file():
+                  raise SystemExit(
+                      f"Falta el histórico: {csv_path}"
+                  )
+
+              if not metadata_path.is_file():
+                  raise SystemExit(
+                      f"Faltan los metadatos: {metadata_path}"
+                  )
+
+              if not item.get("sha256"):
+                  raise SystemExit(
+                      f"Falta SHA-256: {csv_path}"
+                  )
+
+          print(f"Snapshots verificados: {len(snapshots)}")
+          PY
 
       - name: Generar informe técnico ampliado
         if: always()
         run: |
           python - <<'PY'
+          import json
           import os
           import pandas as pd
+          from pathlib import Path
 
           FILES = [
               "operaciones_backtest_v3.csv",
@@ -66,6 +126,9 @@ jobs:
               "errores_backtest_v3.csv",
               "resumen_operaciones_v3.csv",
               "diagnostico_senales_v3.csv",
+              "velas_ohlc_excluidas_v3.csv",
+              "rechazos_rr_backtest_v3.csv",
+              "senales_solapadas_v3.csv",
           ]
 
           summary_path = os.environ["GITHUB_STEP_SUMMARY"]
@@ -117,11 +180,19 @@ jobs:
               "",
               "Informe generado automáticamente a partir de los CSV del backtest.",
               "",
+              "## 1. Configuración de ejecución",
+              "",
+              f"- Modo de datos: **{os.getenv('BACKTEST_DATA_MODE', 'unknown')}**",
+              f"- Directorio de snapshots: **{os.getenv('BACKTEST_SNAPSHOT_DIR', 'unknown')}**",
+              "- Proveedor histórico: Yahoo Finance.",
+              "- Ajuste de precios: auto_adjust=True.",
+              "- Costes y sizing: no incluidos.",
+              "",
           ]
 
           data = {}
 
-          report.append("## 1. Estado de los archivos")
+          report.append("## 2. Estado de los archivos")
 
           for filename in FILES:
               if os.path.exists(filename):
@@ -142,12 +213,13 @@ jobs:
           results = data.get("resultados_backtest_v3.csv")
 
           if results is not None and not results.empty:
-              report.append("\n## 2. Resultados generales")
+              report.append("\n## 3. Resultados generales")
 
               numeric_columns = [
                   "operaciones",
                   "ganadoras",
                   "perdedoras",
+                  "total_R",
                   "resultado_R",
                   "drawdown_max_R",
               ]
@@ -166,9 +238,7 @@ jobs:
                   ]
 
                   if not total_rows.empty:
-                      report.append(
-                          markdown_table(total_rows, 20)
-                      )
+                      report.append(markdown_table(total_rows, 20))
 
                   asset_rows = results[
                       results["tipo"].astype(str).str.upper().str.contains(
@@ -190,14 +260,17 @@ jobs:
 
           if monthly is not None:
               report.append(
-                  section("3. Resumen de operaciones y evolución temporal",
-                          monthly, 50)
+                  section(
+                      "4. Resumen de operaciones y evolución temporal",
+                      monthly,
+                      50,
+                  )
               )
 
           diagnostics = data.get("diagnostico_senales_v3.csv")
 
           if diagnostics is not None and not diagnostics.empty:
-              report.append("\n## 4. Diagnóstico de señales")
+              report.append("\n## 5. Diagnóstico de señales")
 
               status_col = find_column(
                   diagnostics, ["signalstatus", "estado", "status"]
@@ -242,7 +315,7 @@ jobs:
                   grouped = (
                       diagnostics.groupby(
                           [asset_col, timeframe_col, status_col],
-                          dropna=False
+                          dropna=False,
                       )
                       .size()
                       .reset_index(name="cantidad")
@@ -253,15 +326,36 @@ jobs:
                   section(
                       "Muestra de señales diagnosticadas",
                       diagnostics,
-                      15
+                      15,
+                  )
+              )
+
+          overlaps = data.get("senales_solapadas_v3.csv")
+
+          if overlaps is not None:
+              report.append(
+                  section(
+                      "6. Señales no simuladas por solapamiento",
+                      overlaps,
+                      30,
+                  )
+              )
+
+          rr_rejections = data.get("rechazos_rr_backtest_v3.csv")
+
+          if rr_rejections is not None:
+              report.append(
+                  section(
+                      "7. Rechazos por riesgo/recompensa",
+                      rr_rejections,
+                      30,
                   )
               )
 
           operations = data.get("operaciones_backtest_v3.csv")
 
           if operations is not None and not operations.empty:
-              report.append("\n## 5. Operaciones ejecutadas")
-
+              report.append("\n## 8. Operaciones ejecutadas")
               report.append(
                   f"\nTotal de registros: **{len(operations)}**.\n"
               )
@@ -288,20 +382,60 @@ jobs:
 
           if errors is not None:
               report.append(
-                  section("6. Errores del backtest", errors, 30)
+                  section("9. Errores del backtest", errors, 30)
               )
+
+          excluded = data.get("velas_ohlc_excluidas_v3.csv")
+
+          if excluded is not None:
+              report.append(
+                  section(
+                      "10. Velas OHLC excluidas",
+                      excluded,
+                      30,
+                  )
+              )
+
+          snapshot_dir = Path("historicos_backtest_v3")
+          manifest_path = snapshot_dir / "manifest.json"
+
+          report.append("\n## 11. Históricos reproducibles")
+
+          if manifest_path.is_file():
+              try:
+                  with open(manifest_path, encoding="utf-8") as file:
+                      snapshots = json.load(file)
+
+                  report.append(
+                      f"- Snapshots registrados: **{len(snapshots)}**."
+                  )
+
+                  for item in snapshots:
+                      report.append(
+                          f"- {item.get('asset')} "
+                          f"({item.get('timeframe')}): "
+                          f"{item.get('row_count')} velas; "
+                          f"SHA-256 `{item.get('sha256', '')}`."
+                      )
+              except Exception as exc:
+                  report.append(
+                      f"- Error leyendo manifiesto: {exc}"
+                  )
+          else:
+              report.append("- No se ha encontrado el manifiesto.")
 
           report.extend([
               "",
-              "## 7. Consideraciones",
+              "## 12. Consideraciones",
               "",
-              "- Los resultados en R no representan por sí solos una "
-              "rentabilidad monetaria de cartera.",
-              "- No se deben considerar incluidos los costes reales, "
-              "el deslizamiento, la financiación ni el cambio de divisa "
-              "si el backtest no los incorpora.",
-              "- El informe es una herramienta de diagnóstico, "
-              "no una validación de rentabilidad futura.",
+              "- Los resultados en R no representan por sí solos "
+              "una rentabilidad monetaria de cartera.",
+              "- No se consideran incluidos los costes reales, "
+              "el deslizamiento, la financiación ni el cambio de divisa.",
+              "- Los snapshots permiten reproducir los datos descargados, "
+              "pero no garantizan que el proveedor histórico sea idéntico "
+              "al utilizado por el escáner en tiempo real.",
+              "- Una ejecución verde no demuestra rentabilidad futura.",
               "",
               "## Fin del informe",
           ])
@@ -323,5 +457,9 @@ jobs:
             errores_backtest_v3.csv
             resumen_operaciones_v3.csv
             diagnostico_senales_v3.csv
+            velas_ohlc_excluidas_v3.csv
+            rechazos_rr_backtest_v3.csv
+            senales_solapadas_v3.csv
+            historicos_backtest_v3/
           if-no-files-found: warn
           retention-days: 30
