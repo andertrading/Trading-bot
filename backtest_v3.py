@@ -740,7 +740,7 @@ def _has_missing_trading_day(
 
     while missing_date < current_date:
         if _is_trading_day(
-            missing_date.date(),
+            missing_date,
             calendar_asset,
         ):
             return True
@@ -1059,16 +1059,6 @@ def download_history(ticker, interval, asset=None):
                 errors="coerce",
             )
 
-        for column in required:
-            if data[column].isna().any():
-                count = int(data[column].isna().sum())
-
-                DOWNLOAD_ERRORS[key] = (
-                    f"{column} contiene {count} valores ausentes "
-                    "o no numéricos"
-                )
-                return None
-
         data = data.replace(
             [np.inf, -np.inf],
             np.nan,
@@ -1080,18 +1070,23 @@ def download_history(ticker, interval, asset=None):
             )
             return None
 
-        # Rechazar duplicados en vez de elegir silenciosamente
-        # una de las velas que comparten timestamp.
-        if data.index.has_duplicates:
-            duplicate_count = int(
-                data.index.duplicated(keep=False).sum()
-            )
+        # Consolidar únicamente duplicados idénticos.
+        # Si un mismo timestamp contiene velas distintas, el histórico
+        # se rechaza para no elegir arbitrariamente una cotización.
+        duplicated = data.index.duplicated(keep=False)
 
-            DOWNLOAD_ERRORS[key] = (
-                f"Histórico rechazado: "
-                f"{duplicate_count} filas tienen timestamps duplicados"
-            )
-            return None
+        if duplicated.any():
+            duplicate_rows = data.loc[duplicated]
+
+            for timestamp, group in duplicate_rows.groupby(level=0):
+                if len(group.drop_duplicates()) > 1:
+                    DOWNLOAD_ERRORS[key] = (
+                        "Histórico rechazado: "
+                        f"timestamp duplicado conflictivo ({timestamp})"
+                    )
+                    return None
+
+            data = data[~data.index.duplicated(keep="last")].copy()
 
         # No ordenar automáticamente: el orden recibido forma
         # parte de la integridad del histórico descargado.
@@ -1108,7 +1103,21 @@ def download_history(ticker, interval, asset=None):
         )
         return None
 
+    # Excluir primero la última vela, que el backtest considera
+    # potencialmente incompleta. No debe invalidar el histórico
+    # por valores OHLC todavía en formación.
+    if len(data) > 1:
+        data = data.iloc[:-1].copy()
+
     for column in required:
+        if data[column].isna().any():
+            count = int(data[column].isna().sum())
+            DOWNLOAD_ERRORS[key] = (
+                f"{column} contiene {count} valores ausentes "
+                "o no numéricos en velas cerradas"
+            )
+            return None
+
         values = data[column].to_numpy(dtype=float)
 
         if not np.isfinite(values).all():
@@ -1153,11 +1162,6 @@ def download_history(ticker, interval, asset=None):
     if validation_error:
         DOWNLOAD_ERRORS[key] = validation_error
         return None
-
-    # Se conserva el criterio actual del backtest.
-    # La última fila se excluye antes de guardar el snapshot.
-    if len(data) > 1:
-        data = data.iloc[:-1].copy()
 
     if len(data) < MIN_BARS:
         DOWNLOAD_ERRORS[key] = (

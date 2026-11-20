@@ -4,6 +4,17 @@ name: Trading Bot 3.0 - Backtest
 on:
   workflow_dispatch:
 
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "backtest_v3.py"
+      - "strategies.py"
+      - "indicators.py"
+      - "config.py"
+      - "requirements.txt"
+      - ".github/workflows/backtest_v3.yml"
+
   push:
     branches:
       - main
