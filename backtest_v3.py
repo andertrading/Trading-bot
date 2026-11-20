@@ -1,5 +1,11 @@
 
+import hashlib
+import json
+import os
+import platform
 import warnings
+from datetime import datetime, timezone
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -10,7 +16,7 @@ from indicators import add_indicators
 from strategies import evaluate_signal_at
 
 
-VERSION = "3.12"
+VERSION = "3.13"
 
 PERIODS = {
     "15m": {"period": "60d", "max_bars": 32},
@@ -19,19 +25,44 @@ PERIODS = {
 
 MIN_BARS = 220
 
-# RR mínimo exigido después de ejecutar la entrada real.
 MIN_EXECUTION_RR = 2.0
-
-# Tolerancia para evitar rechazos por precisión decimal.
-# No modifica de forma significativa el RR mínimo exigido.
 RR_TOLERANCE = 1e-6
+
+# ---------------------------------------------------------
+# REPRODUCIBILIDAD
+# ---------------------------------------------------------
+
+BACKTEST_DATA_MODE = os.getenv(
+    "BACKTEST_DATA_MODE",
+    "download",
+).strip().lower()
+
+SNAPSHOT_DIR = Path(
+    os.getenv(
+        "BACKTEST_SNAPSHOT_DIR",
+        "historicos_backtest_v3",
+    )
+)
+
+if BACKTEST_DATA_MODE not in ("download", "replay"):
+    raise ValueError(
+        "BACKTEST_DATA_MODE debe ser 'download' o 'replay'"
+    )
+
+SNAPSHOT_MANIFEST = []
+
+
+# ---------------------------------------------------------
+# REGISTROS
+# ---------------------------------------------------------
 
 DOWNLOAD_ERRORS = {}
 
 EXCLUDED_OHLC_CANDLES = []
 
-# Diagnóstico de señales rechazadas por RR real insuficiente.
 RR_REJECTIONS = []
+
+SIGNAL_DIAGNOSTICS = []
 
 RR_REJECTION_COLUMNS = [
     "asset",
@@ -49,9 +80,6 @@ RR_REJECTION_COLUMNS = [
     "minimum_rr",
     "reason",
 ]
-
-# Diagnóstico general de todas las señales candidatas.
-SIGNAL_DIAGNOSTICS = []
 
 SIGNAL_DIAGNOSTIC_COLUMNS = [
     "asset",
@@ -88,28 +116,37 @@ SIGNAL_DIAGNOSTIC_COLUMNS = [
     "result_R",
 ]
 
+OVERLAPPING_SIGNAL_COLUMNS = [
+    "asset",
+    "ticker",
+    "timeframe",
+    "signal_time",
+    "entry_time",
+    "signal_score",
+    "signal_reference",
+    "entry",
+    "stop",
+    "target",
+    "actual_rr",
+    "active_trade_exit_time",
+    "reason",
+]
+
 
 # ---------------------------------------------------------
-# CONFIGURACIÓN DE HUECOS TEMPORALES
+# CONFIGURACIÓN TEMPORAL
 # ---------------------------------------------------------
-
-INTRADAY_INTERVAL_MINUTES = {
-    "15m": 15,
-}
 
 GAP_TOLERANCE_MULTIPLIER = 1.5
 
 
 # ---------------------------------------------------------
-# FUNCIONES AUXILIARES DE DIAGNÓSTICO
+# FUNCIONES AUXILIARES
 # ---------------------------------------------------------
 
 def _safe_float(value):
-    """Convierte un valor a float sin propagar errores."""
-
     try:
         result = float(value)
-
     except (TypeError, ValueError, OverflowError):
         return None
 
@@ -120,13 +157,9 @@ def _safe_float(value):
 
 
 def _first_row_value(row, names):
-    """Obtiene el primer indicador disponible entre varios nombres."""
-
     for name in names:
-
         try:
             value = row.get(name)
-
         except AttributeError:
             try:
                 value = row[name]
@@ -139,6 +172,300 @@ def _first_row_value(row, names):
     return None
 
 
+def _utc_now():
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _snapshot_paths(asset, interval):
+    base = SNAPSHOT_DIR / f"{asset}__{interval}"
+
+    return (
+        base.with_suffix(".csv"),
+        base.with_suffix(".json"),
+    )
+
+
+def _sha256_file(path):
+    digest = hashlib.sha256()
+
+    with open(path, "rb") as file:
+        for chunk in iter(lambda: file.read(1024 * 1024), b""):
+            digest.update(chunk)
+
+    return digest.hexdigest()
+
+
+def _snapshot_metadata(
+    asset,
+    ticker,
+    interval,
+    data,
+    csv_path,
+    digest,
+):
+    return {
+        "bot_version": VERSION,
+        "asset": asset,
+        "ticker": ticker,
+        "timeframe": interval,
+        "provider": "Yahoo Finance",
+        "period_requested": PERIODS[interval]["period"],
+        "interval_requested": interval,
+        "auto_adjust": True,
+        "closed_candle_policy": (
+            "Se excluye la última fila descargada"
+        ),
+        "downloaded_at_utc": _utc_now(),
+        "first_timestamp": str(data.index[0]),
+        "last_timestamp": str(data.index[-1]),
+        "row_count": int(len(data)),
+        "sha256": digest,
+        "csv_file": csv_path.name,
+        "python_version": platform.python_version(),
+        "pandas_version": pd.__version__,
+        "numpy_version": np.__version__,
+        "yfinance_version": getattr(
+            yf,
+            "__version__",
+            "unknown",
+        ),
+    }
+
+
+def _save_snapshot(asset, ticker, interval, data):
+    """
+    Guarda las velas exactas utilizadas por el backtest.
+
+    El CSV se escribe primero en un archivo temporal.
+    Después se calcula su SHA-256 y se guarda el manifiesto.
+    """
+
+    try:
+        SNAPSHOT_DIR.mkdir(
+            parents=True,
+            exist_ok=True,
+        )
+
+        csv_path, metadata_path = _snapshot_paths(
+            asset,
+            interval,
+        )
+
+        temporary_csv = csv_path.with_suffix(".csv.tmp")
+        temporary_metadata = metadata_path.with_suffix(".json.tmp")
+
+        export = data.copy()
+        export.index.name = "timestamp"
+
+        export.to_csv(
+            temporary_csv,
+            index=True,
+            index_label="timestamp",
+            float_format="%.12g",
+        )
+
+        digest = _sha256_file(temporary_csv)
+
+        metadata = _snapshot_metadata(
+            asset,
+            ticker,
+            interval,
+            data,
+            csv_path,
+            digest,
+        )
+
+        with open(
+            temporary_metadata,
+            "w",
+            encoding="utf-8",
+        ) as file:
+            json.dump(
+                metadata,
+                file,
+                ensure_ascii=False,
+                indent=2,
+            )
+
+        os.replace(temporary_csv, csv_path)
+        os.replace(temporary_metadata, metadata_path)
+
+        SNAPSHOT_MANIFEST.append(metadata)
+
+        print(
+            f"  Histórico guardado: {csv_path} "
+            f"| SHA256={digest[:16]}..."
+        )
+
+        return metadata
+
+    except Exception as exc:
+        raise RuntimeError(
+            f"No se pudo guardar el snapshot de "
+            f"{asset} ({interval}): {exc}"
+        ) from exc
+
+
+def _load_snapshot(asset, ticker, interval):
+    """
+    Carga un histórico guardado y verifica su integridad.
+
+    No descarga datos si el snapshot falta o está alterado.
+    """
+
+    csv_path, metadata_path = _snapshot_paths(
+        asset,
+        interval,
+    )
+
+    if not csv_path.is_file():
+        raise FileNotFoundError(
+            f"No existe el histórico guardado: {csv_path}"
+        )
+
+    if not metadata_path.is_file():
+        raise FileNotFoundError(
+            f"No existe el manifiesto: {metadata_path}"
+        )
+
+    with open(
+        metadata_path,
+        "r",
+        encoding="utf-8",
+    ) as file:
+        metadata = json.load(file)
+
+    expected = {
+        "asset": asset,
+        "ticker": ticker,
+        "timeframe": interval,
+        "provider": "Yahoo Finance",
+        "auto_adjust": True,
+    }
+
+    for key, value in expected.items():
+        if metadata.get(key) != value:
+            raise ValueError(
+                f"Metadatos incompatibles en {metadata_path}: "
+                f"{key} esperado={value}, "
+                f"recibido={metadata.get(key)}"
+            )
+
+    actual_hash = _sha256_file(csv_path)
+
+    if actual_hash != metadata.get("sha256"):
+        raise ValueError(
+            f"SHA-256 incorrecto en {csv_path}. "
+            "El archivo puede haber sido modificado."
+        )
+
+    data = pd.read_csv(
+        csv_path,
+        parse_dates=["timestamp"],
+    )
+
+    if "timestamp" not in data.columns:
+        raise ValueError(
+            f"El snapshot no contiene timestamp: {csv_path}"
+        )
+
+    data = data.set_index("timestamp")
+
+    data.index = pd.DatetimeIndex(
+        pd.to_datetime(
+            data.index,
+            utc=True,
+            errors="coerce",
+        )
+    )
+
+    if data.index.hasnans:
+        raise ValueError(
+            f"El snapshot contiene timestamps inválidos: {csv_path}"
+        )
+
+    required = [
+        "Open",
+        "High",
+        "Low",
+        "Close",
+    ]
+
+    for column in required:
+        if column not in data.columns:
+            raise ValueError(
+                f"Falta {column} en el snapshot {csv_path}"
+            )
+
+        data[column] = pd.to_numeric(
+            data[column],
+            errors="coerce",
+        )
+
+    if "Volume" in data.columns:
+        data["Volume"] = pd.to_numeric(
+            data["Volume"],
+            errors="coerce",
+        )
+
+    data = data.sort_index()
+
+    if data.index.has_duplicates:
+        raise ValueError(
+            f"El snapshot contiene timestamps duplicados: {csv_path}"
+        )
+
+    if len(data) != metadata.get("row_count"):
+        raise ValueError(
+            f"Número de filas incompatible en {csv_path}"
+        )
+
+    validation_error = _ohlc_validation_error(data)
+
+    if validation_error:
+        raise ValueError(
+            f"Snapshot OHLC inválido: {validation_error}"
+        )
+
+    if len(data) < MIN_BARS:
+        raise ValueError(
+            f"Snapshot insuficiente: {len(data)} velas"
+        )
+
+    SNAPSHOT_MANIFEST.append(metadata)
+
+    print(
+        f"  Histórico reproducido: {csv_path} "
+        f"| SHA256={actual_hash[:16]}..."
+    )
+
+    return data
+
+
+def _write_snapshot_manifest():
+    if not SNAPSHOT_MANIFEST:
+        return
+
+    SNAPSHOT_DIR.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    path = SNAPSHOT_DIR / "manifest.json"
+
+    with open(path, "w", encoding="utf-8") as file:
+        json.dump(
+            SNAPSHOT_MANIFEST,
+            file,
+            ensure_ascii=False,
+            indent=2,
+        )
+
+
+# ---------------------------------------------------------
+# DIAGNÓSTICO DE SEÑALES
+# ---------------------------------------------------------
+
 def _start_signal_diagnostic(
     asset,
     ticker,
@@ -147,8 +474,6 @@ def _start_signal_diagnostic(
     signal_row,
     signal,
 ):
-    """Crea el registro inicial de una señal candidata."""
-
     diagnostic = {
         "asset": asset,
         "ticker": ticker,
@@ -244,8 +569,6 @@ def _start_signal_diagnostic(
         signal.get("target")
     )
 
-    diagnostic["entry_time"] = None
-
     SIGNAL_DIAGNOSTICS.append(diagnostic)
 
     return diagnostic
@@ -256,8 +579,6 @@ def _finish_signal_diagnostic(
     status,
     reason=None,
 ):
-    """Actualiza el estado final de una señal candidata."""
-
     if diagnostic is None:
         return
 
@@ -266,13 +587,10 @@ def _finish_signal_diagnostic(
 
 
 def _update_signal_diagnostic(diagnostic, **values):
-    """Actualiza los campos disponibles de un diagnóstico."""
-
     if diagnostic is None:
         return
 
     for key, value in values.items():
-
         if key in SIGNAL_DIAGNOSTIC_COLUMNS:
             diagnostic[key] = value
 
@@ -282,12 +600,9 @@ def _update_signal_diagnostic(diagnostic, **values):
 # ---------------------------------------------------------
 
 def get_assets():
-    """Obtiene los activos habilitados en config.py."""
-
     result = []
 
     for name, settings in ASSETS.items():
-
         if not isinstance(settings, dict):
             continue
 
@@ -303,14 +618,14 @@ def get_assets():
 
 
 def _get_asset_type(asset):
-    """Devuelve el tipo de activo configurado."""
-
     settings = ASSETS.get(asset, {})
 
     if not isinstance(settings, dict):
         return "UNKNOWN"
 
-    return str(settings.get("type", "UNKNOWN")).upper()
+    return str(
+        settings.get("type", "UNKNOWN")
+    ).upper()
 
 
 # ---------------------------------------------------------
@@ -323,12 +638,9 @@ def _has_unexpected_gap(
     interval,
     asset_type,
 ):
-    """Detecta discontinuidades temporales anómalas."""
-
     try:
         previous = pd.Timestamp(previous_timestamp)
         current = pd.Timestamp(current_timestamp)
-
     except (TypeError, ValueError):
         return True
 
@@ -343,13 +655,10 @@ def _has_unexpected_gap(
     asset_type = str(asset_type).upper()
 
     if asset_type == "CRYPTO":
-
         if interval == "15m":
             expected = pd.Timedelta(minutes=15)
-
         elif interval == "1d":
             expected = pd.Timedelta(days=1)
-
         else:
             return True
 
@@ -358,14 +667,11 @@ def _has_unexpected_gap(
         return elapsed > maximum
 
     if asset_type in ("STOCK", "ETF"):
-
         if interval == "15m":
-
             if previous.date() != current.date():
                 return False
 
             expected = pd.Timedelta(minutes=15)
-
             maximum = expected * GAP_TOLERANCE_MULTIPLIER
 
             return elapsed > maximum
@@ -381,8 +687,6 @@ def _has_unexpected_gap(
 # ---------------------------------------------------------
 
 def _normalize_columns(data):
-    """Normaliza columnas de Yahoo Finance."""
-
     if not isinstance(data.columns, pd.MultiIndex):
         return data
 
@@ -395,7 +699,6 @@ def _normalize_columns(data):
     }
 
     for level in range(data.columns.nlevels):
-
         values = set(data.columns.get_level_values(level))
 
         if fields.intersection(values):
@@ -406,8 +709,6 @@ def _normalize_columns(data):
 
 
 def _ohlc_incoherent_mask(data):
-    """Identifica velas con relaciones OHLC imposibles."""
-
     return (
         (data["High"] < data["Low"])
         | (data["High"] < data["Open"])
@@ -418,8 +719,6 @@ def _ohlc_incoherent_mask(data):
 
 
 def _ohlc_validation_error(data):
-    """Valida los precios OHLC y devuelve el motivo del error."""
-
     if data is None:
         return "El histórico es None"
 
@@ -441,47 +740,47 @@ def _ohlc_validation_error(data):
         return f"Faltan columnas OHLC: {missing}"
 
     for column in required:
-
         try:
             values = data[column].to_numpy(dtype=float)
-
         except (TypeError, ValueError) as exc:
-            return f"No se puede convertir {column} a números: {exc}"
+            return f"No se puede convertir {column}: {exc}"
 
         if not np.isfinite(values).all():
             return f"La columna {column} contiene valores no finitos"
 
         if (values <= 0).any():
-            return f"La columna {column} contiene precios cero o negativos"
+            return f"La columna {column} contiene precios no positivos"
 
     invalid_count = int(_ohlc_incoherent_mask(data).sum())
 
     if invalid_count:
         return (
-            f"Se detectaron {invalid_count} velas OHLC incoherentes. "
-            "Se rechaza el histórico completo para evitar "
-            "operaciones a través de huecos."
+            f"Se detectaron {invalid_count} velas OHLC incoherentes"
         )
 
     return None
 
 
 def _valid_ohlc(data):
-    """Comprueba que los precios OHLC sean válidos."""
-
     return _ohlc_validation_error(data) is None
 
 
 # ---------------------------------------------------------
-# DESCARGA DE HISTÓRICOS
+# DESCARGA / REPRODUCCIÓN DE HISTÓRICOS
 # ---------------------------------------------------------
 
-def download_history(ticker, interval):
+def download_history(ticker, interval, asset=None):
     """
-    Descarga y valida el histórico.
+    En modo download:
+      - Descarga Yahoo.
+      - Valida OHLC.
+      - Excluye la última fila.
+      - Guarda el histórico exacto y su SHA-256.
 
-    No elimina velas OHLC incoherentes.
-    Si detecta alguna, rechaza el histórico completo.
+    En modo replay:
+      - No consulta Yahoo.
+      - Carga el snapshot.
+      - Comprueba su integridad.
     """
 
     key = (ticker, interval)
@@ -491,6 +790,39 @@ def download_history(ticker, interval):
     if interval not in PERIODS:
         DOWNLOAD_ERRORS[key] = "Temporalidad no admitida"
         return None
+
+    if asset is None:
+        asset = next(
+            (
+                name
+                for name, settings in get_assets()
+                if settings == ticker
+            ),
+            None,
+        )
+
+    if asset is None:
+        DOWNLOAD_ERRORS[key] = (
+            "No se pudo identificar el activo del histórico"
+        )
+        return None
+
+    if BACKTEST_DATA_MODE == "replay":
+        try:
+            return _load_snapshot(
+                asset,
+                ticker,
+                interval,
+            )
+        except Exception as exc:
+            DOWNLOAD_ERRORS[key] = (
+                f"Error reproduciendo snapshot: "
+                f"{type(exc).__name__}: {exc}"
+            )
+            warnings.warn(
+                f"{asset} ({interval}): {DOWNLOAD_ERRORS[key]}"
+            )
+            return None
 
     settings = PERIODS[interval]
 
@@ -505,23 +837,17 @@ def download_history(ticker, interval):
         )
 
     except Exception as exc:
-
         error = (
-            f"Excepción al descargar datos de Yahoo Finance: "
+            f"Excepción Yahoo Finance: "
             f"{type(exc).__name__}: {exc}"
         )
 
         DOWNLOAD_ERRORS[key] = error
-
         warnings.warn(f"{ticker} ({interval}): {error}")
 
         return None
 
-    if data is None:
-        DOWNLOAD_ERRORS[key] = "Yahoo Finance devolvió None"
-        return None
-
-    if data.empty:
+    if data is None or data.empty:
         DOWNLOAD_ERRORS[key] = (
             "Yahoo Finance devolvió un histórico vacío"
         )
@@ -531,11 +857,9 @@ def download_history(ticker, interval):
 
     try:
         data = _normalize_columns(data)
-
     except Exception as exc:
         DOWNLOAD_ERRORS[key] = (
-            f"Error normalizando columnas: "
-            f"{type(exc).__name__}: {exc}"
+            f"Error normalizando columnas: {exc}"
         )
         return None
 
@@ -562,44 +886,26 @@ def download_history(ticker, interval):
     try:
         data = data[columns].copy()
 
-        for column in required:
+        for column in columns:
             data[column] = pd.to_numeric(
                 data[column],
                 errors="coerce",
             )
 
-        if "Volume" in data.columns:
-            data["Volume"] = pd.to_numeric(
-                data["Volume"],
-                errors="coerce",
-            )
-
         for column in required:
-
             if data[column].isna().any():
-
-                missing_count = int(data[column].isna().sum())
+                count = int(data[column].isna().sum())
 
                 DOWNLOAD_ERRORS[key] = (
-                    f"La columna {column} contiene "
-                    f"{missing_count} valores ausentes o no numéricos. "
-                    "Se rechaza el histórico para evitar huecos."
+                    f"{column} contiene {count} valores ausentes "
+                    "o no numéricos"
                 )
-
                 return None
 
         data = data.replace(
             [np.inf, -np.inf],
             np.nan,
         )
-
-        for column in required:
-
-            if data[column].isna().any():
-                DOWNLOAD_ERRORS[key] = (
-                    f"La columna {column} contiene valores no finitos"
-                )
-                return None
 
         if data.index.hasnans:
             DOWNLOAD_ERRORS[key] = (
@@ -620,38 +926,26 @@ def download_history(ticker, interval):
         )
         return None
 
-    if data.empty:
-        DOWNLOAD_ERRORS[key] = (
-            "No quedan velas después de la limpieza"
-        )
-        return None
-
     for column in required:
-
         values = data[column].to_numpy(dtype=float)
 
         if not np.isfinite(values).all():
             DOWNLOAD_ERRORS[key] = (
-                f"La columna {column} contiene valores no finitos"
+                f"{column} contiene valores no finitos"
             )
             return None
 
         if (values <= 0).any():
             DOWNLOAD_ERRORS[key] = (
-                f"La columna {column} contiene precios cero o negativos"
+                f"{column} contiene precios no positivos"
             )
             return None
 
     invalid_mask = _ohlc_incoherent_mask(data)
+    invalid_rows = data.loc[invalid_mask]
 
-    invalid_rows = data.loc[invalid_mask].copy()
-
-    invalid_count = len(invalid_rows)
-
-    if invalid_count:
-
+    if not invalid_rows.empty:
         for timestamp, candle in invalid_rows.iterrows():
-
             EXCLUDED_OHLC_CANDLES.append({
                 "ticker": ticker,
                 "timeframe": interval,
@@ -660,19 +954,14 @@ def download_history(ticker, interval):
                 "high": float(candle["High"]),
                 "low": float(candle["Low"]),
                 "close": float(candle["Close"]),
-                "motivo": "Histórico rechazado por OHLC incoherente",
+                "motivo": (
+                    "Histórico rechazado por OHLC incoherente"
+                ),
             })
 
         DOWNLOAD_ERRORS[key] = (
-            f"Histórico rechazado: {invalid_count} "
-            "velas OHLC incoherentes detectadas. "
-            "No se han eliminado individualmente."
-        )
-
-        print(
-            f"  {ticker} ({interval}): "
-            f"HISTÓRICO RECHAZADO. "
-            f"{invalid_count} velas OHLC incoherentes."
+            f"Histórico rechazado: "
+            f"{len(invalid_rows)} velas OHLC incoherentes"
         )
 
         return None
@@ -680,26 +969,32 @@ def download_history(ticker, interval):
     validation_error = _ohlc_validation_error(data)
 
     if validation_error:
-        DOWNLOAD_ERRORS[key] = (
-            f"Histórico OHLC inválido: {validation_error}"
-        )
+        DOWNLOAD_ERRORS[key] = validation_error
         return None
 
-    # Excluimos la última vela para evitar utilizar
-    # una vela que pudiera estar incompleta.
+    # Se conserva el criterio actual del backtest.
+    # La última fila se excluye antes de guardar el snapshot.
     if len(data) > 1:
         data = data.iloc[:-1].copy()
 
-    final_rows = len(data)
-
-    if final_rows < MIN_BARS:
+    if len(data) < MIN_BARS:
         DOWNLOAD_ERRORS[key] = (
-            f"Histórico insuficiente: se necesitan "
-            f"{MIN_BARS} velas y quedan {final_rows}. "
+            f"Histórico insuficiente: "
+            f"{len(data)} filas; mínimo {MIN_BARS}. "
             f"Filas originales: {raw_rows}; "
-            f"periodo solicitado: {settings['period']}; "
-            f"intervalo: {interval}"
+            f"periodo: {settings['period']}"
         )
+        return None
+
+    try:
+        _save_snapshot(
+            asset,
+            ticker,
+            interval,
+            data,
+        )
+    except Exception as exc:
+        DOWNLOAD_ERRORS[key] = str(exc)
         return None
 
     DOWNLOAD_ERRORS.pop(key, None)
@@ -708,7 +1003,7 @@ def download_history(ticker, interval):
 
 
 # ---------------------------------------------------------
-# VALIDACIÓN DE HUECOS DE EJECUCIÓN
+# HUECOS DE EJECUCIÓN
 # ---------------------------------------------------------
 
 def _validate_execution_gaps(
@@ -718,8 +1013,6 @@ def _validate_execution_gaps(
     interval,
     asset_type,
 ):
-    """Comprueba los huecos temporales de un tramo del histórico."""
-
     if start_index < 0 or end_index >= len(df):
         return "Índices fuera del histórico al comprobar huecos"
 
@@ -727,7 +1020,6 @@ def _validate_execution_gaps(
         return None
 
     for index in range(start_index + 1, end_index + 1):
-
         previous_timestamp = df.index[index - 1]
         current_timestamp = df.index[index]
 
@@ -737,26 +1029,23 @@ def _validate_execution_gaps(
             interval,
             asset_type,
         ):
-
             elapsed = (
                 pd.Timestamp(current_timestamp)
                 - pd.Timestamp(previous_timestamp)
             )
 
             return (
-                f"Hueco temporal anómalo detectado en "
+                f"Hueco temporal anómalo en "
                 f"{asset_type} ({interval}): "
                 f"{previous_timestamp} -> {current_timestamp} "
-                f"(duración: {elapsed}). "
-                "Backtest detenido para evitar simular "
-                "una operación a través de datos ausentes."
+                f"(duración: {elapsed})"
             )
 
     return None
 
 
 # ---------------------------------------------------------
-# REGISTRO DE RECHAZOS POR RR
+# RECHAZOS RR
 # ---------------------------------------------------------
 
 def _record_rr_rejection(
@@ -773,8 +1062,6 @@ def _record_rr_rejection(
     actual_reward,
     actual_rr,
 ):
-    """Registra una señal rechazada por RR real insuficiente."""
-
     RR_REJECTIONS.append({
         "asset": asset,
         "ticker": ticker,
@@ -794,37 +1081,494 @@ def _record_rr_rejection(
 
 
 # ---------------------------------------------------------
+# PREPARACIÓN DE CANDIDATAS
+# ---------------------------------------------------------
+
+def _prepare_candidate(
+    asset,
+    ticker,
+    interval,
+    df,
+    index,
+    signal,
+    asset_type,
+):
+    """
+    Evalúa los datos de entrada y RR de una candidata.
+
+    No simula operaciones ni decide si puede solaparse.
+    """
+
+    signal_row = df.iloc[index]
+    entry_index = index + 1
+
+    diagnostic = _start_signal_diagnostic(
+        asset=asset,
+        ticker=ticker,
+        interval=interval,
+        signal_time=df.index[index],
+        signal_row=signal_row,
+        signal=signal,
+    )
+
+    _update_signal_diagnostic(
+        diagnostic,
+        entry_time=str(df.index[entry_index]),
+    )
+
+    gap_error = _validate_execution_gaps(
+        df,
+        index,
+        entry_index,
+        interval,
+        asset_type,
+    )
+
+    if gap_error:
+        _finish_signal_diagnostic(
+            diagnostic,
+            "BACKTEST_ABORTED_GAP",
+            gap_error,
+        )
+        return None, gap_error
+
+    try:
+        signal_close = float(signal_row["Close"])
+        entry_reference = float(signal["entry_reference"])
+        stop = float(signal["stop"])
+        target = float(signal["target"])
+        entry = float(df.iloc[entry_index]["Open"])
+        atr = float(signal_row["ATR"])
+        score = int(signal["score"])
+
+    except (
+        TypeError,
+        ValueError,
+        KeyError,
+        OverflowError,
+    ):
+        _finish_signal_diagnostic(
+            diagnostic,
+            "INVALID_SIGNAL_DATA",
+            "Faltan datos o no se pueden convertir a números",
+        )
+        return None, None
+
+    entry_gap_pct = (
+        (entry / entry_reference - 1) * 100
+        if entry_reference > 0
+        else None
+    )
+
+    _update_signal_diagnostic(
+        diagnostic,
+        signal_reference=entry_reference,
+        signal_close=signal_close,
+        entry=entry,
+        stop=stop,
+        target=target,
+        score=score,
+        atr=atr,
+        entry_gap_pct=entry_gap_pct,
+    )
+
+    values = (
+        signal_close,
+        entry_reference,
+        stop,
+        target,
+        entry,
+        atr,
+    )
+
+    if not all(np.isfinite(value) for value in values):
+        _finish_signal_diagnostic(
+            diagnostic,
+            "NON_FINITE_SIGNAL_DATA",
+            "La señal contiene valores no finitos",
+        )
+        return None, None
+
+    if (
+        signal_close <= 0
+        or entry_reference <= 0
+        or entry <= 0
+        or atr <= 0
+        or stop <= 0
+        or target <= 0
+    ):
+        _finish_signal_diagnostic(
+            diagnostic,
+            "INVALID_PRICE_LEVELS",
+            "La señal contiene precios cero o negativos",
+        )
+        return None, None
+
+    if not stop < entry_reference < target:
+        _finish_signal_diagnostic(
+            diagnostic,
+            "INVALID_SIGNAL_LEVELS",
+            "Los niveles deben cumplir stop < referencia < objetivo",
+        )
+        return None, None
+
+    initial_risk = entry - stop
+
+    _update_signal_diagnostic(
+        diagnostic,
+        initial_risk_per_unit=initial_risk,
+    )
+
+    if not np.isfinite(initial_risk) or initial_risk <= 0:
+        _finish_signal_diagnostic(
+            diagnostic,
+            "ENTRY_AT_OR_BELOW_STOP",
+            "La entrada real está en el stop o por debajo",
+        )
+        return None, None
+
+    if entry >= target:
+        _finish_signal_diagnostic(
+            diagnostic,
+            "ENTRY_AT_OR_ABOVE_TARGET",
+            "La entrada real ya ha alcanzado o superado el objetivo",
+        )
+        return None, None
+
+    actual_reward = target - entry
+
+    _update_signal_diagnostic(
+        diagnostic,
+        actual_reward_per_unit=actual_reward,
+    )
+
+    if not np.isfinite(actual_reward) or actual_reward <= 0:
+        _finish_signal_diagnostic(
+            diagnostic,
+            "INVALID_REWARD",
+            "La recompensa potencial no es positiva",
+        )
+        return None, None
+
+    actual_rr = actual_reward / initial_risk
+
+    _update_signal_diagnostic(
+        diagnostic,
+        actual_rr=actual_rr,
+    )
+
+    if not np.isfinite(actual_rr):
+        _finish_signal_diagnostic(
+            diagnostic,
+            "INVALID_RR",
+            "El ratio riesgo/recompensa no es finito",
+        )
+        return None, None
+
+    if actual_rr < (MIN_EXECUTION_RR - RR_TOLERANCE):
+        _record_rr_rejection(
+            asset=asset,
+            ticker=ticker,
+            interval=interval,
+            signal_time=df.index[index],
+            entry_time=df.index[entry_index],
+            entry_reference=entry_reference,
+            entry=entry,
+            stop=stop,
+            target=target,
+            initial_risk=initial_risk,
+            actual_reward=actual_reward,
+            actual_rr=actual_rr,
+        )
+
+        _finish_signal_diagnostic(
+            diagnostic,
+            "RR_REJECTED",
+            (
+                f"RR real {actual_rr:.6f} inferior "
+                f"al mínimo {MIN_EXECUTION_RR:.2f}"
+            ),
+        )
+        return None, None
+
+    candidate = {
+        "index": index,
+        "entry_index": entry_index,
+        "signal_time": df.index[index],
+        "entry_time": df.index[entry_index],
+        "signal_close": signal_close,
+        "entry_reference": entry_reference,
+        "entry": entry,
+        "stop": stop,
+        "target": target,
+        "atr": atr,
+        "score": score,
+        "initial_risk": initial_risk,
+        "actual_reward": actual_reward,
+        "actual_rr": actual_rr,
+        "diagnostic": diagnostic,
+    }
+
+    return candidate, None
+
+
+# ---------------------------------------------------------
+# SIMULACIÓN DE UNA OPERACIÓN
+# ---------------------------------------------------------
+
+def _simulate_candidate(
+    asset,
+    ticker,
+    interval,
+    df,
+    candidate,
+    max_bars,
+    asset_type,
+):
+    index = candidate["index"]
+    entry_index = candidate["entry_index"]
+
+    entry = candidate["entry"]
+    stop = candidate["stop"]
+    target = candidate["target"]
+    initial_risk = candidate["initial_risk"]
+    actual_rr = candidate["actual_rr"]
+
+    diagnostic = candidate["diagnostic"]
+
+    last_index = entry_index + max_bars - 1
+
+    exit_price = None
+    exit_reason = None
+    exit_index = last_index
+
+    for j in range(entry_index, last_index + 1):
+        if j > entry_index:
+            gap_error = _validate_execution_gaps(
+                df,
+                j - 1,
+                j,
+                interval,
+                asset_type,
+            )
+
+            if gap_error:
+                _finish_signal_diagnostic(
+                    diagnostic,
+                    "BACKTEST_ABORTED_GAP",
+                    gap_error,
+                )
+                return None, gap_error
+
+        candle = df.iloc[j]
+
+        try:
+            candle_open = float(candle["Open"])
+            candle_high = float(candle["High"])
+            candle_low = float(candle["Low"])
+
+        except (TypeError, ValueError, KeyError):
+            error = (
+                f"Vela inválida durante la ejecución "
+                f"en el índice {j}"
+            )
+
+            _finish_signal_diagnostic(
+                diagnostic,
+                "INVALID_EXECUTION_CANDLE",
+                error,
+            )
+
+            return None, error
+
+        if not all(
+            np.isfinite(value)
+            for value in (
+                candle_open,
+                candle_high,
+                candle_low,
+            )
+        ):
+            error = (
+                f"Valores OHLC no finitos "
+                f"en el índice {j}"
+            )
+
+            _finish_signal_diagnostic(
+                diagnostic,
+                "NON_FINITE_EXECUTION_CANDLE",
+                error,
+            )
+
+            return None, error
+
+        if candle_open <= stop:
+            exit_price = candle_open
+            exit_reason = "STOP_GAP"
+            exit_index = j
+            break
+
+        if candle_open >= target:
+            exit_price = target
+            exit_reason = "TARGET_GAP"
+            exit_index = j
+            break
+
+        # Si stop y objetivo aparecen en la misma vela,
+        # se prioriza el stop por prudencia.
+        if candle_low <= stop:
+            exit_price = stop
+            exit_reason = "STOP"
+            exit_index = j
+            break
+
+        if candle_high >= target:
+            exit_price = target
+            exit_reason = "TARGET"
+            exit_index = j
+            break
+
+    if exit_price is None:
+        try:
+            exit_price = float(
+                df.iloc[last_index]["Close"]
+            )
+        except (TypeError, ValueError, KeyError):
+            error = (
+                "No se pudo obtener el cierre "
+                "de la última vela"
+            )
+
+            _finish_signal_diagnostic(
+                diagnostic,
+                "INVALID_MAX_HOLD_CLOSE",
+                error,
+            )
+
+            return None, error
+
+        exit_reason = "MAX_HOLD"
+
+    if not np.isfinite(exit_price) or exit_price <= 0:
+        error = "El precio de salida no es válido"
+
+        _finish_signal_diagnostic(
+            diagnostic,
+            "INVALID_EXIT_PRICE",
+            error,
+        )
+
+        return None, error
+
+    pnl_per_unit = exit_price - entry
+    result_r = pnl_per_unit / initial_risk
+
+    if not np.isfinite(result_r):
+        error = "El resultado R no es finito"
+
+        _finish_signal_diagnostic(
+            diagnostic,
+            "INVALID_RESULT_R",
+            error,
+        )
+
+        return None, error
+
+    duration_bars = exit_index - entry_index + 1
+
+    trade = {
+        "asset": asset,
+        "ticker": ticker,
+        "timeframe": interval,
+        "signal_time": str(candidate["signal_time"]),
+        "entry_time": str(candidate["entry_time"]),
+        "exit_time": str(df.index[exit_index]),
+        "score": candidate["score"],
+        "signal_reference": round(
+            candidate["entry_reference"],
+            6,
+        ),
+        "signal_close": round(
+            candidate["signal_close"],
+            6,
+        ),
+        "entry": round(entry, 6),
+        "entry_gap_pct": round(
+            (
+                entry / candidate["entry_reference"] - 1
+            ) * 100,
+            4,
+        ),
+        "atr_at_signal": round(
+            candidate["atr"],
+            6,
+        ),
+        "initial_risk_per_unit": round(
+            initial_risk,
+            6,
+        ),
+        "stop": round(stop, 6),
+        "target": round(target, 6),
+        "execution_rr": round(actual_rr, 6),
+        "exit": round(exit_price, 6),
+        "exit_reason": exit_reason,
+        "duration_bars": duration_bars,
+        "pnl_per_unit": round(pnl_per_unit, 6),
+        "result_R": round(result_r, 4),
+        "data_source": "Yahoo Finance",
+        "costs_included": False,
+        "position_sizing_included": False,
+    }
+
+    _update_signal_diagnostic(
+        diagnostic,
+        exit_time=str(df.index[exit_index]),
+        exit=round(exit_price, 6),
+        exit_reason=exit_reason,
+        result_R=round(result_r, 4),
+    )
+
+    _finish_signal_diagnostic(
+        diagnostic,
+        "EXECUTED",
+        None,
+    )
+
+    return {
+        "trade": trade,
+        "exit_index": exit_index,
+    }, None
+
+
+# ---------------------------------------------------------
 # BACKTEST
 # ---------------------------------------------------------
 
 def run_backtest(asset, ticker, interval):
     """
-    Backtest con protección de huecos temporales y filtro RR real.
+    Diagnostica todas las candidatas de cada vela evaluable.
 
-    Conserva los niveles stop y target originales de la señal.
-    La entrada se ejecuta en la apertura de la vela siguiente.
+    La simulación de operaciones sigue siendo long-only
+    y no permite operaciones solapadas.
 
-    Solo acepta operaciones cuyo RR real desde la entrada
-    hasta los niveles originales sea igual o superior a 2:1,
-    admitiendo una tolerancia numérica de 1e-6.
-
-    Registra todas las señales BUY CANDIDATE y su resultado
-    en SIGNAL_DIAGNOSTICS.
+    Una candidata que aparece mientras otra operación está
+    abierta queda registrada, pero no se simula.
     """
 
     if interval not in PERIODS:
         return [], "Temporalidad no admitida"
 
-    data = download_history(ticker, interval)
+    data = download_history(
+        ticker,
+        interval,
+        asset=asset,
+    )
 
     if data is None:
-
-        diagnostic = DOWNLOAD_ERRORS.get(
+        return [], DOWNLOAD_ERRORS.get(
             (ticker, interval),
             "Causa desconocida durante la descarga",
         )
-
-        return [], diagnostic
 
     validation_error = _ohlc_validation_error(data)
 
@@ -836,24 +1580,21 @@ def run_backtest(asset, ticker, interval):
 
     try:
         df = add_indicators(data)
-
     except Exception as exc:
         return [], (
             f"Error calculando indicadores: "
             f"{type(exc).__name__}: {exc}"
         )
 
-    if df is None:
-        return [], "El cálculo de indicadores devolvió None"
-
-    if not isinstance(df, pd.DataFrame):
-        return [], "El cálculo de indicadores no devolvió un DataFrame"
+    if df is None or not isinstance(df, pd.DataFrame):
+        return [], (
+            "El cálculo de indicadores no devolvió un DataFrame válido"
+        )
 
     if len(df) < MIN_BARS:
         return [], (
-            f"Indicadores o histórico insuficientes: "
-            f"{len(df)} filas disponibles; "
-            f"mínimo requerido: {MIN_BARS}"
+            f"Histórico insuficiente: {len(df)} filas; "
+            f"mínimo {MIN_BARS}"
         )
 
     validation_error = _ohlc_validation_error(df)
@@ -871,15 +1612,17 @@ def run_backtest(asset, ticker, interval):
         return [], "El índice temporal contiene duplicados"
 
     max_bars = PERIODS[interval]["max_bars"]
-
     asset_type = _get_asset_type(asset)
 
-    trades = []
+    # -----------------------------------------------------
+    # FASE 1: DETECTAR Y DIAGNOSTICAR TODAS LAS CANDIDATAS
+    # -----------------------------------------------------
 
-    i = MIN_BARS - 1
+    candidates = []
 
-    while i + max_bars < len(df):
+    last_evaluable_index = len(df) - max_bars - 1
 
+    for i in range(MIN_BARS - 1, last_evaluable_index + 1):
         signal = evaluate_signal_at(
             data=df,
             asset=asset,
@@ -888,446 +1631,67 @@ def run_backtest(asset, ticker, interval):
         )
 
         if not isinstance(signal, dict):
-            i += 1
             continue
 
         if signal.get("action") != "BUY CANDIDATE":
-            i += 1
             continue
 
-        signal_row = df.iloc[i]
-
-        entry_index = i + 1
-
-        entry_row = df.iloc[entry_index]
-
-        # Crear diagnóstico desde el momento en que existe
-        # una señal candidata.
-        diagnostic = _start_signal_diagnostic(
+        candidate, error = _prepare_candidate(
             asset=asset,
             ticker=ticker,
             interval=interval,
-            signal_time=df.index[i],
-            signal_row=signal_row,
+            df=df,
+            index=i,
             signal=signal,
+            asset_type=asset_type,
         )
 
-        _update_signal_diagnostic(
-            diagnostic,
-            entry_time=str(df.index[entry_index]),
-        )
+        if error:
+            return [], error
 
-        # Comprobar la continuidad entre señal y entrada.
-        gap_error = _validate_execution_gaps(
-            df,
-            i,
-            entry_index,
-            interval,
-            asset_type,
-        )
+        if candidate is not None:
+            candidates.append(candidate)
 
-        if gap_error:
+    # -----------------------------------------------------
+    # FASE 2: SIMULAR SIN SOLAPAR OPERACIONES
+    # -----------------------------------------------------
 
+    trades = []
+    last_exit_index = -1
+
+    for candidate in candidates:
+        signal_index = candidate["index"]
+        diagnostic = candidate["diagnostic"]
+
+        # Conserva la regla anterior:
+        # no se abre otra operación hasta después de la vela
+        # en la que se cerró la operación anterior.
+        if signal_index <= last_exit_index:
             _finish_signal_diagnostic(
                 diagnostic,
-                "BACKTEST_ABORTED_GAP",
-                gap_error,
-            )
-
-            return [], gap_error
-
-        try:
-            signal_close = float(signal_row["Close"])
-            entry_reference = float(signal["entry_reference"])
-            stop = float(signal["stop"])
-            target = float(signal["target"])
-            entry = float(entry_row["Open"])
-            atr = float(signal_row["ATR"])
-            score = int(signal["score"])
-
-        except (
-            TypeError,
-            ValueError,
-            KeyError,
-            OverflowError,
-        ):
-
-            _finish_signal_diagnostic(
-                diagnostic,
-                "INVALID_SIGNAL_DATA",
-                "Faltan datos o no se pueden convertir a números",
-            )
-
-            i += 1
-            continue
-
-        _update_signal_diagnostic(
-            diagnostic,
-            signal_reference=entry_reference,
-            signal_close=signal_close,
-            entry=entry,
-            stop=stop,
-            target=target,
-            score=score,
-            atr=atr,
-            entry_gap_pct=(
-                (entry / entry_reference - 1) * 100
-                if entry_reference > 0
-                else None
-            ),
-        )
-
-        if not all(
-            np.isfinite(value)
-            for value in (
-                signal_close,
-                entry_reference,
-                stop,
-                target,
-                entry,
-                atr,
-            )
-        ):
-
-            _finish_signal_diagnostic(
-                diagnostic,
-                "NON_FINITE_SIGNAL_DATA",
-                "La señal contiene valores no finitos",
-            )
-
-            i += 1
-            continue
-
-        if (
-            signal_close <= 0
-            or entry_reference <= 0
-            or entry <= 0
-            or atr <= 0
-            or stop <= 0
-            or target <= 0
-        ):
-
-            _finish_signal_diagnostic(
-                diagnostic,
-                "INVALID_PRICE_LEVELS",
-                "La señal contiene precios cero o negativos",
-            )
-
-            i += 1
-            continue
-
-        # Los niveles originales deben tener sentido.
-        if not (
-            stop < entry_reference < target
-        ):
-
-            _finish_signal_diagnostic(
-                diagnostic,
-                "INVALID_SIGNAL_LEVELS",
-                "Los niveles deben cumplir stop < referencia < objetivo",
-            )
-
-            i += 1
-            continue
-
-        # El riesgo se calcula desde la entrada real.
-        initial_risk = entry - stop
-
-        _update_signal_diagnostic(
-            diagnostic,
-            initial_risk_per_unit=initial_risk,
-        )
-
-        if not np.isfinite(initial_risk) or initial_risk <= 0:
-
-            _finish_signal_diagnostic(
-                diagnostic,
-                "ENTRY_AT_OR_BELOW_STOP",
-                "La entrada real está en el stop o por debajo",
-            )
-
-            i += 1
-            continue
-
-        if entry >= target:
-
-            _finish_signal_diagnostic(
-                diagnostic,
-                "ENTRY_AT_OR_ABOVE_TARGET",
-                "La entrada real ya ha alcanzado o superado el objetivo",
-            )
-
-            i += 1
-            continue
-
-        # -------------------------------------------------
-        # FILTRO RR REAL DE EJECUCIÓN
-        # -------------------------------------------------
-
-        actual_reward = target - entry
-
-        _update_signal_diagnostic(
-            diagnostic,
-            actual_reward_per_unit=actual_reward,
-        )
-
-        if not np.isfinite(actual_reward) or actual_reward <= 0:
-
-            _finish_signal_diagnostic(
-                diagnostic,
-                "INVALID_REWARD",
-                "La recompensa potencial desde la entrada no es positiva",
-            )
-
-            i += 1
-            continue
-
-        actual_rr = actual_reward / initial_risk
-
-        _update_signal_diagnostic(
-            diagnostic,
-            actual_rr=actual_rr,
-        )
-
-        if not np.isfinite(actual_rr):
-
-            _finish_signal_diagnostic(
-                diagnostic,
-                "INVALID_RR",
-                "El ratio riesgo/recompensa no es finito",
-            )
-
-            i += 1
-            continue
-
-        # Se rechaza únicamente cuando el RR está por debajo
-        # del mínimo más allá de la tolerancia numérica.
-        if actual_rr < (MIN_EXECUTION_RR - RR_TOLERANCE):
-
-            _record_rr_rejection(
-                asset=asset,
-                ticker=ticker,
-                interval=interval,
-                signal_time=df.index[i],
-                entry_time=df.index[entry_index],
-                entry_reference=entry_reference,
-                entry=entry,
-                stop=stop,
-                target=target,
-                initial_risk=initial_risk,
-                actual_reward=actual_reward,
-                actual_rr=actual_rr,
-            )
-
-            _finish_signal_diagnostic(
-                diagnostic,
-                "RR_REJECTED",
+                "SKIPPED_OVERLAPPING_TRADE",
                 (
-                    f"RR real {actual_rr:.4f} inferior "
-                    f"al mínimo {MIN_EXECUTION_RR:.2f}"
+                    "La candidata apareció mientras había "
+                    "una operación anterior abierta"
                 ),
             )
-
-            i += 1
             continue
 
-        # -------------------------------------------------
-        # EJECUCIÓN DE LA OPERACIÓN ACEPTADA
-        # -------------------------------------------------
-
-        last_index = entry_index + max_bars - 1
-
-        exit_price = None
-        exit_reason = None
-        exit_index = last_index
-
-        for j in range(entry_index, last_index + 1):
-
-            if j > entry_index:
-
-                gap_error = _validate_execution_gaps(
-                    df,
-                    j - 1,
-                    j,
-                    interval,
-                    asset_type,
-                )
-
-                if gap_error:
-
-                    _finish_signal_diagnostic(
-                        diagnostic,
-                        "BACKTEST_ABORTED_GAP",
-                        gap_error,
-                    )
-
-                    return [], gap_error
-
-            candle = df.iloc[j]
-
-            try:
-                candle_open = float(candle["Open"])
-                candle_high = float(candle["High"])
-                candle_low = float(candle["Low"])
-
-            except (TypeError, ValueError, KeyError):
-
-                _finish_signal_diagnostic(
-                    diagnostic,
-                    "INVALID_EXECUTION_CANDLE",
-                    f"Vela inválida durante la ejecución en el índice {j}",
-                )
-
-                return [], (
-                    f"Vela inválida durante la ejecución "
-                    f"en el índice {j}"
-                )
-
-            if not all(
-                np.isfinite(value)
-                for value in (
-                    candle_open,
-                    candle_high,
-                    candle_low,
-                )
-            ):
-
-                _finish_signal_diagnostic(
-                    diagnostic,
-                    "NON_FINITE_EXECUTION_CANDLE",
-                    f"Valores OHLC no finitos en el índice {j}",
-                )
-
-                return [], (
-                    f"Valores OHLC no finitos durante la ejecución "
-                    f"en el índice {j}"
-                )
-
-            # Si el mercado abre por debajo del stop,
-            # se utiliza la apertura real como precio de salida.
-            if candle_open <= stop:
-                exit_price = candle_open
-                exit_reason = "STOP_GAP"
-                exit_index = j
-                break
-
-            # Si abre por encima del objetivo, se conserva
-            # el objetivo como precio conservador de ejecución.
-            if candle_open >= target:
-                exit_price = target
-                exit_reason = "TARGET_GAP"
-                exit_index = j
-                break
-
-            # Si stop y objetivo aparecen en la misma vela,
-            # se prioriza el stop por prudencia.
-            if candle_low <= stop:
-                exit_price = stop
-                exit_reason = "STOP"
-                exit_index = j
-                break
-
-            if candle_high >= target:
-                exit_price = target
-                exit_reason = "TARGET"
-                exit_index = j
-                break
-
-        if exit_price is None:
-
-            try:
-                exit_price = float(
-                    df.iloc[last_index]["Close"]
-                )
-
-            except (TypeError, ValueError, KeyError):
-
-                _finish_signal_diagnostic(
-                    diagnostic,
-                    "INVALID_MAX_HOLD_CLOSE",
-                    "No se pudo obtener el cierre de la última vela",
-                )
-
-                i = last_index + 1
-                continue
-
-            exit_reason = "MAX_HOLD"
-
-        if not np.isfinite(exit_price) or exit_price <= 0:
-
-            _finish_signal_diagnostic(
-                diagnostic,
-                "INVALID_EXIT_PRICE",
-                "El precio de salida no es válido",
-            )
-
-            i = exit_index + 1
-            continue
-
-        pnl_per_unit = exit_price - entry
-
-        result_r = pnl_per_unit / initial_risk
-
-        if not np.isfinite(result_r):
-
-            _finish_signal_diagnostic(
-                diagnostic,
-                "INVALID_RESULT_R",
-                "El resultado R no es finito",
-            )
-
-            i = exit_index + 1
-            continue
-
-        duration_bars = exit_index - entry_index + 1
-
-        trade = {
-            "asset": asset,
-            "ticker": ticker,
-            "timeframe": interval,
-            "signal_time": str(df.index[i]),
-            "entry_time": str(df.index[entry_index]),
-            "exit_time": str(df.index[exit_index]),
-            "score": score,
-            "signal_reference": round(entry_reference, 6),
-            "signal_close": round(signal_close, 6),
-            "entry": round(entry, 6),
-            "entry_gap_pct": round(
-                (entry / entry_reference - 1) * 100,
-                4,
-            ),
-            "atr_at_signal": round(atr, 6),
-            "initial_risk_per_unit": round(initial_risk, 6),
-            "stop": round(stop, 6),
-            "target": round(target, 6),
-            "execution_rr": round(actual_rr, 6),
-            "exit": round(exit_price, 6),
-            "exit_reason": exit_reason,
-            "duration_bars": duration_bars,
-            "pnl_per_unit": round(pnl_per_unit, 6),
-            "result_R": round(result_r, 4),
-            "data_source": "Yahoo Finance",
-            "costs_included": False,
-            "position_sizing_included": False,
-        }
-
-        trades.append(trade)
-
-        _update_signal_diagnostic(
-            diagnostic,
-            exit_time=str(df.index[exit_index]),
-            exit=round(exit_price, 6),
-            exit_reason=exit_reason,
-            result_R=round(result_r, 4),
+        simulation, error = _simulate_candidate(
+            asset=asset,
+            ticker=ticker,
+            interval=interval,
+            df=df,
+            candidate=candidate,
+            max_bars=max_bars,
+            asset_type=asset_type,
         )
 
-        _finish_signal_diagnostic(
-            diagnostic,
-            "EXECUTED",
-            None,
-        )
+        if error:
+            return [], error
 
-        i = exit_index + 1
+        trades.append(simulation["trade"])
+        last_exit_index = simulation["exit_index"]
 
     return trades, None
 
@@ -1351,8 +1715,6 @@ def _empty_metrics():
 
 
 def _calculate_drawdown(results):
-    """Drawdown de la secuencia de operaciones cerradas."""
-
     if len(results) == 0:
         return 0.0
 
@@ -1368,38 +1730,35 @@ def _calculate_drawdown(results):
 
 
 def calculate_metrics(trades):
-    """Calcula métricas de una secuencia independiente."""
-
     if trades is None:
         return _empty_metrics()
 
     if isinstance(trades, pd.DataFrame):
-
         if trades.empty or "result_R" not in trades.columns:
             return _empty_metrics()
 
         records = trades.to_dict("records")
-
     else:
-
         try:
             records = list(trades)
-
         except (TypeError, ValueError):
             return _empty_metrics()
 
     valid_trades = []
 
     for trade in records:
-
         if not isinstance(trade, dict):
             continue
 
         try:
             result = float(trade["result_R"])
             duration = float(trade["duration_bars"])
-
-        except (TypeError, ValueError, KeyError, OverflowError):
+        except (
+            TypeError,
+            ValueError,
+            KeyError,
+            OverflowError,
+        ):
             continue
 
         if not np.isfinite(result) or not np.isfinite(duration):
@@ -1424,11 +1783,9 @@ def calculate_metrics(trades):
     )
 
     wins = results[results > 0]
-
     losses = results[results < 0]
 
     gross_profit = float(wins.sum())
-
     gross_loss = abs(float(losses.sum()))
 
     profit_factor = (
@@ -1468,8 +1825,6 @@ def calculate_metrics(trades):
 # ---------------------------------------------------------
 
 def generate_operations_summary(trades):
-    """Genera un resumen por activo, temporalidad y mes."""
-
     columns = [
         "tipo",
         "activo",
@@ -1499,17 +1854,13 @@ def generate_operations_summary(trades):
         return pd.DataFrame(columns=columns)
 
     if isinstance(trades, pd.DataFrame):
-
         if trades.empty:
             return pd.DataFrame(columns=columns)
 
         df = trades.copy()
-
     else:
-
         try:
             df = pd.DataFrame(list(trades))
-
         except (TypeError, ValueError):
             return pd.DataFrame(columns=columns)
 
@@ -1565,39 +1916,31 @@ def generate_operations_summary(trades):
         timeframe,
         period,
     ):
-
         group = group.sort_values("exit_time")
-
         results = group["result_R"].to_numpy(dtype=float)
 
         if len(results) == 0:
             return
 
         wins = results[results > 0]
-
         losses = results[results < 0]
 
         max_losing_streak = 0
-
         current_losing_streak = 0
 
         for result in results:
-
             if result < 0:
                 current_losing_streak += 1
-
                 max_losing_streak = max(
                     max_losing_streak,
                     current_losing_streak,
                 )
-
             else:
                 current_losing_streak = 0
 
         reasons = group["exit_reason"].value_counts()
 
         gross_profit = float(wins.sum())
-
         gross_loss = abs(float(losses.sum()))
 
         profit_factor = (
@@ -1662,7 +2005,6 @@ def generate_operations_summary(trades):
     for (asset, timeframe), group in df.groupby(
         ["asset", "timeframe"]
     ):
-
         summarize(
             group,
             "ACTIVO_TEMPORALIDAD",
@@ -1676,7 +2018,6 @@ def generate_operations_summary(trades):
     for (asset, timeframe, month), group in df.groupby(
         ["asset", "timeframe", "month"]
     ):
-
         summarize(
             group,
             "MENSUAL",
@@ -1697,64 +2038,40 @@ def generate_operations_summary(trades):
 
 def main():
     all_trades = []
-
     summaries = []
-
     errors = []
+    overlapping_signals = []
 
     DOWNLOAD_ERRORS.clear()
-
     EXCLUDED_OHLC_CANDLES.clear()
-
     RR_REJECTIONS.clear()
-
     SIGNAL_DIAGNOSTICS.clear()
+    SNAPSHOT_MANIFEST.clear()
 
     assets = get_assets()
 
     print(f"Trading Bot {VERSION} - Backtest")
-
     print(f"Activos habilitados: {len(assets)}")
-
     print("Modo: histórico, compras únicamente")
-
-    print("Estrategia: compartida con el análisis en directo")
-
+    print("Estrategia: sin cambios")
     print("Datos: Yahoo Finance")
-
+    print(f"Modo de datos: {BACKTEST_DATA_MODE}")
+    print(f"Directorio de históricos: {SNAPSHOT_DIR}")
     print("Costes: no incluidos ni verificados")
-
     print("Sizing: desactivado")
-
-    print("Ejecución: entrada en apertura de vela siguiente")
-
-    print("Stop y objetivo: niveles originales de la señal")
-
-    print(
-        f"Filtro de ejecución: RR real mínimo "
-        f"{MIN_EXECUTION_RR:.2f}:1"
-    )
-
-    print(
-        f"Tolerancia de precisión RR: {RR_TOLERANCE}"
-    )
-
-    print("Validación: históricos OHLC incoherentes rechazados")
-
-    print("Validación: protección frente a huecos temporales")
-
-    print("Diagnóstico: registro de señales candidatas activado")
-
-    print("-" * 50)
+    print("Entrada: apertura de la vela siguiente")
+    print("Stop y objetivo: niveles originales")
+    print(f"RR mínimo: {MIN_EXECUTION_RR:.2f}:1")
+    print(f"Tolerancia RR: {RR_TOLERANCE}")
+    print("Diagnóstico: todas las candidatas")
+    print("Simulación: sin operaciones solapadas")
+    print("-" * 60)
 
     for asset, ticker in assets:
-
         for interval in ("15m", "1d"):
-
             print(f"Analizando {asset} ({interval})...")
 
             try:
-
                 trades, error = run_backtest(
                     asset,
                     ticker,
@@ -1762,7 +2079,6 @@ def main():
                 )
 
                 if error:
-
                     errors.append({
                         "asset": asset,
                         "ticker": ticker,
@@ -1771,7 +2087,6 @@ def main():
                     })
 
                     print(f"  Sin resultados: {error}")
-
                     continue
 
                 all_trades.extend(trades)
@@ -1790,7 +2105,6 @@ def main():
                 )
 
             except Exception as exc:
-
                 error_message = (
                     f"{type(exc).__name__}: {exc}"
                 )
@@ -1803,6 +2117,27 @@ def main():
                 })
 
                 print(f"  Error: {error_message}")
+
+    # Señales que no se han simulado por solapamiento.
+    for diagnostic in SIGNAL_DIAGNOSTICS:
+        if diagnostic["signal_status"] != "SKIPPED_OVERLAPPING_TRADE":
+            continue
+
+        overlapping_signals.append({
+            "asset": diagnostic["asset"],
+            "ticker": diagnostic["ticker"],
+            "timeframe": diagnostic["timeframe"],
+            "signal_time": diagnostic["signal_time"],
+            "entry_time": diagnostic["entry_time"],
+            "signal_score": diagnostic["score"],
+            "signal_reference": diagnostic["signal_reference"],
+            "entry": diagnostic["entry"],
+            "stop": diagnostic["stop"],
+            "target": diagnostic["target"],
+            "actual_rr": diagnostic["actual_rr"],
+            "active_trade_exit_time": None,
+            "reason": diagnostic["rejection_reason"],
+        })
 
     pd.DataFrame(all_trades).to_csv(
         "operaciones_backtest_v3.csv",
@@ -1847,7 +2182,6 @@ def main():
         index=False,
     )
 
-    # Informe independiente de rechazos por RR real.
     pd.DataFrame(
         RR_REJECTIONS,
         columns=RR_REJECTION_COLUMNS,
@@ -1856,7 +2190,6 @@ def main():
         index=False,
     )
 
-    # Informe general de todas las señales candidatas.
     pd.DataFrame(
         SIGNAL_DIAGNOSTICS,
         columns=SIGNAL_DIAGNOSTIC_COLUMNS,
@@ -1865,38 +2198,53 @@ def main():
         index=False,
     )
 
-    print("-" * 50)
+    pd.DataFrame(
+        overlapping_signals,
+        columns=OVERLAPPING_SIGNAL_COLUMNS,
+    ).to_csv(
+        "senales_solapadas_v3.csv",
+        index=False,
+    )
 
+    try:
+        _write_snapshot_manifest()
+    except Exception as exc:
+        errors.append({
+            "asset": "SYSTEM",
+            "ticker": "",
+            "timeframe": "",
+            "error": (
+                f"No se pudo escribir el manifiesto: {exc}"
+            ),
+        })
+
+        pd.DataFrame(errors).to_csv(
+            "errores_backtest_v3.csv",
+            index=False,
+        )
+
+    print("-" * 60)
+    print(f"Modo de datos: {BACKTEST_DATA_MODE}")
     print(f"Operaciones ejecutadas: {len(all_trades)}")
-
-    print(f"Señales candidatas registradas: {len(SIGNAL_DIAGNOSTICS)}")
-
-    print(f"Señales rechazadas por RR: {len(RR_REJECTIONS)}")
-
-    print(f"RR mínimo exigido: {MIN_EXECUTION_RR:.2f}:1")
-
-    print(f"Tolerancia RR: {RR_TOLERANCE}")
-
-    print(f"Combinaciones analizadas: {len(summaries)}")
-
-    print(f"Errores o datos insuficientes: {len(errors)}")
-
     print(
-        f"Velas OHLC incoherentes detectadas: "
+        "Señales candidatas registradas: "
+        f"{len(SIGNAL_DIAGNOSTICS)}"
+    )
+    print(f"Rechazos por RR: {len(RR_REJECTIONS)}")
+    print(
+        "Señales solapadas no simuladas: "
+        f"{len(overlapping_signals)}"
+    )
+    print(f"RR mínimo: {MIN_EXECUTION_RR:.2f}:1")
+    print(f"Errores: {len(errors)}")
+    print(
+        "Velas OHLC incoherentes: "
         f"{len(EXCLUDED_OHLC_CANDLES)}"
     )
-
     print(
-        f"Filas del resumen detallado: "
-        f"{len(operations_summary)}"
+        f"Históricos registrados: {len(SNAPSHOT_MANIFEST)}"
     )
-
     print("Archivos CSV generados.")
-
-    print(
-        "Nuevo informe: diagnostico_senales_v3.csv"
-    )
-
     print(
         "IMPORTANTE: resultados brutos, sin costes, "
         "sin sizing y sin simulación de cartera."
