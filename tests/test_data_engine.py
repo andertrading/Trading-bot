@@ -258,7 +258,7 @@ class TestDataNormalisation(unittest.TestCase):
         self.assertIsNotNone(result)
         self.assertEqual(result.iloc[1]["Volume"], 0)
 
-    def test_replaces_missing_volume_with_zero(self):
+    def test_replaces_nan_volume_with_zero(self):
         df = self.df.copy()
         df.loc[self.index[1], "volume"] = np.nan
 
@@ -348,6 +348,33 @@ class TestDataNormalisation(unittest.TestCase):
         result = engine._normalise_dataframe(df)
 
         self.assertIsNone(result)
+
+    def test_normalises_multiindex_columns(self):
+        columns = pd.MultiIndex.from_product(
+            [
+                ["Open", "High", "Low", "Close", "Volume"],
+                ["TSLA"],
+            ]
+        )
+
+        df = pd.DataFrame(
+            [
+                [100, 102, 99, 101, 1000],
+                [101, 103, 100, 102, 1100],
+                [102, 104, 101, 103, 1200],
+            ],
+            index=self.index,
+            columns=columns,
+        )
+
+        result = engine._normalise_dataframe(df)
+
+        self.assertIsNotNone(result)
+        self.assertEqual(
+            list(result.columns),
+            ["Open", "High", "Low", "Close", "Volume"],
+        )
+        self.assertEqual(len(result), 3)
 
 
 # ---------------------------------------------------------------------
@@ -958,6 +985,70 @@ class TestIntradayGaps(unittest.TestCase):
 
         self.assertTrue(
             engine._has_intraday_gaps(df, "TSLA")
+        )
+
+    # REGRESIONES NUEVAS
+
+    def test_rejects_single_candle_us_session(self):
+        index = pd.to_datetime(
+            ["2026-11-18T14:30:00Z"]
+        )
+
+        df = make_ohlcv(index)
+
+        self.assertTrue(
+            engine._has_intraday_gaps(df, "TSLA")
+        )
+
+    def test_rejects_single_candle_london_session(self):
+        index = pd.to_datetime(
+            ["2026-11-18T08:00:00Z"]
+        )
+
+        df = make_ohlcv(index)
+
+        self.assertTrue(
+            engine._has_intraday_gaps(df, "CSPX")
+        )
+
+    def test_rejects_missing_entire_us_session(self):
+        first_session = pd.date_range(
+            "2026-11-17T14:30:00Z",
+            periods=26,
+            freq="15min",
+        )
+
+        third_session = pd.date_range(
+            "2026-11-19T14:30:00Z",
+            periods=26,
+            freq="15min",
+        )
+
+        index = first_session.append(third_session)
+        df = make_ohlcv(index)
+
+        self.assertTrue(
+            engine._has_intraday_gaps(df, "TSLA")
+        )
+
+    def test_rejects_missing_entire_london_session(self):
+        first_session = pd.date_range(
+            "2026-11-17T08:00:00Z",
+            periods=34,
+            freq="15min",
+        )
+
+        third_session = pd.date_range(
+            "2026-11-19T08:00:00Z",
+            periods=34,
+            freq="15min",
+        )
+
+        index = first_session.append(third_session)
+        df = make_ohlcv(index)
+
+        self.assertTrue(
+            engine._has_intraday_gaps(df, "CSPX")
         )
 
 
