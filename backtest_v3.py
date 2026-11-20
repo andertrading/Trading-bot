@@ -16,7 +16,7 @@ from indicators import add_indicators
 from strategies import evaluate_signal_at
 
 
-VERSION = "3.14"
+VERSION = "3.15"
 
 PERIODS = {
     "15m": {"period": "60d", "max_bars": 32},
@@ -1548,8 +1548,12 @@ def run_backtest(asset, ticker, interval):
     La simulación de operaciones sigue siendo long-only
     y no permite operaciones solapadas.
 
-    Cada señal solapada registra la hora de salida real
-    de la operación que impedía su ejecución.
+    Una nueva entrada solo se bloquea si su vela de entrada
+    coincide con la vela de salida de la operación anterior
+    o es anterior a ella.
+
+    Si la operación anterior termina en la vela de señal,
+    la entrada prevista en la vela siguiente puede ejecutarse.
     """
 
     if interval not in PERIODS:
@@ -1657,19 +1661,23 @@ def run_backtest(asset, ticker, interval):
     last_exit_index = -1
 
     for candidate in candidates:
-        signal_index = candidate["index"]
+        entry_index = candidate["entry_index"]
         diagnostic = candidate["diagnostic"]
 
-        # No se abre otra operación hasta después de la vela
-        # en la que se cerró la operación anterior.
-        if signal_index <= last_exit_index:
+        # V3.15:
+        # Se compara la vela de ENTRADA prevista con la vela
+        # de SALIDA de la operación anterior.
+        #
+        # Si la operación anterior sale en la misma vela
+        # que la señal, pero antes de la entrada prevista,
+        # la nueva operación puede ejecutarse en la siguiente
+        # vela.
+        #
+        # Si la salida coincide con la vela de entrada,
+        # se mantiene el bloqueo por prudencia: con datos OHLC
+        # no conocemos el orden intravela de los acontecimientos.
+        if entry_index <= last_exit_index:
 
-            # CORRECCIÓN V3.14:
-            # last_exit_index pertenece a la operación activa
-            # que está bloqueando esta candidata.
-            #
-            # Se guarda el timestamp exacto de su salida,
-            # sin estimarlo ni calcularlo a partir de la duración.
             if 0 <= last_exit_index < len(df):
                 active_trade_exit_time = str(
                     df.index[last_exit_index]
@@ -1686,8 +1694,9 @@ def run_backtest(asset, ticker, interval):
                 diagnostic,
                 "SKIPPED_OVERLAPPING_TRADE",
                 (
-                    "La candidata apareció mientras había "
-                    "una operación anterior abierta"
+                    "La entrada prevista coincide con la vela "
+                    "de salida de una operación anterior "
+                    "o se produce antes de ella"
                 ),
             )
 
@@ -2081,7 +2090,7 @@ def main():
     print(f"Tolerancia RR: {RR_TOLERANCE}")
     print("Diagnóstico: todas las candidatas")
     print("Simulación: sin operaciones solapadas")
-    print("Solapamientos: hora real de salida registrada")
+    print("Filtro de solapamiento: comparación con entry_index")
     print("-" * 60)
 
     for asset, ticker in assets:
