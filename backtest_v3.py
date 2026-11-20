@@ -1059,16 +1059,6 @@ def download_history(ticker, interval, asset=None):
                 errors="coerce",
             )
 
-        for column in required:
-            if data[column].isna().any():
-                count = int(data[column].isna().sum())
-
-                DOWNLOAD_ERRORS[key] = (
-                    f"{column} contiene {count} valores ausentes "
-                    "o no numéricos"
-                )
-                return None
-
         data = data.replace(
             [np.inf, -np.inf],
             np.nan,
@@ -1113,7 +1103,21 @@ def download_history(ticker, interval, asset=None):
         )
         return None
 
+    # Excluir primero la última vela, que el backtest considera
+    # potencialmente incompleta. No debe invalidar el histórico
+    # por valores OHLC todavía en formación.
+    if len(data) > 1:
+        data = data.iloc[:-1].copy()
+
     for column in required:
+        if data[column].isna().any():
+            count = int(data[column].isna().sum())
+            DOWNLOAD_ERRORS[key] = (
+                f"{column} contiene {count} valores ausentes "
+                "o no numéricos en velas cerradas"
+            )
+            return None
+
         values = data[column].to_numpy(dtype=float)
 
         if not np.isfinite(values).all():
@@ -1158,11 +1162,6 @@ def download_history(ticker, interval, asset=None):
     if validation_error:
         DOWNLOAD_ERRORS[key] = validation_error
         return None
-
-    # Se conserva el criterio actual del backtest.
-    # La última fila se excluye antes de guardar el snapshot.
-    if len(data) > 1:
-        data = data.iloc[:-1].copy()
 
     if len(data) < MIN_BARS:
         DOWNLOAD_ERRORS[key] = (
