@@ -1,12 +1,15 @@
-
 name: Trading Bot 3.0 - Data Engine Test
 
 on:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   test-data-engine:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     steps:
       - name: Descargar repositorio
@@ -18,52 +21,140 @@ jobs:
           python-version: "3.11"
 
       - name: Instalar dependencias
-        run: pip install -r requirements.txt
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
 
-      - name: Probar proveedores de datos
+      - name: Probar cobertura completa del motor de datos en vivo
         env:
           TWELVE_DATA_API_KEY: ${{ secrets.TWELVE_DATA_API_KEY }}
         run: |
           python - <<'PY'
-          import time
-          from data_engine import download_data, get_data_timestamp, is_data_fresh
+          import os
+          import sys
 
-          tests = [
-              ("TSLA", "15m"),
-              ("BTC", "15m"),
-              ("TSLA", "1d"),
-              ("BTC", "1d"),
-              ("CSPX", "15m"),
-              ("CNDX", "15m"),
-              ("CSPX", "1d"),
-              ("CNDX", "1d"),
-          ]
+          from config import ASSETS
+          from data_engine import (
+              PROVIDER_MAP,
+              download_data,
+              get_data_timestamp,
+              is_data_fresh,
+          )
 
+          intervals = ("15m", "1d")
+          enabled_assets = sorted(
+              asset
+              for asset, config in ASSETS.items()
+              if isinstance(config, dict) and config.get("enabled") is True
+          )
+
+          expected = {
+              (asset, interval)
+              for asset in enabled_assets
+              for interval in intervals
+          }
+
+          results = {}
           failures = []
 
-          for asset, interval in tests:
-              print(f"\nProbando {asset} - {interval}")
+          if not enabled_assets:
+              raise SystemExit("ERROR: No hay activos habilitados en config.py")
 
-              df = download_data(asset, interval)
+          twelve_data_assets = [
+              asset
+              for asset in enabled_assets
+              if PROVIDER_MAP.get(asset) == "twelvedata"
+          ]
 
-              if df is None or df.empty:
-                  print("ERROR: No se han recibido datos válidos")
-                  failures.append(f"{asset} {interval}")
-              else:
-                  timestamp = get_data_timestamp(df)
-                  print(f"OK: {len(df)} velas")
-                  print(f"Última vela: {timestamp}")
-                  print(f"Datos recientes: {is_data_fresh(df)}")
+          if twelve_data_assets and not os.environ.get("TWELVE_DATA_API_KEY"):
+              raise SystemExit(
+                  "ERROR: Falta el secreto TWELVE_DATA_API_KEY."
+              )
 
-              if asset in ("TSLA", "BTC"):
-                  time.sleep(9)
+          print("COBERTURA DEL MOTOR DE DATOS")
+          print(f"Activos habilitados: {len(enabled_assets)}")
+          print(f"Temporalidades: {', '.join(intervals)}")
+          print(f"Combinaciones esperadas: {len(expected)}")
+          print("Proveedores:", {
+              asset: PROVIDER_MAP.get(asset)
+              for asset in enabled_assets
+          })
+          print("----------------------------------------")
 
-          print("\n------------------------------")
-          print(f"Pruebas fallidas: {len(failures)}")
+          for asset in enabled_assets:
+              provider = PROVIDER_MAP.get(asset)
+
+              if provider not in ("twelvedata", "yahoo"):
+                  failures.append(f"{asset}: proveedor no definido")
+                  print(f"ERROR | {asset} | proveedor no definido")
+                  continue
+
+              for interval in intervals:
+                  key = (asset, interval)
+                  print(f"\nProbando {asset} | {interval} | {provider}")
+
+                  try:
+                      df = download_data(asset, interval)
+
+                      if df is None or df.empty:
+                          failures.append(f"{asset} {interval}: sin datos válidos")
+                          print("ERROR: histórico vacío o rechazado")
+                          continue
+
+                      timestamp = get_data_timestamp(df)
+                      fresh = is_data_fresh(
+                          df,
+                          asset=asset,
+                          interval=interval,
+                      )
+
+                      results[key] = {
+                          "bars": len(df),
+                          "last_timestamp": str(timestamp),
+                          "fresh": fresh,
+                          "provider": provider,
+                      }
+
+                      print(f"OK: {len(df)} velas")
+                      print(f"Última vela UTC: {timestamp}")
+                      print(f"Datos recientes: {fresh}")
+
+                      if not fresh:
+                          failures.append(
+                              f"{asset} {interval}: datos no recientes"
+                          )
+
+                  except Exception as error:
+                      failures.append(
+                          f"{asset} {interval}: {type(error).__name__}"
+                      )
+                      print(
+                          f"ERROR: excepción {type(error).__name__}"
+                      )
+
+          missing = sorted(expected - set(results))
+          if missing:
+              failures.extend(
+                  f"{asset} {interval}: combinación sin resultado"
+                  for asset, interval in missing
+              )
+
+          print("\n========================================")
+          print("RESUMEN DE COBERTURA")
+          print(f"Combinaciones válidas: {len(results)}/{len(expected)}")
+          print(f"Fallos: {len(failures)}")
+
+          for (asset, interval), result in sorted(results.items()):
+              print(
+                  f"{asset:6} | {interval:3} | {result['provider']:10} "
+                  f"| {result['bars']:5} velas | fresca={result['fresh']}"
+              )
 
           if failures:
-              print("Fallos:", ", ".join(failures))
-              raise SystemExit(1)
+              print("\nFALLOS DETECTADOS:")
+              for failure in failures:
+                  print(f"- {failure}")
+              sys.exit(1)
 
-          print("TODAS LAS PRUEBAS SUPERADAS")
+          print("\nCOBERTURA COMPLETA Y DATOS RECIENTES: OK")
           PY
