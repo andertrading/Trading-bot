@@ -10,7 +10,7 @@ from indicators import add_indicators
 from strategies import evaluate_signal_at
 
 
-VERSION = "3.11"
+VERSION = "3.12"
 
 PERIODS = {
     "15m": {"period": "60d", "max_bars": 32},
@@ -21,6 +21,10 @@ MIN_BARS = 220
 
 # RR mínimo exigido después de ejecutar la entrada real.
 MIN_EXECUTION_RR = 2.0
+
+# Tolerancia para evitar rechazos por precisión decimal.
+# No modifica de forma significativa el RR mínimo exigido.
+RR_TOLERANCE = 1e-6
 
 DOWNLOAD_ERRORS = {}
 
@@ -801,7 +805,8 @@ def run_backtest(asset, ticker, interval):
     La entrada se ejecuta en la apertura de la vela siguiente.
 
     Solo acepta operaciones cuyo RR real desde la entrada
-    hasta los niveles originales sea igual o superior a 2:1.
+    hasta los niveles originales sea igual o superior a 2:1,
+    admitiendo una tolerancia numérica de 1e-6.
 
     Registra todas las señales BUY CANDIDATE y su resultado
     en SIGNAL_DIAGNOSTICS.
@@ -1095,7 +1100,9 @@ def run_backtest(asset, ticker, interval):
             i += 1
             continue
 
-        if actual_rr < MIN_EXECUTION_RR:
+        # Se rechaza únicamente cuando el RR está por debajo
+        # del mínimo más allá de la tolerancia numérica.
+        if actual_rr < (MIN_EXECUTION_RR - RR_TOLERANCE):
 
             _record_rr_rejection(
                 asset=asset,
@@ -1728,6 +1735,10 @@ def main():
         f"{MIN_EXECUTION_RR:.2f}:1"
     )
 
+    print(
+        f"Tolerancia de precisión RR: {RR_TOLERANCE}"
+    )
+
     print("Validación: históricos OHLC incoherentes rechazados")
 
     print("Validación: protección frente a huecos temporales")
@@ -1863,6 +1874,8 @@ def main():
     print(f"Señales rechazadas por RR: {len(RR_REJECTIONS)}")
 
     print(f"RR mínimo exigido: {MIN_EXECUTION_RR:.2f}:1")
+
+    print(f"Tolerancia RR: {RR_TOLERANCE}")
 
     print(f"Combinaciones analizadas: {len(summaries)}")
 
