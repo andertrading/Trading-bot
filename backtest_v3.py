@@ -16,7 +16,7 @@ from indicators import add_indicators
 from strategies import evaluate_signal_at
 
 
-VERSION = "3.13"
+VERSION = "3.14"
 
 PERIODS = {
     "15m": {"period": "60d", "max_bars": 32},
@@ -111,6 +111,7 @@ SIGNAL_DIAGNOSTIC_COLUMNS = [
     "actual_rr",
     "minimum_rr",
     "exit_time",
+    "active_trade_exit_time",
     "exit",
     "exit_reason",
     "result_R",
@@ -235,9 +236,6 @@ def _snapshot_metadata(
 def _save_snapshot(asset, ticker, interval, data):
     """
     Guarda las velas exactas utilizadas por el backtest.
-
-    El CSV se escribe primero en un archivo temporal.
-    Después se calcula su SHA-256 y se guarda el manifiesto.
     """
 
     try:
@@ -309,8 +307,6 @@ def _save_snapshot(asset, ticker, interval, data):
 def _load_snapshot(asset, ticker, interval):
     """
     Carga un histórico guardado y verifica su integridad.
-
-    No descarga datos si el snapshot falta o está alterado.
     """
 
     csv_path, metadata_path = _snapshot_paths(
@@ -547,6 +543,7 @@ def _start_signal_diagnostic(
         "actual_rr": None,
         "minimum_rr": MIN_EXECUTION_RR,
         "exit_time": None,
+        "active_trade_exit_time": None,
         "exit": None,
         "exit_reason": None,
         "result_R": None,
@@ -1551,8 +1548,8 @@ def run_backtest(asset, ticker, interval):
     La simulación de operaciones sigue siendo long-only
     y no permite operaciones solapadas.
 
-    Una candidata que aparece mientras otra operación está
-    abierta queda registrada, pero no se simula.
+    Cada señal solapada registra la hora de salida real
+    de la operación que impedía su ejecución.
     """
 
     if interval not in PERIODS:
@@ -1663,10 +1660,28 @@ def run_backtest(asset, ticker, interval):
         signal_index = candidate["index"]
         diagnostic = candidate["diagnostic"]
 
-        # Conserva la regla anterior:
-        # no se abre otra operación hasta después de la vela
+        # No se abre otra operación hasta después de la vela
         # en la que se cerró la operación anterior.
         if signal_index <= last_exit_index:
+
+            # CORRECCIÓN V3.14:
+            # last_exit_index pertenece a la operación activa
+            # que está bloqueando esta candidata.
+            #
+            # Se guarda el timestamp exacto de su salida,
+            # sin estimarlo ni calcularlo a partir de la duración.
+            if 0 <= last_exit_index < len(df):
+                active_trade_exit_time = str(
+                    df.index[last_exit_index]
+                )
+            else:
+                active_trade_exit_time = None
+
+            _update_signal_diagnostic(
+                diagnostic,
+                active_trade_exit_time=active_trade_exit_time,
+            )
+
             _finish_signal_diagnostic(
                 diagnostic,
                 "SKIPPED_OVERLAPPING_TRADE",
@@ -1675,6 +1690,7 @@ def run_backtest(asset, ticker, interval):
                     "una operación anterior abierta"
                 ),
             )
+
             continue
 
         simulation, error = _simulate_candidate(
@@ -2065,6 +2081,7 @@ def main():
     print(f"Tolerancia RR: {RR_TOLERANCE}")
     print("Diagnóstico: todas las candidatas")
     print("Simulación: sin operaciones solapadas")
+    print("Solapamientos: hora real de salida registrada")
     print("-" * 60)
 
     for asset, ticker in assets:
@@ -2118,7 +2135,10 @@ def main():
 
                 print(f"  Error: {error_message}")
 
-    # Señales que no se han simulado por solapamiento.
+    # -----------------------------------------------------
+    # SEÑALES SOLAPADAS
+    # -----------------------------------------------------
+
     for diagnostic in SIGNAL_DIAGNOSTICS:
         if diagnostic["signal_status"] != "SKIPPED_OVERLAPPING_TRADE":
             continue
@@ -2135,9 +2155,15 @@ def main():
             "stop": diagnostic["stop"],
             "target": diagnostic["target"],
             "actual_rr": diagnostic["actual_rr"],
-            "active_trade_exit_time": None,
+            "active_trade_exit_time": (
+                diagnostic["active_trade_exit_time"]
+            ),
             "reason": diagnostic["rejection_reason"],
         })
+
+    # -----------------------------------------------------
+    # EXPORTACIÓN DE RESULTADOS
+    # -----------------------------------------------------
 
     pd.DataFrame(all_trades).to_csv(
         "operaciones_backtest_v3.csv",
@@ -2223,6 +2249,16 @@ def main():
             index=False,
         )
 
+    # -----------------------------------------------------
+    # COMPROBACIÓN DEL REGISTRO DE SOLAPAMIENTOS
+    # -----------------------------------------------------
+
+    missing_overlap_times = sum(
+        1
+        for signal in overlapping_signals
+        if not signal["active_trade_exit_time"]
+    )
+
     print("-" * 60)
     print(f"Modo de datos: {BACKTEST_DATA_MODE}")
     print(f"Operaciones ejecutadas: {len(all_trades)}")
@@ -2234,6 +2270,10 @@ def main():
     print(
         "Señales solapadas no simuladas: "
         f"{len(overlapping_signals)}"
+    )
+    print(
+        "Solapamientos sin hora de salida: "
+        f"{missing_overlap_times}"
     )
     print(f"RR mínimo: {MIN_EXECUTION_RR:.2f}:1")
     print(f"Errores: {len(errors)}")
