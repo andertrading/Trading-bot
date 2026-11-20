@@ -12,11 +12,15 @@ import pandas as pd
 import yfinance as yf
 
 from config import ASSETS
+from data_engine import (
+    _is_trading_day,
+    _market_for_asset,
+)
 from indicators import add_indicators
 from strategies import evaluate_signal_at
 
 
-VERSION = "3.16"
+VERSION = "3.17"
 
 PERIODS = {
     "15m": {"period": "60d", "max_bars": 32},
@@ -32,9 +36,6 @@ RR_TOLERANCE = 1e-6
 # REPRODUCIBILIDAD
 # ---------------------------------------------------------
 
-# Por defecto se reproduce el último histórico guardado.
-# Para descargar históricos nuevos habrá que establecer
-# BACKTEST_DATA_MODE=download expresamente.
 BACKTEST_DATA_MODE = os.getenv(
     "BACKTEST_DATA_MODE",
     "replay",
@@ -54,17 +55,13 @@ if BACKTEST_DATA_MODE not in ("download", "replay"):
 
 SNAPSHOT_MANIFEST = []
 
-
 # ---------------------------------------------------------
 # REGISTROS
 # ---------------------------------------------------------
 
 DOWNLOAD_ERRORS = {}
-
 EXCLUDED_OHLC_CANDLES = []
-
 RR_REJECTIONS = []
-
 SIGNAL_DIAGNOSTICS = []
 
 RR_REJECTION_COLUMNS = [
@@ -135,7 +132,6 @@ OVERLAPPING_SIGNAL_COLUMNS = [
     "active_trade_exit_time",
     "reason",
 ]
-
 
 # ---------------------------------------------------------
 # CONFIGURACIÓN TEMPORAL
@@ -237,9 +233,7 @@ def _snapshot_metadata(
 
 
 def _save_snapshot(asset, ticker, interval, data):
-    """
-    Guarda las velas exactas utilizadas por el backtest.
-    """
+    """Guarda las velas exactas utilizadas por el backtest."""
 
     try:
         SNAPSHOT_DIR.mkdir(
@@ -307,10 +301,39 @@ def _save_snapshot(asset, ticker, interval, data):
         ) from exc
 
 
+def _metadata_timestamp(value, field_name, metadata_path):
+    """Convierte un timestamp del manifiesto a UTC."""
+
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(
+            f"Metadata inválida en {metadata_path}: "
+            f"{field_name} ausente o no textual"
+        )
+
+    try:
+        timestamp = pd.Timestamp(value)
+    except Exception as exc:
+        raise ValueError(
+            f"Metadata inválida en {metadata_path}: "
+            f"{field_name} no es una fecha válida"
+        ) from exc
+
+    if pd.isna(timestamp):
+        raise ValueError(
+            f"Metadata inválida en {metadata_path}: "
+            f"{field_name} contiene NaT"
+        )
+
+    if timestamp.tzinfo is None:
+        timestamp = timestamp.tz_localize("UTC")
+    else:
+        timestamp = timestamp.tz_convert("UTC")
+
+    return timestamp
+
+
 def _load_snapshot(asset, ticker, interval):
-    """
-    Carga un histórico guardado y verifica su integridad.
-    """
+    """Carga un histórico guardado y verifica su integridad."""
 
     csv_path, metadata_path = _snapshot_paths(
         asset,
@@ -333,6 +356,11 @@ def _load_snapshot(asset, ticker, interval):
         encoding="utf-8",
     ) as file:
         metadata = json.load(file)
+
+    if not isinstance(metadata, dict):
+        raise ValueError(
+            f"El manifiesto no contiene un objeto JSON: {metadata_path}"
+        )
 
     expected = {
         "asset": asset,
@@ -383,6 +411,17 @@ def _load_snapshot(asset, ticker, interval):
             f"El snapshot contiene timestamps inválidos: {csv_path}"
         )
 
+    # No se repara silenciosamente un snapshot desordenado.
+    if not data.index.is_monotonic_increasing:
+        raise ValueError(
+            f"El snapshot contiene timestamps desordenados: {csv_path}"
+        )
+
+    if data.index.has_duplicates:
+        raise ValueError(
+            f"El snapshot contiene timestamps duplicados: {csv_path}"
+        )
+
     required = [
         "Open",
         "High",
@@ -407,16 +446,45 @@ def _load_snapshot(asset, ticker, interval):
             errors="coerce",
         )
 
-    data = data.sort_index()
+    row_count = metadata.get("row_count")
 
-    if data.index.has_duplicates:
+    if (
+        isinstance(row_count, bool)
+        or not isinstance(row_count, int)
+        or row_count != len(data)
+    ):
         raise ValueError(
-            f"El snapshot contiene timestamps duplicados: {csv_path}"
+            f"Número de filas incompatible en {csv_path}: "
+            f"metadata={row_count}, real={len(data)}"
         )
 
-    if len(data) != metadata.get("row_count"):
+    metadata_first = _metadata_timestamp(
+        metadata.get("first_timestamp"),
+        "first_timestamp",
+        metadata_path,
+    )
+
+    metadata_last = _metadata_timestamp(
+        metadata.get("last_timestamp"),
+        "last_timestamp",
+        metadata_path,
+    )
+
+    if data.empty:
         raise ValueError(
-            f"Número de filas incompatible en {csv_path}"
+            f"El snapshot está vacío: {csv_path}"
+        )
+
+    if data.index[0] != metadata_first:
+        raise ValueError(
+            f"first_timestamp no coincide con el CSV en {csv_path}: "
+            f"metadata={metadata_first}, real={data.index[0]}"
+        )
+
+    if data.index[-1] != metadata_last:
+        raise ValueError(
+            f"last_timestamp no coincide con el CSV en {csv_path}: "
+            f"metadata={metadata_last}, real={data.index[-1]}"
         )
 
     validation_error = _ohlc_validation_error(data)
@@ -629,14 +697,65 @@ def _get_asset_type(asset):
 
 
 # ---------------------------------------------------------
-# VALIDACIÓN TEMPORAL
+# CALENDARIO Y VALIDACIÓN TEMPORAL
 # ---------------------------------------------------------
+
+def _calendar_asset(asset_type, asset=None):
+    """
+    Devuelve el identificador que utiliza data_engine
+    para seleccionar el calendario de mercado.
+
+    Si no se proporciona el activo, conserva compatibilidad
+    con las llamadas antiguas de los tests.
+    """
+
+    if asset:
+        return str(asset).upper()
+
+    asset_type = str(asset_type).upper()
+
+    if asset_type == "CRYPTO":
+        return "BTC"
+
+    return "UNKNOWN"
+
+
+def _has_missing_trading_day(
+    previous_date,
+    current_date,
+    calendar_asset,
+):
+    """
+    Comprueba si existe una sesión bursátil completa ausente
+    entre dos fechas representadas en el histórico.
+
+    Los fines de semana y festivos oficiales del calendario
+    correspondiente no se consideran sesiones ausentes.
+    """
+
+    if current_date <= previous_date:
+        return True
+
+    missing_date = previous_date + pd.Timedelta(days=1)
+
+    while missing_date < current_date:
+        if _is_trading_day(
+            missing_date.date(),
+            calendar_asset,
+        ):
+            return True
+
+        missing_date += pd.Timedelta(days=1)
+
+    return False
+
 
 def _has_unexpected_gap(
     previous_timestamp,
     current_timestamp,
     interval,
     asset_type,
+    asset=None,
 ):
     try:
         previous = pd.Timestamp(previous_timestamp)
@@ -666,18 +785,65 @@ def _has_unexpected_gap(
 
         return elapsed > maximum
 
-    if asset_type in ("STOCK", "ETF"):
-        if interval == "15m":
-            if previous.date() != current.date():
-                return False
+    if asset_type not in ("STOCK", "ETF"):
+        return True
 
+    calendar_asset = _calendar_asset(
+        asset_type,
+        asset,
+    )
+
+    if interval == "15m":
+        market = _market_for_asset(calendar_asset)
+        market_tz = market["timezone"]
+
+        try:
+            if previous.tzinfo is None:
+                previous = previous.tz_localize("UTC")
+            else:
+                previous = previous.tz_convert("UTC")
+
+            if current.tzinfo is None:
+                current = current.tz_localize("UTC")
+            else:
+                current = current.tz_convert("UTC")
+
+            previous_local = previous.tz_convert(market_tz)
+            current_local = current.tz_convert(market_tz)
+
+        except Exception:
+            return True
+
+        # Dentro de una misma sesión, las velas deben ser
+        # consecutivas con una tolerancia estricta.
+        if previous_local.date() == current_local.date():
             expected = pd.Timedelta(minutes=15)
             maximum = expected * GAP_TOLERANCE_MULTIPLIER
 
             return elapsed > maximum
 
-        if interval == "1d":
-            return False
+        # Entre sesiones puede haber cierres nocturnos,
+        # fines de semana y festivos. Se rechazan únicamente
+        # los días bursátiles completos ausentes.
+        return _has_missing_trading_day(
+            previous_local.date(),
+            current_local.date(),
+            calendar_asset,
+        )
+
+    if interval == "1d":
+        # Yahoo Finance representa las velas diarias con
+        # timestamps UTC asociados a la fecha de sesión.
+        # Por eso se utiliza la fecha UTC del timestamp,
+        # no la fecha local obtenida al convertir la hora.
+        previous_date = previous.date()
+        current_date = current.date()
+
+        return _has_missing_trading_day(
+            previous_date,
+            current_date,
+            calendar_asset,
+        )
 
     return True
 
@@ -774,6 +940,7 @@ def download_history(ticker, interval, asset=None):
     En modo download:
       - Descarga Yahoo.
       - Valida OHLC.
+      - Rechaza timestamps duplicados o desordenados.
       - Excluye la última fila.
       - Guarda el histórico exacto y su SHA-256.
 
@@ -913,11 +1080,26 @@ def download_history(ticker, interval, asset=None):
             )
             return None
 
-        data = data[
-            ~data.index.duplicated(keep="last")
-        ]
+        # Rechazar duplicados en vez de elegir silenciosamente
+        # una de las velas que comparten timestamp.
+        if data.index.has_duplicates:
+            duplicate_count = int(
+                data.index.duplicated(keep=False).sum()
+            )
 
-        data = data.sort_index()
+            DOWNLOAD_ERRORS[key] = (
+                f"Histórico rechazado: "
+                f"{duplicate_count} filas tienen timestamps duplicados"
+            )
+            return None
+
+        # No ordenar automáticamente: el orden recibido forma
+        # parte de la integridad del histórico descargado.
+        if not data.index.is_monotonic_increasing:
+            DOWNLOAD_ERRORS[key] = (
+                "Histórico rechazado: timestamps desordenados"
+            )
+            return None
 
     except Exception as exc:
         DOWNLOAD_ERRORS[key] = (
@@ -1012,6 +1194,7 @@ def _validate_execution_gaps(
     end_index,
     interval,
     asset_type,
+    asset=None,
 ):
     if start_index < 0 or end_index >= len(df):
         return "Índices fuera del histórico al comprobar huecos"
@@ -1028,6 +1211,7 @@ def _validate_execution_gaps(
             current_timestamp,
             interval,
             asset_type,
+            asset=asset,
         ):
             elapsed = (
                 pd.Timestamp(current_timestamp)
@@ -1093,11 +1277,7 @@ def _prepare_candidate(
     signal,
     asset_type,
 ):
-    """
-    Evalúa los datos de entrada y RR de una candidata.
-
-    No simula operaciones ni decide si puede solaparse.
-    """
+    """Evalúa los datos de entrada y RR de una candidata."""
 
     signal_row = df.iloc[index]
     entry_index = index + 1
@@ -1122,6 +1302,7 @@ def _prepare_candidate(
         entry_index,
         interval,
         asset_type,
+        asset=asset,
     )
 
     if gap_error:
@@ -1350,6 +1531,7 @@ def _simulate_candidate(
                 j,
                 interval,
                 asset_type,
+                asset=asset,
             )
 
             if gap_error:
@@ -1548,15 +1730,8 @@ def run_backtest(asset, ticker, interval):
     """
     Diagnostica todas las candidatas de cada vela evaluable.
 
-    La simulación de operaciones sigue siendo long-only
-    y no permite operaciones solapadas.
-
-    Una nueva entrada solo se bloquea si su vela de entrada
-    coincide con la vela de salida de la operación anterior
-    o es anterior a ella.
-
-    Si la operación anterior termina en la vela de señal,
-    la entrada prevista en la vela siguiente puede ejecutarse.
+    La simulación sigue siendo long-only y no permite
+    operaciones solapadas.
     """
 
     if interval not in PERIODS:
@@ -1609,6 +1784,12 @@ def run_backtest(asset, ticker, interval):
             f"{validation_error}"
         )
 
+    if not isinstance(df.index, pd.DatetimeIndex):
+        return [], "El índice temporal no es un DatetimeIndex"
+
+    if df.index.hasnans:
+        return [], "El índice temporal contiene fechas inválidas"
+
     if not df.index.is_monotonic_increasing:
         return [], "El índice temporal no está ordenado"
 
@@ -1619,7 +1800,7 @@ def run_backtest(asset, ticker, interval):
     asset_type = _get_asset_type(asset)
 
     # -----------------------------------------------------
-    # FASE 1: DETECTAR Y DIAGNOSTICAR TODAS LAS CANDIDATAS
+    # FASE 1: DETECTAR Y DIAGNOSTICAR CANDIDATAS
     # -----------------------------------------------------
 
     candidates = []
@@ -1667,17 +1848,6 @@ def run_backtest(asset, ticker, interval):
         entry_index = candidate["entry_index"]
         diagnostic = candidate["diagnostic"]
 
-        # Se compara la vela de ENTRADA prevista con la vela
-        # de SALIDA de la operación anterior.
-        #
-        # Si la operación anterior sale en la misma vela
-        # que la señal, pero antes de la entrada prevista,
-        # la nueva operación puede ejecutarse en la siguiente
-        # vela.
-        #
-        # Si la salida coincide con la vela de entrada,
-        # se mantiene el bloqueo por prudencia: con datos OHLC
-        # no conocemos el orden intravela de los acontecimientos.
         if entry_index <= last_exit_index:
 
             if 0 <= last_exit_index < len(df):
@@ -2092,7 +2262,8 @@ def main():
     print(f"Tolerancia RR: {RR_TOLERANCE}")
     print("Diagnóstico: todas las candidatas")
     print("Simulación: sin operaciones solapadas")
-    print("Filtro de solapamiento: comparación con entry_index")
+    print("Calendario: festivos y sesiones por mercado")
+    print("Snapshots: hash, filas, orden y timestamps verificados")
 
     if BACKTEST_DATA_MODE == "replay":
         print("SEGURIDAD: no se descargarán ni sobrescribirán snapshots.")
@@ -2249,9 +2420,6 @@ def main():
         index=False,
     )
 
-    # En download se genera el manifiesto con los snapshots
-    # recién guardados. En replay se conserva el manifiesto
-    # original para no modificar los históricos de referencia.
     if BACKTEST_DATA_MODE == "download":
         try:
             _write_snapshot_manifest()
