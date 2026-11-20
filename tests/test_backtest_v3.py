@@ -160,6 +160,69 @@ class TestBacktestV3(unittest.TestCase):
         self.assertIsNotNone(cleaned)
         self.assertFalse(cleaned.index.has_duplicates)
 
+    def test_download_excludes_incomplete_last_ohlc_candle(self):
+        data = self.make_data()
+        data.iloc[-1, data.columns.get_loc("High")] = 1.0
+        last_timestamp = data.index[-1]
+
+        with (
+            patch.object(
+                backtest_v3,
+                "BACKTEST_DATA_MODE",
+                "download",
+            ),
+            patch.object(
+                backtest_v3.yf,
+                "download",
+                return_value=data,
+            ),
+            patch.object(
+                backtest_v3,
+                "_save_snapshot",
+                return_value=None,
+            ),
+        ):
+            cleaned = backtest_v3.download_history(
+                "AAPL",
+                "15m",
+            )
+
+        self.assertIsNotNone(cleaned)
+        self.assertEqual(len(cleaned), len(data) - 1)
+        self.assertNotIn(last_timestamp, cleaned.index)
+
+    def test_download_rejects_conflicting_duplicate_timestamps(self):
+        data = self.make_data()
+        conflicting = data.iloc[[-1]].copy()
+
+        for column in ("Open", "High", "Low", "Close"):
+            conflicting[column] += 0.5
+
+        duplicated = pd.concat([data, conflicting])
+
+        with (
+            patch.object(
+                backtest_v3,
+                "BACKTEST_DATA_MODE",
+                "download",
+            ),
+            patch.object(
+                backtest_v3.yf,
+                "download",
+                return_value=duplicated,
+            ),
+        ):
+            cleaned = backtest_v3.download_history(
+                "AAPL",
+                "15m",
+            )
+
+        self.assertIsNone(cleaned)
+        self.assertIn(
+            "timestamp duplicado conflictivo",
+            backtest_v3.DOWNLOAD_ERRORS[("AAPL", "15m")],
+        )
+
     def test_download_rejects_incoherent_history(self):
         data = self.make_data()
         data.loc[data.index[10], "High"] = 1.0
