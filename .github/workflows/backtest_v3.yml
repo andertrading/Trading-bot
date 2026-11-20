@@ -53,7 +53,266 @@ jobs:
           test -f resumen_operaciones_v3.csv
           test -f diagnostico_senales_v3.csv
 
-      - name: Guardar resultados
+      - name: Generar informe técnico ampliado
+        if: always()
+        run: |
+          python - <<'PY'
+          import os
+          import pandas as pd
+
+          FILES = [
+              "operaciones_backtest_v3.csv",
+              "resultados_backtest_v3.csv",
+              "errores_backtest_v3.csv",
+              "resumen_operaciones_v3.csv",
+              "diagnostico_senales_v3.csv",
+          ]
+
+          summary_path = os.environ["GITHUB_STEP_SUMMARY"]
+
+          def clean(value):
+              if pd.isna(value):
+                  return ""
+              return str(value).replace("|", "\\|").replace("\n", " ")
+
+          def markdown_table(df, max_rows=40):
+              if df is None or df.empty:
+                  return "_Sin datos disponibles._\n"
+
+              shown = df.head(max_rows)
+              columns = list(shown.columns)
+
+              lines = [
+                  "| " + " | ".join(clean(c) for c in columns) + " |",
+                  "| " + " | ".join(["---"] * len(columns)) + " |",
+              ]
+
+              for _, row in shown.iterrows():
+                  lines.append(
+                      "| " + " | ".join(clean(row[c]) for c in columns) + " |"
+                  )
+
+              if len(df) > max_rows:
+                  lines.append(
+                      f"\n_Se muestran {max_rows} de {len(df)} filas._"
+                  )
+
+              return "\n".join(lines) + "\n"
+
+          def find_column(df, terms):
+              for column in df.columns:
+                  name = str(column).lower().replace("_", "").replace(" ", "")
+                  if any(term in name for term in terms):
+                      return column
+              return None
+
+          def section(title, df, max_rows=40):
+              return (
+                  f"\n## {title}\n\n"
+                  + markdown_table(df, max_rows)
+              )
+
+          report = [
+              "# INFORME TÉCNICO - TRADING BOT 3.0",
+              "",
+              "Informe generado automáticamente a partir de los CSV del backtest.",
+              "",
+          ]
+
+          data = {}
+
+          report.append("## 1. Estado de los archivos")
+
+          for filename in FILES:
+              if os.path.exists(filename):
+                  try:
+                      df = pd.read_csv(filename)
+                      data[filename] = df
+                      report.append(
+                          f"- **{filename}:** disponible, "
+                          f"{len(df)} filas y {len(df.columns)} columnas."
+                      )
+                  except Exception as exc:
+                      report.append(
+                          f"- **{filename}:** error de lectura: {exc}"
+                      )
+              else:
+                  report.append(f"- **{filename}:** no generado.")
+
+          results = data.get("resultados_backtest_v3.csv")
+
+          if results is not None and not results.empty:
+              report.append("\n## 2. Resultados generales")
+
+              numeric_columns = [
+                  "operaciones",
+                  "ganadoras",
+                  "perdedoras",
+                  "resultado_R",
+                  "drawdown_max_R",
+              ]
+
+              for column in numeric_columns:
+                  if column in results.columns:
+                      results[column] = pd.to_numeric(
+                          results[column], errors="coerce"
+                      )
+
+              if "tipo" in results.columns:
+                  total_rows = results[
+                      results["tipo"].astype(str).str.upper().str.contains(
+                          "TOTAL", na=False
+                      )
+                  ]
+
+                  if not total_rows.empty:
+                      report.append(
+                          markdown_table(total_rows, 20)
+                      )
+
+                  asset_rows = results[
+                      results["tipo"].astype(str).str.upper().str.contains(
+                          "ACTIVO_TEMPORALIDAD", na=False
+                      )
+                  ]
+
+                  if asset_rows.empty:
+                      asset_rows = results
+
+                  report.append(
+                      "\n### Resultados por activo y temporalidad\n"
+                  )
+                  report.append(markdown_table(asset_rows, 40))
+              else:
+                  report.append(markdown_table(results, 40))
+
+          monthly = data.get("resumen_operaciones_v3.csv")
+
+          if monthly is not None:
+              report.append(
+                  section("3. Resumen de operaciones y evolución temporal",
+                          monthly, 50)
+              )
+
+          diagnostics = data.get("diagnostico_senales_v3.csv")
+
+          if diagnostics is not None and not diagnostics.empty:
+              report.append("\n## 4. Diagnóstico de señales")
+
+              status_col = find_column(
+                  diagnostics, ["signalstatus", "estado", "status"]
+              )
+
+              reason_col = find_column(
+                  diagnostics, ["rejectionreason", "motivo", "reason"]
+              )
+
+              asset_col = find_column(
+                  diagnostics, ["activo", "asset", "ticker", "symbol"]
+              )
+
+              timeframe_col = find_column(
+                  diagnostics, ["temporalidad", "timeframe"]
+              )
+
+              if status_col:
+                  report.append("\n### Señales por estado\n")
+                  counts = (
+                      diagnostics.groupby(status_col, dropna=False)
+                      .size()
+                      .reset_index(name="cantidad")
+                      .sort_values("cantidad", ascending=False)
+                  )
+                  report.append(markdown_table(counts, 50))
+
+              if reason_col:
+                  report.append("\n### Motivos registrados\n")
+                  reasons = (
+                      diagnostics.groupby(reason_col, dropna=False)
+                      .size()
+                      .reset_index(name="cantidad")
+                      .sort_values("cantidad", ascending=False)
+                  )
+                  report.append(markdown_table(reasons, 50))
+
+              if asset_col and timeframe_col and status_col:
+                  report.append(
+                      "\n### Estados por activo y temporalidad\n"
+                  )
+                  grouped = (
+                      diagnostics.groupby(
+                          [asset_col, timeframe_col, status_col],
+                          dropna=False
+                      )
+                      .size()
+                      .reset_index(name="cantidad")
+                  )
+                  report.append(markdown_table(grouped, 100))
+
+              report.append(
+                  section(
+                      "Muestra de señales diagnosticadas",
+                      diagnostics,
+                      15
+                  )
+              )
+
+          operations = data.get("operaciones_backtest_v3.csv")
+
+          if operations is not None and not operations.empty:
+              report.append("\n## 5. Operaciones ejecutadas")
+
+              report.append(
+                  f"\nTotal de registros: **{len(operations)}**.\n"
+              )
+
+              exit_col = find_column(
+                  operations, ["exitreason", "motivosalida", "salida"]
+              )
+
+              if exit_col:
+                  exits = (
+                      operations.groupby(exit_col, dropna=False)
+                      .size()
+                      .reset_index(name="cantidad")
+                      .sort_values("cantidad", ascending=False)
+                  )
+                  report.append("### Tipos de salida\n")
+                  report.append(markdown_table(exits, 30))
+
+              report.append(
+                  section("Muestra de operaciones", operations, 10)
+              )
+
+          errors = data.get("errores_backtest_v3.csv")
+
+          if errors is not None:
+              report.append(
+                  section("6. Errores del backtest", errors, 30)
+              )
+
+          report.extend([
+              "",
+              "## 7. Consideraciones",
+              "",
+              "- Los resultados en R no representan por sí solos una "
+              "rentabilidad monetaria de cartera.",
+              "- No se deben considerar incluidos los costes reales, "
+              "el deslizamiento, la financiación ni el cambio de divisa "
+              "si el backtest no los incorpora.",
+              "- El informe es una herramienta de diagnóstico, "
+              "no una validación de rentabilidad futura.",
+              "",
+              "## Fin del informe",
+          ])
+
+          with open(summary_path, "a", encoding="utf-8") as file:
+              file.write("\n".join(report))
+
+          print("Informe técnico ampliado generado.")
+          PY
+
+      - name: Guardar resultados descargables
         if: always()
         uses: actions/upload-artifact@v4
         with:
