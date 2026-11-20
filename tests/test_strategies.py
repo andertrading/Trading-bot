@@ -6,6 +6,7 @@ import pandas as pd
 
 from strategies import (
     MIN_BARS,
+    MIN_SCORE,
     evaluate_signal,
     evaluate_signal_at,
 )
@@ -31,7 +32,9 @@ class TestStrategies(unittest.TestCase):
 
     def test_valid_data_generates_candidate(self):
         result = evaluate_signal_at(
-            "AAPL", make_valid_data(), "1d"
+            "AAPL",
+            make_valid_data(),
+            "1d",
         )
 
         self.assertEqual(
@@ -39,14 +42,105 @@ class TestStrategies(unittest.TestCase):
             "BUY CANDIDATE",
             msg=str(result),
         )
-        self.assertFalse(result.get("validated", False))
+
+        self.assertFalse(result["validated"])
+        self.assertFalse(result["tradable"])
+
+        self.assertEqual(
+            result["status"],
+            "PENDING_VALIDATION",
+        )
+
+    def test_bearish_main_trend_is_rejected(self):
+        data = make_valid_data()
+
+        data.loc[data.index[-1], "EMA50"] = 90.0
+        data.loc[data.index[-1], "EMA200"] = 95.0
+
+        result = evaluate_signal_at(
+            "AAPL",
+            data,
+            "1d",
+        )
+
+        self.assertEqual(
+            result["action"],
+            "NO TRADE",
+        )
+
+        self.assertIn(
+            "Tendencia principal no alcista",
+            result["reason"],
+        )
+
+    def test_equal_ema50_and_ema200_is_rejected(self):
+        data = make_valid_data()
+
+        data.loc[data.index[-1], "EMA50"] = 95.0
+        data.loc[data.index[-1], "EMA200"] = 95.0
+
+        result = evaluate_signal_at(
+            "AAPL",
+            data,
+            "1d",
+        )
+
+        self.assertEqual(
+            result["action"],
+            "NO TRADE",
+        )
+
+        self.assertIn(
+            "Tendencia principal no alcista",
+            result["reason"],
+        )
+
+    def test_bullish_main_trend_is_required_for_candidate(self):
+        data = make_valid_data()
+
+        data.loc[data.index[-1], "EMA50"] = 100.0
+        data.loc[data.index[-1], "EMA200"] = 95.0
+
+        result = evaluate_signal_at(
+            "AAPL",
+            data,
+            "1d",
+        )
+
+        self.assertEqual(
+            result["action"],
+            "BUY CANDIDATE",
+        )
+
+        self.assertIn(
+            "Tendencia principal alcista",
+            result["reasons"],
+        )
+
+    def test_valid_candidate_works_on_intraday_timeframe(self):
+        result = evaluate_signal_at(
+            "AAPL",
+            make_valid_data(),
+            "15m",
+        )
+
+        self.assertEqual(
+            result["action"],
+            "BUY CANDIDATE",
+            msg=str(result),
+        )
 
     def test_unsupported_timeframe_is_rejected(self):
         result = evaluate_signal_at(
-            "AAPL", make_valid_data(), "5m"
+            "AAPL",
+            make_valid_data(),
+            "5m",
         )
 
-        self.assertEqual(result["action"], "NO TRADE")
+        self.assertEqual(
+            result["action"],
+            "NO TRADE",
+        )
 
     def test_insufficient_data_is_rejected(self):
         result = evaluate_signal_at(
@@ -55,68 +149,352 @@ class TestStrategies(unittest.TestCase):
             "1d",
         )
 
-        self.assertEqual(result["action"], "NO TRADE")
+        self.assertEqual(
+            result["action"],
+            "NO TRADE",
+        )
 
     def test_missing_required_column_is_rejected(self):
-        data = make_valid_data().drop(columns=["RSI"])
+        data = make_valid_data().drop(
+            columns=["RSI"]
+        )
 
-        result = evaluate_signal_at("AAPL", data, "1d")
+        result = evaluate_signal_at(
+            "AAPL",
+            data,
+            "1d",
+        )
 
-        self.assertEqual(result["action"], "NO TRADE")
+        self.assertEqual(
+            result["action"],
+            "NO TRADE",
+        )
+
+        self.assertIn(
+            "Falta indicador",
+            result["reason"],
+        )
 
     def test_invalid_price_is_rejected(self):
         data = make_valid_data()
+
         data.loc[data.index[-1], "Close"] = 0
 
-        result = evaluate_signal_at("AAPL", data, "1d")
+        result = evaluate_signal_at(
+            "AAPL",
+            data,
+            "1d",
+        )
 
-        self.assertEqual(result["action"], "NO TRADE")
+        self.assertEqual(
+            result["action"],
+            "NO TRADE",
+        )
+
+    def test_negative_price_is_rejected(self):
+        data = make_valid_data()
+
+        data.loc[data.index[-1], "Close"] = -10
+
+        result = evaluate_signal_at(
+            "AAPL",
+            data,
+            "1d",
+        )
+
+        self.assertEqual(
+            result["action"],
+            "NO TRADE",
+        )
 
     def test_non_finite_atr_is_rejected(self):
-        data = make_valid_data()
-        data.loc[data.index[-1], "ATR"] = float("inf")
+        invalid_values = (
+            float("nan"),
+            float("inf"),
+            float("-inf"),
+        )
 
-        result = evaluate_signal_at("AAPL", data, "1d")
+        for value in invalid_values:
+            with self.subTest(value=value):
+                data = make_valid_data()
 
-        self.assertEqual(result["action"], "NO TRADE")
+                data.loc[data.index[-1], "ATR"] = value
+
+                result = evaluate_signal_at(
+                    "AAPL",
+                    data,
+                    "1d",
+                )
+
+                self.assertEqual(
+                    result["action"],
+                    "NO TRADE",
+                )
 
     def test_boolean_numeric_value_is_rejected(self):
         data = make_valid_data()
+
         data["RSI"] = data["RSI"].astype(object)
+
         data.loc[data.index[-1], "RSI"] = True
 
-        result = evaluate_signal_at("AAPL", data, "1d")
+        result = evaluate_signal_at(
+            "AAPL",
+            data,
+            "1d",
+        )
 
-        self.assertEqual(result["action"], "NO TRADE")
+        self.assertEqual(
+            result["action"],
+            "NO TRADE",
+        )
 
     def test_invalid_rsi_is_rejected(self):
-        data = make_valid_data()
-        data.loc[data.index[-1], "RSI"] = 105
+        invalid_values = (-1, 101, 105)
 
-        result = evaluate_signal_at("AAPL", data, "1d")
+        for value in invalid_values:
+            with self.subTest(value=value):
+                data = make_valid_data()
 
-        self.assertEqual(result["action"], "NO TRADE")
+                data.loc[data.index[-1], "RSI"] = value
+
+                result = evaluate_signal_at(
+                    "AAPL",
+                    data,
+                    "1d",
+                )
+
+                self.assertEqual(
+                    result["action"],
+                    "NO TRADE",
+                )
 
     def test_excessive_volatility_is_rejected(self):
         data = make_valid_data()
-        data.loc[data.index[-1], "ATR_PERCENT"] = 5.1
 
-        result = evaluate_signal_at("AAPL", data, "1d")
+        data.loc[
+            data.index[-1],
+            "ATR_PERCENT",
+        ] = 5.1
 
-        self.assertEqual(result["action"], "NO TRADE")
-
-    def test_risk_reward_is_at_least_two(self):
         result = evaluate_signal_at(
-            "AAPL", make_valid_data(), "1d"
+            "AAPL",
+            data,
+            "1d",
         )
 
-        if result["action"] == "BUY CANDIDATE":
-            self.assertGreaterEqual(result["risk_reward"], 2.0)
+        self.assertEqual(
+            result["action"],
+            "NO TRADE",
+        )
+
+    def test_negative_volatility_is_rejected(self):
+        data = make_valid_data()
+
+        data.loc[
+            data.index[-1],
+            "ATR_PERCENT",
+        ] = -0.1
+
+        result = evaluate_signal_at(
+            "AAPL",
+            data,
+            "1d",
+        )
+
+        self.assertEqual(
+            result["action"],
+            "NO TRADE",
+        )
+
+    def test_risk_reward_is_exactly_two(self):
+        result = evaluate_signal_at(
+            "AAPL",
+            make_valid_data(),
+            "1d",
+        )
+
+        self.assertEqual(
+            result["action"],
+            "BUY CANDIDATE",
+        )
+
+        self.assertAlmostEqual(
+            result["risk_reward"],
+            2.0,
+        )
+
+    def test_stop_and_target_are_correct(self):
+        result = evaluate_signal_at(
+            "AAPL",
+            make_valid_data(),
+            "1d",
+        )
+
+        self.assertEqual(
+            result["action"],
+            "BUY CANDIDATE",
+        )
+
+        self.assertAlmostEqual(
+            result["entry_reference"],
+            110.0,
+        )
+
+        self.assertAlmostEqual(
+            result["stop"],
+            107.0,
+        )
+
+        self.assertAlmostEqual(
+            result["target"],
+            116.0,
+        )
+
+    def test_volume_is_optional(self):
+        data = make_valid_data().drop(
+            columns=["relative_volume"]
+        )
+
+        result = evaluate_signal_at(
+            "AAPL",
+            data,
+            "1d",
+        )
+
+        self.assertEqual(
+            result["action"],
+            "BUY CANDIDATE",
+            msg=str(result),
+        )
+
+    def test_low_volume_does_not_add_volume_score(self):
+        data = make_valid_data()
+
+        data.loc[
+            data.index[-1],
+            "relative_volume",
+        ] = 0.5
+
+        result = evaluate_signal_at(
+            "AAPL",
+            data,
+            "1d",
+        )
+
+        self.assertEqual(
+            result["action"],
+            "BUY CANDIDATE",
+        )
+
+        self.assertNotIn(
+            "Volumen superior a la media",
+            result["reasons"],
+        )
+
+    def test_candidate_score_meets_minimum(self):
+        result = evaluate_signal_at(
+            "AAPL",
+            make_valid_data(),
+            "1d",
+        )
+
+        self.assertEqual(
+            result["action"],
+            "BUY CANDIDATE",
+        )
+
+        self.assertGreaterEqual(
+            result["score"],
+            MIN_SCORE,
+        )
+
+    def test_invalid_index_is_rejected(self):
+        invalid_indices = (
+            True,
+            1.5,
+            "last",
+            None,
+        )
+
+        for index in invalid_indices:
+            with self.subTest(index=index):
+                result = evaluate_signal_at(
+                    "AAPL",
+                    make_valid_data(),
+                    "1d",
+                    index=index,
+                )
+
+                self.assertEqual(
+                    result["action"],
+                    "NO TRADE",
+                )
+
+    def test_out_of_range_index_is_rejected(self):
+        result = evaluate_signal_at(
+            "AAPL",
+            make_valid_data(),
+            "1d",
+            index=MIN_BARS,
+        )
+
+        self.assertEqual(
+            result["action"],
+            "NO TRADE",
+        )
+
+    def test_negative_index_selects_previous_candle(self):
+        data = make_valid_data()
+
+        data.loc[
+            data.index[-1],
+            "EMA50",
+        ] = 90.0
+
+        result = evaluate_signal_at(
+            "AAPL",
+            data,
+            "1d",
+            index=-2,
+        )
+
+        self.assertEqual(
+            result["action"],
+            "BUY CANDIDATE",
+        )
+
+    def test_asset_and_dataframe_argument_orders(self):
+        data = make_valid_data()
+
+        result_a = evaluate_signal_at(
+            data,
+            "AAPL",
+            "1d",
+        )
+
+        result_b = evaluate_signal_at(
+            "AAPL",
+            data,
+            "1d",
+        )
+
+        self.assertEqual(
+            result_a["action"],
+            result_b["action"],
+        )
+
+        self.assertEqual(
+            result_a["score"],
+            result_b["score"],
+        )
 
     def test_indicator_exception_is_handled(self):
         with patch(
             "strategies.add_indicators",
-            side_effect=ValueError("Indicadores no disponibles"),
+            side_effect=ValueError(
+                "Indicadores no disponibles"
+            ),
         ):
             result = evaluate_signal(
                 "AAPL",
@@ -124,7 +502,15 @@ class TestStrategies(unittest.TestCase):
                 "1d",
             )
 
-        self.assertEqual(result["action"], "NO TRADE")
+        self.assertEqual(
+            result["action"],
+            "NO TRADE",
+        )
+
+        self.assertIn(
+            "Error al calcular indicadores",
+            result["reason"],
+        )
 
 
 if __name__ == "__main__":
