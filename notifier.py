@@ -43,8 +43,13 @@ def send_telegram(message):
 
         return True
 
-    except requests.RequestException:
-        logger.exception("Error enviando alerta a Telegram.")
+    except requests.RequestException as exc:
+        # La URL de Telegram contiene el token en su ruta.
+        # Registrar solo el tipo de error evita filtrarlo en los logs.
+        logger.error(
+            "Error enviando alerta a Telegram: %s",
+            type(exc).__name__,
+        )
         return False
 
 
