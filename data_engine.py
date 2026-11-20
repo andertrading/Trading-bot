@@ -108,7 +108,7 @@ def _last_weekday(year, month, weekday):
 
 
 def _easter_sunday(year):
-    """Algoritmo gregoriano de Pascua."""
+    """Calcula el domingo de Pascua mediante el algoritmo gregoriano."""
 
     a = year % 19
     b = year // 100
@@ -166,9 +166,7 @@ def _uk_substitute_holidays(year):
     for month, day in ((1, 1), (12, 25), (12, 26)):
         original = date(year, month, day)
 
-        if original.weekday() == 5:
-            holidays.add(original + timedelta(days=2))
-        elif original.weekday() == 6:
+        if original.weekday() in (5, 6):
             holidays.add(original + timedelta(days=2))
         else:
             holidays.add(original)
@@ -219,7 +217,6 @@ def _is_market_holiday(day, asset):
 
 
 def _is_trading_day(day, asset):
-    # Las criptomonedas cotizan todos los días del año.
     if asset in CRYPTO_ASSETS:
         return True
 
@@ -245,6 +242,41 @@ def _previous_weekday(day):
         candidate -= timedelta(days=1)
 
     return candidate
+
+
+def _us_early_close_dates(year):
+    """
+    Devuelve las fechas estadounidenses con cierre anticipado
+    que se contemplan expresamente en este calendario.
+
+    Incluye el viernes posterior a Thanksgiving.
+    """
+
+    thanksgiving = _nth_weekday(year, 11, 3, 4)
+
+    return {
+        thanksgiving + timedelta(days=1),
+    }
+
+
+def _market_close_time(asset, session_date):
+    """
+    Devuelve la hora de cierre aplicable a una sesión concreta.
+
+    Para Estados Unidos contempla el cierre anticipado del viernes
+    posterior a Thanksgiving.
+    """
+
+    _, _, regular_close = _session_for_asset(asset)
+
+    if asset in CRYPTO_ASSETS:
+        return regular_close
+
+    if asset not in LONDON_ASSETS:
+        if session_date in _us_early_close_dates(session_date.year):
+            return datetime_time(13, 0)
+
+    return regular_close
 
 
 # ---------------------------------------------------------------------
@@ -461,7 +493,7 @@ def _normalise_dataframe(df):
 # ---------------------------------------------------------------------
 
 def _last_expected_intraday_timestamp(asset, now_utc):
-    tz, opening, closing = _session_for_asset(asset)
+    tz, opening, regular_closing = _session_for_asset(asset)
 
     now_local = now_utc.astimezone(tz)
     session_date = now_local.date()
@@ -475,13 +507,23 @@ def _last_expected_intraday_timestamp(asset, now_utc):
             asset,
         )
 
-        previous_close = datetime.combine(
+        previous_close = _market_close_time(
+            asset,
             previous_day,
-            closing,
+        )
+
+        previous_close_dt = datetime.combine(
+            previous_day,
+            previous_close,
             tzinfo=tz,
         )
 
-        return previous_close - timedelta(minutes=15)
+        return previous_close_dt - timedelta(minutes=15)
+
+    closing = _market_close_time(
+        asset,
+        session_date,
+    )
 
     open_dt = datetime.combine(
         session_date,
@@ -501,13 +543,18 @@ def _last_expected_intraday_timestamp(asset, now_utc):
             asset,
         )
 
-        previous_close = datetime.combine(
+        previous_close = _market_close_time(
+            asset,
             previous_day,
-            closing,
+        )
+
+        previous_close_dt = datetime.combine(
+            previous_day,
+            previous_close,
             tzinfo=tz,
         )
 
-        return previous_close - timedelta(minutes=15)
+        return previous_close_dt - timedelta(minutes=15)
 
     if now_local >= close_dt:
         return close_dt - timedelta(minutes=15)
@@ -521,17 +568,66 @@ def _last_expected_intraday_timestamp(asset, now_utc):
             asset,
         )
 
-        previous_close = datetime.combine(
+        previous_close = _market_close_time(
+            asset,
             previous_day,
-            closing,
+        )
+
+        previous_close_dt = datetime.combine(
+            previous_day,
+            previous_close,
             tzinfo=tz,
         )
 
-        return previous_close - timedelta(minutes=15)
+        return previous_close_dt - timedelta(minutes=15)
 
-    return (
+    expected = (
         open_dt
         + timedelta(minutes=15 * (completed_intervals - 1))
+    )
+
+    last_session_candle = close_dt - timedelta(minutes=15)
+
+    return min(expected, last_session_candle)
+
+
+def _last_completed_daily_session_date(asset, now_utc):
+    """
+    Determina la última sesión diaria que puede considerarse completa.
+
+    Acciones y ETF:
+    - Antes del cierre: última sesión bursátil anterior.
+    - Después del cierre: sesión de hoy, si hoy es hábil.
+
+    Criptomonedas:
+    - La vela diaria UTC actual no se considera completa hasta
+      el siguiente cambio de día UTC.
+    """
+
+    if asset in CRYPTO_ASSETS:
+        return now_utc.date() - timedelta(days=1)
+
+    market_tz, _, _ = _session_for_asset(asset)
+    now_local = now_utc.astimezone(market_tz)
+    market_today = now_local.date()
+
+    if not _is_trading_day(market_today, asset):
+        return _previous_trading_day(
+            market_today,
+            asset,
+        )
+
+    closing = _market_close_time(
+        asset,
+        market_today,
+    )
+
+    if now_local.time() >= closing:
+        return market_today
+
+    return _previous_trading_day(
+        market_today,
+        asset,
     )
 
 
@@ -569,7 +665,17 @@ def _remove_incomplete_candle(df, interval, asset=None):
         return df[df.index <= last_completed_start]
 
     if interval == "1d":
-        return df[df.index.date < now.date()]
+        if asset is None:
+            return df[df.index.date < now.date()]
+
+        last_completed_date = _last_completed_daily_session_date(
+            asset,
+            now,
+        )
+
+        return df[
+            df.index.date <= last_completed_date
+        ]
 
     return df
 
@@ -582,9 +688,18 @@ def _has_intraday_gaps(df, asset):
     """
     Comprueba continuidad de velas de 15 minutos.
 
-    Cripto: mercado continuo 24/7.
-    Acciones y ETF: comprueba huecos dentro de cada sesión.
-    No exige velas durante noches, fines de semana ni festivos.
+    Cripto:
+    - Comprueba continuidad de 15 minutos durante todo el histórico.
+
+    Acciones y ETF:
+    - Comprueba intervalos de 15 minutos dentro de cada sesión.
+    - Comprueba apertura cuando puede determinarse que la sesión
+      está completa.
+    - Comprueba cierre en sesiones históricas completas.
+    - No exige que el primer día de un histórico multidía esté
+      completo, porque el proveedor puede haber empezado a mitad
+      de esa sesión.
+    - No exige el cierre de la sesión actual si todavía está abierta.
     """
 
     if df is None or df.empty:
@@ -598,7 +713,9 @@ def _has_intraday_gaps(df, asset):
     if asset in CRYPTO_ASSETS:
         differences = timestamps.to_series().diff().dropna()
 
-        if not (differences == pd.Timedelta(minutes=15)).all():
+        if not (
+            differences == pd.Timedelta(minutes=15)
+        ).all():
             logger.error(
                 "HUECO INTRADIA | %s | mercado cripto",
                 asset,
@@ -607,15 +724,26 @@ def _has_intraday_gaps(df, asset):
 
         return False
 
-    tz, opening, closing = _session_for_asset(asset)
+    tz, opening, _ = _session_for_asset(asset)
 
     local_index = timestamps.tz_convert(tz)
+
     local_dates = pd.Series(
         local_index.date,
         index=timestamps,
     )
 
-    for session_date, group in local_dates.groupby(local_dates):
+    sessions = list(local_dates.groupby(local_dates))
+
+    if not sessions:
+        return True
+
+    first_session_date = sessions[0][0]
+
+    now_local = datetime.now(timezone.utc).astimezone(tz)
+    current_session_date = now_local.date()
+
+    for session_date, group in sessions:
         if not _is_trading_day(session_date, asset):
             logger.error(
                 "HISTÓRICO RECHAZADO: vela en día no hábil | %s | %s",
@@ -629,11 +757,22 @@ def _has_intraday_gaps(df, asset):
         ).sort_values()
 
         if len(session_timestamps) < 2:
-            continue
+            logger.error(
+                "HISTÓRICO RECHAZADO: sesión con una sola vela | %s | %s",
+                asset,
+                session_date,
+            )
+            return True
 
-        differences = session_timestamps.to_series().diff().dropna()
+        differences = (
+            session_timestamps.to_series()
+            .diff()
+            .dropna()
+        )
 
-        if not (differences == pd.Timedelta(minutes=15)).all():
+        if not (
+            differences == pd.Timedelta(minutes=15)
+        ).all():
             logger.error(
                 "HUECO INTRADIA | %s | sesión=%s",
                 asset,
@@ -643,6 +782,11 @@ def _has_intraday_gaps(df, asset):
 
         local_first = session_timestamps[0].tz_convert(tz)
         local_last = session_timestamps[-1].tz_convert(tz)
+
+        closing = _market_close_time(
+            asset,
+            session_date,
+        )
 
         open_dt = datetime.combine(
             session_date,
@@ -663,6 +807,52 @@ def _has_intraday_gaps(df, asset):
                 session_date,
             )
             return True
+
+        # Si el histórico contiene varias sesiones, el primer día
+        # puede estar parcialmente descargado por el límite del
+        # proveedor. No exigimos su primera vela en ese caso.
+        #
+        # Si solo hay una sesión, sí comprobamos su apertura.
+        check_open = (
+            session_date != first_session_date
+            or len(sessions) == 1
+        )
+
+        if check_open and local_first != open_dt:
+            logger.error(
+                "FALTA LA PRIMERA VELA DE SESIÓN | %s | %s | expected=%s | received=%s",
+                asset,
+                session_date,
+                open_dt,
+                local_first,
+            )
+            return True
+
+        # Una sesión anterior a la fecha local actual debe estar
+        # completa. La sesión actual puede seguir abierta.
+        #
+        # Si la sesión actual ya ha cerrado, también exigimos
+        # la última vela correspondiente a su horario.
+        session_is_complete = (
+            session_date < current_session_date
+            or (
+                session_date == current_session_date
+                and now_local.time() >= closing
+            )
+        )
+
+        if session_is_complete:
+            expected_last = close_dt - timedelta(minutes=15)
+
+            if local_last != expected_last:
+                logger.error(
+                    "FALTA LA ÚLTIMA VELA DE SESIÓN | %s | %s | expected=%s | received=%s",
+                    asset,
+                    session_date,
+                    expected_last,
+                    local_last,
+                )
+                return True
 
     return False
 
@@ -1325,12 +1515,9 @@ def is_data_fresh(
             return is_fresh
 
     elif interval == "1d":
-        market_tz, _, _ = _session_for_asset(asset)
-        market_today = now.astimezone(market_tz).date()
-
-        expected_date = _previous_trading_day(
-            market_today,
+        expected_date = _last_completed_daily_session_date(
             asset,
+            now,
         )
 
         timestamp_date = timestamp_dt.date()
