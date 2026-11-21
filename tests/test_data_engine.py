@@ -1087,8 +1087,7 @@ class TestDailyGaps(unittest.TestCase):
         df = self.make_daily([
             "2020-11-12",
             "2020-11-15",
-            "2025-11-20",
-            "2025-11-21",
+            "2026-11-19",
             "2026-11-20",
         ])
         self.assertFalse(engine._has_daily_gaps(df, "ETH"))
