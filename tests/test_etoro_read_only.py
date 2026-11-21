@@ -839,6 +839,25 @@ class AccountSnapshotTests(unittest.TestCase):
         with self.assertRaises(EtoroAPIError):
             normalize_account_snapshot(self.payload, "USD")
 
+    def test_long_position_stop_must_be_below_open_rate(self):
+        self.payload["clientPortfolio"]["positions"][0]["stopLossRate"] = "100"
+        with self.assertRaisesRegex(EtoroAPIError, "compra debe estar por debajo"):
+            normalize_account_snapshot(self.payload, "USD")
+
+    def test_short_position_stop_must_be_above_open_rate(self):
+        position = self.payload["clientPortfolio"]["positions"][0]
+        position["isBuy"] = False
+        position["stopLossRate"] = "95"
+        with self.assertRaisesRegex(EtoroAPIError, "venta debe estar por encima"):
+            normalize_account_snapshot(self.payload, "USD")
+
+    def test_short_position_with_correct_stop_direction_is_accepted(self):
+        position = self.payload["clientPortfolio"]["positions"][0]
+        position["isBuy"] = False
+        position["stopLossRate"] = "105"
+        snapshot = normalize_account_snapshot(self.payload, "USD")
+        self.assertEqual(len(snapshot.positions), 1)
+
 
 if __name__ == "__main__":
     unittest.main()
