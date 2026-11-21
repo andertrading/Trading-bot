@@ -149,6 +149,44 @@ class TestBacktestV3(unittest.TestCase):
         live_mock.assert_called_once_with("AAPL", "15m")
         self.assertEqual(backtest_v3._provider_for_asset("AAPL", "15m"), "twelvedata")
 
+    def test_daily_backtest_history_is_capped_to_two_years(self):
+        index = pd.date_range(
+            "2010-01-01",
+            periods=5000,
+            freq="1D",
+            tz="UTC",
+        )
+        values = [100.0 + i * 0.001 for i in range(len(index))]
+        data = pd.DataFrame(
+            {
+                "Open": values,
+                "High": [value + 1 for value in values],
+                "Low": [value - 1 for value in values],
+                "Close": values,
+                "Volume": [1000] * len(index),
+            },
+            index=index,
+        )
+        data.attrs.update({
+            "data_provider": "twelvedata",
+            "price_adjustment_policy": "split_adjusted_ohlc_no_dividend_adjustment",
+            "price_adjustment_verified": True,
+        })
+        with (
+            patch.object(backtest_v3, "BACKTEST_DATA_MODE", "download"),
+            patch.object(backtest_v3, "download_data", return_value=data),
+            patch.object(backtest_v3, "_save_snapshot", return_value=None),
+        ):
+            result = backtest_v3.download_history(
+                "AAPL", "1d", asset="AAPL"
+            )
+        self.assertIsNotNone(result)
+        self.assertLessEqual(
+            (result.index[-1] - result.index[0]).days,
+            backtest_v3.BACKTEST_DAILY_LOOKBACK_DAYS,
+        )
+        self.assertGreaterEqual(len(result), backtest_v3.MIN_BARS)
+
     def test_backtest_rejects_unverified_price_adjustment_metadata(self):
         data = self.make_data()
         data.attrs["price_adjustment_verified"] = False
