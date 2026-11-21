@@ -49,30 +49,45 @@ def _send_signal_report(scan_result: dict, candidate: dict, signal: dict) -> boo
         logger.error("No se pudo construir el informe Telegram para %s", signal["signal_id"])
         return False
 
+    # Telegram photo captions are limited to 1024 characters. Send the full
+    # report as text first so expiry, entry window and risk warnings cannot be
+    # silently truncated by the photo-caption limit.
+    if not Bot.send_telegram_message(messages[1]):
+        logger.error(
+            "No se pudo enviar el informe completo para %s",
+            signal["signal_id"],
+        )
+        return False
+
     try:
         chart = Bot.generate_candidate_chart(report_candidate)
     except Exception:
-        # Chart generation is optional; a rendering failure must not suppress
-        # the actionable text alert or leave the persisted signal unnotified.
         logger.exception(
-            "No se pudo generar el gráfico para %s; se enviará el mensaje de texto",
+            "No se pudo generar el gráfico para %s; el informe completo ya se envió",
             signal["signal_id"],
         )
-        chart = None
+        return True
+
     if chart is not None:
+        caption = (
+            "📈 <b>Gráfico técnico</b> · "
+            f"<b>{Bot.escape_html(candidate.get('asset', 'N/D'))}</b> · "
+            f"{Bot.escape_html(candidate.get('timeframe', 'N/D'))}\n"
+            "El informe completo se ha enviado en el mensaje anterior."
+        )
         try:
-            if Bot.send_telegram_photo(chart, messages[1]):
-                return True
+            if not Bot.send_telegram_photo(chart, caption):
+                logger.warning(
+                    "No se pudo enviar el gráfico para %s; el informe completo ya se envió",
+                    signal["signal_id"],
+                )
         except Exception:
             logger.exception(
-                "No se pudo enviar el gráfico para %s; se enviará el mensaje de texto",
+                "Falló el envío del gráfico para %s; el informe completo ya se envió",
                 signal["signal_id"],
             )
-        logger.warning(
-            "El envío del gráfico falló para %s; se usará el mensaje de texto",
-            signal["signal_id"],
-        )
-    return bool(Bot.send_telegram_message(messages[1]))
+
+    return True
 
 
 def _lifecycle_message(signal: dict, event: str) -> str:
