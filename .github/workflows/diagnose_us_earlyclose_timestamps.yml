@@ -1,0 +1,86 @@
+name: One-off Twelve Data US Early Close Timestamp Diagnostic
+
+on:
+  push:
+    branches:
+      - oneoff/diagnose-us-equity-earlyclose-20261121
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      TWELVE_DATA_API_KEY: ${{ secrets.TWELVE_DATA_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install minimal dependencies
+        run: pip install requests pandas
+      - name: Inspect raw 15-minute timestamps for the US early-close session
+        run: |
+          python - <<'PY'
+          import os
+          import time
+          import requests
+          import pandas as pd
+          from datetime import datetime
+          from zoneinfo import ZoneInfo
+          from config import ASSETS
+          from data_engine import TWELVE_DATA_URL
+
+          api_key = os.environ.get("TWELVE_DATA_API_KEY")
+          if not api_key:
+              raise SystemExit("Missing TWELVE_DATA_API_KEY")
+
+          tz = ZoneInfo("America/New_York")
+          assets = ("TSLA", "NVDA", "AAPL", "MSFT", "TTWO")
+          for index, asset in enumerate(assets):
+              symbol = ASSETS[asset].get("twelvedata_symbol") or asset
+              params = {
+                  "symbol": symbol,
+                  "interval": "15min",
+                  "timezone": "UTC",
+                  "adjust": "none",
+                  "start_date": "2024-12-24 00:00:00",
+                  "end_date": "2024-12-25 00:00:00",
+                  "apikey": api_key,
+              }
+              response = requests.get(TWELVE_DATA_URL, params=params, timeout=30)
+              response.raise_for_status()
+              payload = response.json()
+              values = payload.get("values")
+              if not isinstance(values, list):
+                  print(f"{asset} | PROVIDER_ERROR | {payload.get('message', payload.get('code', 'unknown'))}")
+              else:
+                  stamps = pd.to_datetime(
+                      [row["datetime"] for row in values],
+                      utc=True,
+                      errors="coerce",
+                  ).dropna().sort_values()
+                  local = stamps.tz_convert(tz)
+                  diffs = local.to_series().diff().dropna()
+                  gaps = [
+                      f"{prev.isoformat()} -> {curr.isoformat()} ({delta.total_seconds()/60:.0f} min)"
+                      for prev, curr, delta in zip(local[:-1], local[1:], diffs)
+                      if delta != pd.Timedelta(minutes=15)
+                  ]
+                  outside = [
+                      stamp.isoformat()
+                      for stamp in local
+                      if stamp.date().isoformat() == "2024-12-24"
+                      and (stamp.hour < 9 or (stamp.hour == 9 and stamp.minute < 30) or stamp.hour >= 13)
+                  ]
+                  print(
+                      f"{asset} | symbol={symbol} | bars={len(local)} | "
+                      f"first={local[0] if len(local) else 'NONE'} | "
+                      f"last={local[-1] if len(local) else 'NONE'} | "
+                      f"gaps={gaps[:8]} | outside_regular_early_close={outside[:8]}"
+                  )
+              if index < len(assets) - 1:
+                  time.sleep(8.5)
+          PY
