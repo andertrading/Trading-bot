@@ -31,7 +31,7 @@ logging.basicConfig(
 def _send_signal_report(scan_result: dict, candidate: dict, signal: dict) -> bool:
     report_candidate = dict(candidate)
     report_candidate["expires_at"] = signal["expires_at"]
-    report_candidate["generated_at"] = signal["generated_at"]
+    report_candidate["generated_at"] = signal.get("generated_at")
     report_candidate["signal_id"] = signal["signal_id"]
     report_candidate["strategy_validated"] = STRATEGY_VALIDATED
 
