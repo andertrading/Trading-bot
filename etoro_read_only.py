@@ -181,6 +181,7 @@ class EtoroReadOnlyClient:
                     params=params,
                     json=json_body,
                     timeout=self._timeout,
+                    allow_redirects=False,
                 )
             except requests.RequestException as exc:
                 if attempt + 1 >= self._max_attempts:
