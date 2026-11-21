@@ -82,7 +82,7 @@ class ReadOnlyAuditTests(unittest.TestCase):
         client = FakeAuditClient(missing_symbols={"TSLA", "Tesla"})
         report = run_audit(client, self.assets, "USD", self.now)
         self.assertFalse(report["overall_pass"])
-        self.assertFalse(report["instrument_resolution"][0]["resolved"])
+        self.assertFalse(report["instrument_resolution"][0]["candidate_found"])
         self.assertIsNone(report["instrument_resolution"][0]["instrument_id"])
         self.assertEqual(client.quote_calls, [])
 
