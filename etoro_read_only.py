@@ -281,9 +281,13 @@ def normalize_realtime_quotes(
     """Return only a complete, fresh, uncrossed set of realtime quotes."""
     if response.status_code != 200:
         raise EtoroAPIError("Las cotizaciones no son una respuesta HTTP 200 completa")
-    if not expected_instrument_ids or any(
-        isinstance(value, bool) or not isinstance(value, int) or value <= 0
-        for value in expected_instrument_ids
+    if (
+        not isinstance(expected_instrument_ids, list)
+        or not 1 <= len(expected_instrument_ids) <= 100
+        or any(
+            isinstance(value, bool) or not isinstance(value, int) or value <= 0
+            for value in expected_instrument_ids
+        )
     ):
         raise EtoroAPIError("La lista de instrumentos esperados no es válida")
     if len(set(expected_instrument_ids)) != len(expected_instrument_ids):
@@ -982,7 +986,7 @@ class EtoroReadOnlyClient:
         instrument_ids: list[int],
         currency: str = "USD",
     ) -> EtoroResponse:
-        if not instrument_ids or len(instrument_ids) > 100:
+        if not isinstance(instrument_ids, list) or not 1 <= len(instrument_ids) <= 100:
             raise ValueError("instrument_ids debe contener entre 1 y 100 IDs")
         if any(
             isinstance(value, bool) or not isinstance(value, int) or value <= 0
