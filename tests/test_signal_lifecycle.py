@@ -116,6 +116,32 @@ class SignalLifecycleTests(unittest.TestCase):
         self.assertEqual(updated["status"], "EXPIRED")
         self.assertEqual(updated["monitor_status"], "STOP_TOUCHED")
 
+    def test_signal_candle_does_not_trigger_stop_or_target_before_alert(self):
+        signal = build_signal_record(candidate(), NOW, 30)
+        updated, event = advance_signal(
+            signal,
+            NOW + timedelta(minutes=5),
+            latest_price=180.0,
+            latest_high=184.0,
+            latest_low=178.0,
+            latest_data_timestamp=signal["data_timestamp"],
+        )
+        self.assertIsNone(event)
+        self.assertEqual(updated["status"], "PENDING")
+
+    def test_later_completed_candle_can_trigger_intrabar_stop(self):
+        signal = build_signal_record(candidate(), NOW, 30)
+        updated, event = advance_signal(
+            signal,
+            NOW + timedelta(minutes=20),
+            latest_price=179.5,
+            latest_high=179.8,
+            latest_low=178.0,
+            latest_data_timestamp=NOW + timedelta(minutes=15),
+        )
+        self.assertEqual(event, "SIGNAL_INVALIDATED_STOP_LEVEL")
+        self.assertEqual(updated["monitor_status"], "STOP_TOUCHED")
+
     def test_intrabar_stop_is_detected_even_when_close_is_above_stop(self):
         signal = build_signal_record(candidate(), NOW, 30)
         updated, event = advance_signal(
