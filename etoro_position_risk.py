@@ -279,6 +279,8 @@ def calculate_account_gross_stop_risk_from_client(
         raise EtoroAPIError("Falta un snapshot de cuenta eToro validado")
     if not account_snapshot.positions:
         return calculate_account_gross_stop_risk_usd({}, {})
+    if account_snapshot.has_unbounded_stop_risk:
+        raise EtoroAPIError("Al menos una posición del snapshot no tiene stop-loss confirmado")
     if account_snapshot.client_id is None:
         raise EtoroAPIError("El snapshot no contiene CID para consultar el desglose")
 
