@@ -279,6 +279,14 @@ def _snapshot_metadata(
         "price_adjustment_verified": bool(
             data.attrs.get("price_adjustment_verified", False)
         ),
+        "price_source_detail": data.attrs.get("price_source_detail"),
+        "ohlc_repair_count": int(data.attrs.get("ohlc_repair_count", 0) or 0),
+        "ohlc_repair_source_ticker": data.attrs.get(
+            "ohlc_repair_source_ticker"
+        ),
+        "ohlc_repair_max_close_deviation_pct": data.attrs.get(
+            "ohlc_repair_max_close_deviation_pct"
+        ),
         "closed_candle_policy": (
             "El motor live excluye velas incompletas antes de devolver el histórico"
         ),
