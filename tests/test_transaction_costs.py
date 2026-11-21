@@ -102,7 +102,7 @@ class TestEtoroTransactionCosts(unittest.TestCase):
                 overnight_charge_units=2,
                 leverage=2.0,
             )
-        self.assertAlmostEqual(result["overnight_cost"], 105.0 * 0.10 * 2 / 365)
+        self.assertAlmostEqual(result["overnight_cost"], 100.0 * 0.10 * 2 / 365)
 
     def test_short_stock_cfd_requires_instrument_borrow_fee(self):
         result = costs.estimate_etoro_trade_costs(
@@ -116,7 +116,25 @@ class TestEtoroTransactionCosts(unittest.TestCase):
             leverage=1.0,
             side="SELL",
         )
-        self.assertIn("cfd_short_borrow_fee_missing", result["unpriced_costs"])
+        self.assertIn("cfd_short_borrow_rate_missing", result["unpriced_costs"])
+
+    def test_short_stock_cfd_uses_annual_borrow_rate_on_opening_notional(self):
+        with patch.dict(
+            costs.ETORO_CFD_STOCK_SHORT_BORROW_ANNUAL_RATE_PCT,
+            {"AAPL": 0.11},
+        ):
+            result = costs.estimate_etoro_trade_costs(
+                "AAPL",
+                100.0,
+                90.0,
+                1.0,
+                execution_type="CFD",
+                market_spread_bps=0,
+                overnight_charge_units=1,
+                leverage=1.0,
+                side="SELL",
+            )
+        self.assertAlmostEqual(result["overnight_cost"], 100.0 * 0.11 / 365)
 
     def test_unleveraged_long_stock_cfd_has_no_overnight_fee(self):
         result = costs.estimate_etoro_trade_costs(
