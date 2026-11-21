@@ -423,11 +423,11 @@ jobs:
           portfolio_trades = data.get("operaciones_cartera_backtest_v3.csv")
           portfolio_rejections = data.get("rechazos_cartera_backtest_v3.csv")
 
-          report.append("\\n## 10. Simulación conjunta de cartera")
+          report.append("\n## 10. Simulación conjunta de cartera")
           if portfolio_summary is not None and not portfolio_summary.empty:
               report.append(markdown_table(portfolio_summary, 10))
           else:
-              report.append("_No se ha generado un resumen de cartera válido._\\n")
+              report.append("_No se ha generado un resumen de cartera válido._\n")
 
           if portfolio_trades is not None:
               report.append(
@@ -448,9 +448,9 @@ jobs:
               )
 
           report.append(
-              "\\nLa simulación de cartera aplica capital y riesgo compartidos, "
+              "\nLa simulación de cartera aplica capital y riesgo compartidos, "
               "pero su P&L es bruto: no descuenta comisiones, spread, FX ni financiación. "
-              "Tampoco modela correlaciones ni concentración por activo.\\n"
+              "Tampoco modela correlaciones ni concentración por activo.\n"
           )
 
           errors = data.get("errores_backtest_v3.csv")
