@@ -231,6 +231,22 @@ class SignalLifecycleTests(unittest.TestCase):
         self.assertEqual(duplicate["status"], "PENDING")
         self.assertEqual(duplicate["monitor_status"], "ACTIVE")
 
+    def test_future_candle_cannot_trigger_or_advance_signal(self):
+        signal = build_signal_record(candidate(), NOW, 30)
+        updated, event = advance_signal(
+            signal,
+            NOW + timedelta(minutes=5),
+            latest_price=178.0,
+            latest_high=179.0,
+            latest_low=177.5,
+            conditions_valid=False,
+            latest_data_timestamp=NOW + timedelta(minutes=10),
+        )
+        self.assertIsNone(event)
+        self.assertEqual(updated["status"], "PENDING")
+        self.assertEqual(updated["monitor_status"], "ACTIVE")
+        self.assertNotIn("last_market_data_timestamp", updated)
+
     def test_candle_close_outside_ohlc_range_is_rejected(self):
         signal = build_signal_record(candidate(), NOW, 30)
         with self.assertRaisesRegex(ValueError, "must not exceed latest_high"):
