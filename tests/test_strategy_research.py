@@ -6,6 +6,7 @@ from strategy_research import (
     _chronological_period_bounds,
     _out_of_sample_trades,
     _snapshot_coverage,
+    _broker_cost_sensitivity_rows,
 )
 
 
@@ -45,6 +46,71 @@ class TestCommonCalendarOutOfSampleSplit(unittest.TestCase):
                     {"asset": "BTC", "timeframe": "15m"},
                 ],
             )
+
+    def test_broker_cost_sensitivity_models_published_fee_scenarios(self):
+        assets = {
+            "AAPL": {"type": "STOCK", "currency": "USD"},
+            "BTC": {"type": "CRYPTO", "currency": "USD"},
+        }
+        stock = {
+            "strategy": "mtf",
+            "asset": "AAPL",
+            "timeframe": "15m",
+            "entry_time": "2026-01-01T10:00:00Z",
+            "exit_time": "2026-01-01T11:00:00Z",
+            "entry": 100.0,
+            "exit": 110.0,
+            "hypothetical_quantity": 1.0,
+            "hypothetical_risk_budget_usd": 5.0,
+            "hypothetical_gross_pnl_usd": 10.0,
+        }
+        crypto = {
+            **stock,
+            "asset": "BTC",
+            "entry": 100.0,
+            "exit": 110.0,
+        }
+        rows = _broker_cost_sensitivity_rows(
+            [stock, crypto], assets_config=assets, spread_bps_values=(0,)
+        )
+        lookup = {(row["asset"], row["venue"], row["fee_mode"]): row for row in rows}
+        self.assertEqual(lookup[("AAPL", "ETORO_REAL", "published_fee_scenario")]["commission_scenario_usd"], 4.0)
+        self.assertEqual(lookup[("AAPL", "XTB_OMI", "zero_commission_conditional")]["commission_scenario_usd"], 0.0)
+        self.assertEqual(lookup[("BTC", "ETORO_REAL", "published_fee_scenario")]["commission_scenario_usd"], 2.1)
+        self.assertAlmostEqual(lookup[("BTC", "BITVAVO_SPOT", "maker")]["commission_scenario_usd"], 0.315)
+        self.assertAlmostEqual(lookup[("BTC", "BITVAVO_SPOT", "taker")]["commission_scenario_usd"], 0.525)
+
+    def test_broker_cost_sensitivity_spread_is_separate_and_xtb_threshold_fails_closed(self):
+        assets = {"AAPL": {"type": "STOCK", "currency": "USD"}}
+        trade = {
+            "strategy": "baseline",
+            "asset": "AAPL",
+            "timeframe": "15m",
+            "entry_time": "2026-01-01T10:00:00Z",
+            "exit_time": "2026-01-01T11:00:00Z",
+            "entry": 100.0,
+            "exit": 110.0,
+            "hypothetical_quantity": 1.0,
+            "hypothetical_risk_budget_usd": 5.0,
+            "hypothetical_gross_pnl_usd": 10.0,
+        }
+        rows = _broker_cost_sensitivity_rows(
+            [trade], assets_config=assets, spread_bps_values=(10,)
+        )
+        xtb = next(row for row in rows if row["venue"] == "XTB_OMI")
+        self.assertAlmostEqual(xtb["spread_scenario_usd"], 0.105)
+        self.assertFalse(xtb["historical_spread_verified"])
+
+        large = dict(trade, hypothetical_quantity=1000.0)
+        blocked = _broker_cost_sensitivity_rows(
+            [large], assets_config=assets, spread_bps_values=(0,)
+        )
+        xtb_blocked = next(row for row in blocked if row["venue"] == "XTB_OMI")
+        self.assertEqual(
+            xtb_blocked["scenario_status"],
+            "NOT_PRICED_XTB_ZERO_COMMISSION_CONDITION_NOT_MET",
+        )
+        self.assertIsNone(xtb_blocked["scenario_net_total_R"])
 
     def test_naive_history_bounds_are_interpreted_as_utc(self):
         bounds = _chronological_period_bounds(
