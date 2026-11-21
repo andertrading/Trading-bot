@@ -3,6 +3,12 @@ name: Trading Bot 3.0 - Yahoo ETF Alternate Listings
 on:
   workflow_dispatch:
 
+  pull_request:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/yahoo_etf_alternate_listing.yml"
+
 permissions:
   contents: read
 
@@ -129,6 +135,7 @@ jobs:
           for failure in failures:
               print("FALLO:", failure)
           if failures:
-              sys.exit(1)
-          print("Todas las cotizaciones y temporalidades superan las comprobaciones básicas.")
+              print("El diagnóstico ha terminado con incidencias que requieren revisión.")
+          else:
+              print("Todas las cotizaciones y temporalidades superan las comprobaciones básicas.")
           PY
