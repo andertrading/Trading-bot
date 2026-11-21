@@ -1,0 +1,86 @@
+name: One-off US Equity M15 Replay After Risk Fixes
+
+on:
+  push:
+    branches:
+      - oneoff/us-equity-m15-replay-risk-fixes-20261121
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      BACKTEST_DATA_MODE: replay
+      BACKTEST_SNAPSHOT_DIR: historicos_us_equity_m15_filtered
+      BACKTEST_ASSETS: "TSLA,NVDA,AAPL,MSFT,TTWO"
+      BACKTEST_TIMEFRAMES: "15m"
+
+    steps:
+      - name: Checkout latest risk-fixed main
+        uses: actions/checkout@v4
+
+      - name: Download exact historical snapshot from prior run
+        uses: actions/download-artifact@v4
+        with:
+          name: us-equity-m15-filtered-backfill-2026-11-21
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: andertrading/Trading-bot
+          run-id: 44896519696
+          path: .
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Verify exact replay snapshot
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          root = Path("historicos_us_equity_m15_filtered")
+          manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
+          expected = {"TSLA", "NVDA", "AAPL", "MSFT", "TTWO"}
+          actual = {item["asset"] for item in manifest if item["timeframe"] == "15m"}
+          if actual != expected:
+              raise SystemExit(f"Unexpected replay assets: {sorted(actual)}")
+          if any(item["row_count"] < 12000 for item in manifest if item["timeframe"] == "15m"):
+              raise SystemExit("One or more replay histories are shorter than expected")
+          print("Exact five-asset M15 snapshot verified; no provider calls required.")
+          for item in manifest:
+              if item["timeframe"] == "15m":
+                  print(item["asset"], item["row_count"], item["first_timestamp"], item["last_timestamp"], item["sha256"][:16])
+          PY
+
+      - name: Run risk-fixed replay backtest
+        run: python backtest_v3.py
+
+      - name: Upload replay results and diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: us-equity-m15-risk-fixed-replay-2026-11-21
+          retention-days: 14
+          if-no-files-found: warn
+          path: |
+            operaciones_backtest_v3.csv
+            resultados_backtest_v3.csv
+            errores_backtest_v3.csv
+            resumen_operaciones_v3.csv
+            diagnostico_senales_v3.csv
+            velas_ohlc_excluidas_v3.csv
+            rechazos_rr_backtest_v3.csv
+            senales_solapadas_v3.csv
+            costes_backtest_v3.csv
+            operaciones_cartera_backtest_v3.csv
+            rechazos_cartera_backtest_v3.csv
+            resultados_cartera_backtest_v3.csv
