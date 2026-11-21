@@ -1530,6 +1530,97 @@ def twelvedata_history_windows(asset, end=None, lookback_days=700):
     return windows
 
 
+def _download_coinbase_crypto_gap(asset, start, end):
+    """Fetch a missing historical USD-quoted crypto interval without synthesis."""
+    if asset not in CRYPTO_ASSETS:
+        return None
+
+    product_id = f"{asset}-USD"
+    base_url = "https://api.exchange.coinbase.com"
+    headers = {
+        "Accept": "application/json",
+        "User-Agent": "TradingBot-Historical-Research/1.0",
+    }
+    start_utc = pd.Timestamp(start).tz_convert("UTC")
+    end_utc = pd.Timestamp(end).tz_convert("UTC")
+
+    try:
+        product_response = requests.get(
+            f"{base_url}/products/{product_id}",
+            headers=headers,
+            timeout=20,
+        )
+        product_response.raise_for_status()
+        product = product_response.json()
+        if (
+            str(product.get("base_currency", "")).upper() != asset
+            or str(product.get("quote_currency", "")).upper() != "USD"
+        ):
+            logger.error(
+                "COINBASE PAR NO VERIFICADO | %s | %s",
+                asset,
+                product_id,
+            )
+            return None
+
+        response = requests.get(
+            f"{base_url}/products/{product_id}/candles",
+            params={
+                "granularity": 900,
+                "start": start_utc.isoformat().replace("+00:00", "Z"),
+                "end": end_utc.isoformat().replace("+00:00", "Z"),
+            },
+            headers=headers,
+            timeout=20,
+        )
+        response.raise_for_status()
+        values = response.json()
+        if not isinstance(values, list) or not values:
+            return None
+
+        frame = pd.DataFrame(
+            values,
+            columns=["timestamp", "Low", "High", "Open", "Close", "Volume"],
+        )
+        frame["timestamp"] = pd.to_datetime(
+            frame["timestamp"], unit="s", utc=True, errors="coerce"
+        )
+        frame = frame.set_index("timestamp").sort_index()
+        frame = frame.loc[
+            (frame.index >= start_utc) & (frame.index <= end_utc)
+        ]
+        frame = _normalise_dataframe(frame)
+        if frame is None or frame.empty:
+            return None
+
+        expected = pd.date_range(start_utc, end_utc, freq="15min")
+        if not frame.index.equals(expected):
+            logger.warning(
+                "COINBASE NO CUBRE TODO EL HUECO | %s | esperadas=%s | recibidas=%s",
+                asset,
+                len(expected),
+                len(frame),
+            )
+            return None
+
+        frame.attrs["price_adjustment_policy"] = "raw_unadjusted_intraday"
+        frame.attrs["price_adjustment_verified"] = True
+        frame.attrs["price_source_detail"] = (
+            "Twelve Data primary; Coinbase Exchange SOL-USD exact-gap repair"
+        )
+        logger.info(
+            "COINBASE GAP REPAIR OK | %s | %s velas | %s -> %s",
+            asset,
+            len(frame),
+            frame.index[0].isoformat(),
+            frame.index[-1].isoformat(),
+        )
+        return frame
+    except (requests.RequestException, ValueError, TypeError, KeyError):
+        logger.exception("COINBASE GAP REPAIR FAILED | %s", asset)
+        return None
+
+
 def _download_twelvedata_extended(asset, config, interval):
     """Backtest-only historical backfill using contiguous date-range requests."""
     if interval != "15m":
@@ -1624,6 +1715,14 @@ def _download_twelvedata_extended(asset, config, interval):
                     end_date=repair_end.strftime("%Y-%m-%d %H:%M:%S"),
                     validate_gaps=False,
                 )
+                if repair is None or repair.empty:
+                    # Independent USD-quoted exchange source, only for the
+                    # exact missing interval; never interpolate or forward-fill.
+                    repair = _download_coinbase_crypto_gap(
+                        asset,
+                        previous_timestamp + pd.Timedelta(minutes=15),
+                        next_timestamp - pd.Timedelta(minutes=15),
+                    )
                 if repair is not None and not repair.empty:
                     repair_frames.append(repair)
 
