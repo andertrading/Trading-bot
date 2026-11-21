@@ -65,19 +65,53 @@ def _resolve_asset(
 def _account_snapshot_status(exc: Exception) -> str:
     """Return a redacted diagnostic code; never expose account/API payloads."""
     message = str(exc)
+    if "HTTP " in message:
+        suffix = message.split("HTTP ", 1)[1][:3]
+        if suffix.isdigit():
+            return f"ETORO_HTTP_{suffix}"
+
     known_failures = (
+        ("La respuesta de cuenta no es un objeto JSON", "INVALID_ACCOUNT_RESPONSE"),
+        ("Solo se admite la divisa configurada", "UNSUPPORTED_ACCOUNT_CURRENCY"),
         ("Falta clientPortfolio", "MISSING_CLIENT_PORTFOLIO"),
         ("Falta la lista explícita de posiciones", "MISSING_POSITIONS"),
         ("Falta la lista explícita de mirrors", "MISSING_MIRRORS"),
+        ("contiene mirrors/copy trading", "UNSUPPORTED_COPY_TRADING"),
         ("Falta la lista explícita de órdenes pendientes", "MISSING_PENDING_ORDERS"),
+        ("Orden pendiente inválida", "INVALID_PENDING_ORDER"),
+        ("mirrorId inválido en orden", "INVALID_PENDING_ORDER_MIRROR_ID"),
+        ("órdenes pendientes mirror/copy", "UNSUPPORTED_MIRROR_PENDING_ORDER"),
+        ("órdenes de entrada pendientes", "UNQUANTIFIED_PENDING_ENTRY_ORDER"),
         ("Falta la lista explícita de órdenes Market-if-touched", "MISSING_MIT_ORDERS"),
+        ("Market-if-touched", "UNQUANTIFIED_MIT_ORDER"),
         ("clientPortfolio.unrealizedPnL", "INVALID_UNREALIZED_PNL"),
+        ("Esquema ambiguo o incompleto", "AMBIGUOUS_ACCOUNT_SCHEMA"),
+        ("Las listas de órdenes de la cuenta están incompletas", "INCOMPLETE_ACCOUNT_ORDER_LISTS"),
+        ("Orden activa inválida", "INVALID_ACTIVE_ORDER"),
+        ("Importe negativo", "NEGATIVE_ORDER_AMOUNT"),
+        ("El efectivo disponible calculado es negativo", "NEGATIVE_AVAILABLE_CASH"),
+        ("Posición inválida", "INVALID_POSITION"),
+        ("Posición " , "INVALID_POSITION_SCHEMA"),
+        ("positionId inválido", "INVALID_POSITION_ID"),
+        ("instrumentId inválido", "INVALID_INSTRUMENT_ID"),
+        ("cid inválido", "INVALID_POSITION_CID"),
+        ("más de un CID", "MULTIPLE_POSITION_CIDS"),
+        ("mirrorId inválido", "INVALID_POSITION_MIRROR_ID"),
+        ("mirror/copy no soportadas", "UNSUPPORTED_MIRROR_POSITION"),
+        ("isBuy inválido", "INVALID_POSITION_DIRECTION"),
+        ("isNoStopLoss inválido", "INVALID_POSITION_STOP_FLAG"),
+        ("Tipo de liquidación no reconocido", "UNSUPPORTED_SETTLEMENT_TYPE"),
         ("Campo numérico inválido", "INVALID_NUMERIC_FIELD"),
         ("Campo numérico no finito", "NON_FINITE_NUMERIC_FIELD"),
+        ("debe ser positivo en posición", "NON_POSITIVE_POSITION_VALUE"),
+        ("stop loss", "INVALID_STOP_LOSS"),
+        ("Stop loss inválido", "INVALID_STOP_LOSS"),
     )
     for marker, code in known_failures:
         if marker in message:
             return code
+    if type(exc).__name__ == "EtoroAPIError":
+        return "ETORO_API_VALIDATION_ERROR"
     return type(exc).__name__.upper()
 
 
