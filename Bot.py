@@ -711,17 +711,44 @@ def build_telegram_messages(scan_result):
         blockers = candidate.get("validation_reasons", [])
         if not isinstance(blockers, list):
             blockers = [str(blockers)]
+        blockers_display = []
+        for reason in blockers:
+            if "Cartera no confirmada" in str(reason):
+                blockers_display.append(
+                    "Riesgo agregado de cartera no verificado; el bot no consulta "
+                    "posiciones. Comprueba manualmente el límite del 3%."
+                )
+            else:
+                blockers_display.append(str(reason))
         blocker_text = "\n".join(
             f"• {escape_html(reason)}"
-            for reason in blockers
+            for reason in blockers_display
         ) or "• Validación pendiente."
         if len(blocker_text) > 600:
             blocker_text = blocker_text[:600] + "..."
 
+        strategy_validated = candidate.get("strategy_validated") is True
+        if strategy_validated:
+            report_title = "📡 <b>SEÑAL TÉCNICA · DECISIÓN MANUAL</b>"
+            report_status = (
+                "⚠️ <b>CONFIRMA COSTES Y CONDICIONES ANTES DE ENTRAR</b>"
+            )
+            report_closing = (
+                "La estrategia ha superado la validación histórica definida. "
+                "La decisión y ejecución siguen siendo manuales."
+            )
+        else:
+            report_title = "🔎 <b>CANDIDATA TÉCNICA · SOLO INVESTIGACIÓN</b>"
+            report_status = "🚫 <b>NO OPERAR — ESTRATEGIA NO VALIDADA</b>"
+            report_closing = (
+                "La estrategia aún no ha superado la validación histórica. "
+                "No utilizar como instrucción de entrada."
+            )
+
         message = (
-            "🔎 <b>CANDIDATA TÉCNICA · SOLO INVESTIGACIÓN</b>\n"
+            f"{report_title}\n"
             "━━━━━━━━━━━━━━━━━━\n"
-            "🚫 <b>NO OPERAR — ESTRATEGIA NO VALIDADA</b>\n\n"
+            f"{report_status}\n\n"
             f"📌 <b>{asset}</b>  |  {timeframe}  |  Score <b>{score}/100</b>\n"
             "🟢 Dirección: <b>LONG</b>\n\n"
             "💰 <b>NIVELES Y MOVIMIENTO POTENCIAL</b>\n"
@@ -748,8 +775,8 @@ def build_telegram_messages(scan_result):
             "Probabilidad histórica: <b>NO VALIDADA</b>\n"
             f"Caducidad de la señal: <b>{expiry_text}</b>\n"
             "Noticias y costes: <b>NO INCORPORADOS AÚN</b>\n"
-            "Este informe es investigación, no asesoramiento ni una orden.\n"
-            "<b>NO OPERAR.</b>"
+            f"{escape_html(report_closing)}\n"
+            "Este informe no constituye asesoramiento financiero."
         )
         messages.append(message)
 
