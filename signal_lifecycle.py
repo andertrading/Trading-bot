@@ -346,3 +346,46 @@ class UpstashSignalStateStore:
             self._set_raw(json.dumps(
                 payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True
             ))
+
+    def prune(self, now=None, retention_days: int = 90,
+              max_terminal_records: int = 10000) -> int:
+        """Bound state growth while preserving every pending signal."""
+        if isinstance(retention_days, bool) or retention_days <= 0:
+            raise ValueError("retention_days must be positive")
+        if isinstance(max_terminal_records, bool) or max_terminal_records <= 0:
+            raise ValueError("max_terminal_records must be positive")
+
+        current = _as_utc(now or datetime.now(timezone.utc))
+        cutoff = current - timedelta(days=retention_days)
+
+        with self._lock:
+            payload = self.load()
+            signals = payload["signals"]
+            removed = 0
+            terminal = []
+
+            for signal_id, signal in signals.items():
+                if signal.get("status") not in TERMINAL_STATUSES:
+                    continue
+                terminal_at = signal.get("last_checked_at") or signal.get("generated_at")
+                try:
+                    terminal_time = _as_utc(terminal_at)
+                except (TypeError, ValueError):
+                    terminal_time = current
+                if terminal_time < cutoff:
+                    del signals[signal_id]
+                    removed += 1
+                else:
+                    terminal.append((terminal_time, signal_id))
+
+            if len(terminal) > max_terminal_records:
+                terminal.sort(reverse=True)
+                for _, signal_id in terminal[max_terminal_records:]:
+                    del signals[signal_id]
+                    removed += 1
+
+            if removed:
+                self._set_raw(json.dumps(
+                    payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True
+                ))
+            return removed
