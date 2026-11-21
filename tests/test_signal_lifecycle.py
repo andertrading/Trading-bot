@@ -169,6 +169,54 @@ class SignalLifecycleTests(unittest.TestCase):
                 loaded["signals"][signal["signal_id"]]["status"], "PENDING"
             )
 
+
+    def test_upstash_prune_removes_old_terminal_but_keeps_pending(self):
+        remote = {
+            "state": json.dumps({
+                "schema_version": 1,
+                "signals": {
+                    "old": {
+                        "signal_id": "old",
+                        "status": "EXPIRED",
+                        "generated_at": "2026-01-01T00:00:00Z",
+                        "last_checked_at": "2026-01-02T00:00:00Z",
+                    },
+                    "recent": {
+                        "signal_id": "recent",
+                        "status": "INVALIDATED",
+                        "generated_at": "2026-11-20T00:00:00Z",
+                        "last_checked_at": "2026-11-20T00:00:00Z",
+                    },
+                    "pending": {
+                        "signal_id": "pending",
+                        "status": "PENDING",
+                        "generated_at": "2026-01-01T00:00:00Z",
+                    },
+                },
+            })
+        }
+
+        def fake_get(url, **kwargs):
+            return FakeResponse({"result": remote["state"]})
+
+        def fake_post(url, data=None, **kwargs):
+            remote["state"] = data.decode("utf-8")
+            return FakeResponse({"result": "OK"})
+
+        with patch("signal_lifecycle.requests.get", side_effect=fake_get), patch(
+            "signal_lifecycle.requests.post", side_effect=fake_post
+        ):
+            store = UpstashSignalStateStore(
+                "https://example.upstash.io", "test-token"
+            )
+            removed = store.prune(now=NOW, retention_days=90)
+            loaded = store.load()
+
+        self.assertEqual(removed, 1)
+        self.assertNotIn("old", loaded["signals"])
+        self.assertIn("recent", loaded["signals"])
+        self.assertIn("pending", loaded["signals"])
+
     def test_upstash_store_requires_credentials(self):
         with self.assertRaises(ValueError):
             UpstashSignalStateStore("", "")
