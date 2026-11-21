@@ -192,3 +192,7 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 SIGNAL_ALERTS_ENABLED = os.getenv(
     "SIGNAL_ALERTS_ENABLED", "false"
 ).strip().lower() in {"1", "true", "yes", "on"}
+
+# Gate interno: no enviar alertas operativas hasta superar la validación
+# histórica, walk-forward y de costes. Solo el código puede cambiar este valor.
+STRATEGY_VALIDATED = False
