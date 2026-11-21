@@ -124,10 +124,26 @@ def simulate_portfolio(
         0.01 if venue == "ETORO_REAL" else 0.0015 if venue == "BITVAVO_MAKER" else 0.0025,
     ))
     stock_fee = float(cost_model.get("stock_fee_per_side_usd", 1.0))
+    crypto_rate_by_asset = cost_model.get("crypto_rate_by_asset", {})
     if not _finite(crypto_rate) or not 0 <= crypto_rate <= 0.1:
         raise ValueError("crypto_rate_per_side inválido")
     if not _finite(stock_fee) or not 0 <= stock_fee <= 100:
         raise ValueError("stock_fee_per_side_usd inválido")
+    if not isinstance(crypto_rate_by_asset, dict):
+        raise ValueError("crypto_rate_by_asset debe ser un objeto")
+    normalized_crypto_rates = {}
+    for raw_asset, raw_rate in crypto_rate_by_asset.items():
+        asset_key = str(raw_asset).strip().upper()
+        settings = ASSETS.get(asset_key)
+        if not isinstance(settings, dict) or str(settings.get("type", "")).upper() != "CRYPTO":
+            raise ValueError("crypto_rate_by_asset contiene un activo no cripto")
+        if not _finite(raw_rate) or not 0 <= float(raw_rate) <= 0.1:
+            raise ValueError("crypto_rate_by_asset contiene una tasa inválida")
+        normalized_crypto_rates[asset_key] = float(raw_rate)
+
+    def crypto_rate_for_asset(asset):
+        return normalized_crypto_rates.get(asset, crypto_rate)
+
     costs_included = execution_costs is not None
     result = _empty_result(capital, costs_included=costs_included)
     result["summary"]["trades_considered"] = len(trades or [])
@@ -270,7 +286,7 @@ def simulate_portfolio(
                 elif asset_type == "ETF":
                     fee = 0.0
                 else:
-                    fee = entry_notional * crypto_rate
+                    fee = entry_notional * crypto_rate_for_asset(item["asset"])
                 fee += entry_notional * spread_bps / 20000.0
                 entry_fees += fee
             return entry_fees
@@ -351,7 +367,7 @@ def simulate_portfolio(
             elif asset_type == "ETF":
                 entry_cost = 0.0
             else:
-                entry_cost = entry_notional * crypto_rate
+                entry_cost = entry_notional * crypto_rate_for_asset(item["asset"])
             entry_cost += entry_notional * spread_bps / 20000.0 if costs_included else 0.0
             total_entry_cost += entry_cost
             position = {
@@ -402,7 +418,7 @@ def simulate_portfolio(
                 exit_cost = 0.0
             exit_notional = position["exit_price"] * position["quantity"]
             if position["asset_type"] == "CRYPTO" and costs_included:
-                exit_cost = exit_notional * crypto_rate
+                exit_cost = exit_notional * crypto_rate_for_asset(position["asset"])
             exit_cost += exit_notional * spread_bps / 20000.0 if costs_included else 0.0
             total_exit_cost += exit_cost
             position["realized_pnl_usd"] = pnl
