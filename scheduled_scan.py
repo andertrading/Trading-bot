@@ -31,6 +31,7 @@ logging.basicConfig(
 def _send_signal_report(scan_result: dict, candidate: dict, signal: dict) -> bool:
     report_candidate = dict(candidate)
     report_candidate["expires_at"] = signal["expires_at"]
+    report_candidate["generated_at"] = signal.get("generated_at")
     report_candidate["signal_id"] = signal["signal_id"]
     report_candidate["strategy_validated"] = STRATEGY_VALIDATED
 
@@ -48,10 +49,45 @@ def _send_signal_report(scan_result: dict, candidate: dict, signal: dict) -> boo
         logger.error("No se pudo construir el informe Telegram para %s", signal["signal_id"])
         return False
 
-    chart = Bot.generate_candidate_chart(report_candidate)
+    # Telegram photo captions are limited to 1024 characters. Send the full
+    # report as text first so expiry, entry window and risk warnings cannot be
+    # silently truncated by the photo-caption limit.
+    if not Bot.send_telegram_message(messages[1]):
+        logger.error(
+            "No se pudo enviar el informe completo para %s",
+            signal["signal_id"],
+        )
+        return False
+
+    try:
+        chart = Bot.generate_candidate_chart(report_candidate)
+    except Exception:
+        logger.exception(
+            "No se pudo generar el gráfico para %s; el informe completo ya se envió",
+            signal["signal_id"],
+        )
+        return True
+
     if chart is not None:
-        return bool(Bot.send_telegram_photo(chart, messages[1]))
-    return bool(Bot.send_telegram_message(messages[1]))
+        caption = (
+            "📈 <b>Gráfico técnico</b> · "
+            f"<b>{Bot.escape_html(candidate.get('asset', 'N/D'))}</b> · "
+            f"{Bot.escape_html(candidate.get('timeframe', 'N/D'))}\n"
+            "El informe completo se ha enviado en el mensaje anterior."
+        )
+        try:
+            if not Bot.send_telegram_photo(chart, caption):
+                logger.warning(
+                    "No se pudo enviar el gráfico para %s; el informe completo ya se envió",
+                    signal["signal_id"],
+                )
+        except Exception:
+            logger.exception(
+                "Falló el envío del gráfico para %s; el informe completo ya se envió",
+                signal["signal_id"],
+            )
+
+    return True
 
 
 def _lifecycle_message(signal: dict, event: str) -> str:
@@ -112,6 +148,24 @@ def _lifecycle_message(signal: dict, event: str) -> str:
     return messages.get(event, "")
 
 
+def _pending_notification_events(signal: dict) -> list[str]:
+    """Return queued lifecycle events, including the legacy single-event field."""
+    queued = signal.get("pending_notification_events")
+    events = list(queued) if isinstance(queued, list) else []
+    legacy = signal.get("pending_notification_event")
+    if legacy and legacy not in events:
+        events.insert(0, legacy)
+    return events
+
+
+def _set_pending_notification_events(signal: dict, events: list[str]) -> dict:
+    updated = dict(signal)
+    # Keep the first item in the legacy field for old readers and pruning logic.
+    updated["pending_notification_events"] = list(events)
+    updated["pending_notification_event"] = events[0] if events else None
+    return updated
+
+
 def _notify_lifecycle_event(store, signal: dict, event: str, alerts_enabled: bool):
     if not alerts_enabled or not signal.get("alert_sent"):
         return signal
@@ -120,18 +174,48 @@ def _notify_lifecycle_event(store, signal: dict, event: str, alerts_enabled: boo
     if not message:
         return signal
 
+    pending = _pending_notification_events(signal)
     if Bot.send_telegram_message(message):
-        updated = dict(signal)
-        updated["pending_notification_event"] = None
+        if event in pending:
+            pending.remove(event)
+        updated = _set_pending_notification_events(signal, pending)
         updated["last_notification_event"] = event
         updated["last_notification_at"] = datetime.now(timezone.utc).isoformat()
         store.update(updated)
         return updated
 
-    updated = dict(signal)
-    updated["pending_notification_event"] = event
+    if event not in pending:
+        pending.append(event)
+    updated = _set_pending_notification_events(signal, pending)
     store.update(updated)
     return updated
+
+
+def _retry_pending_notifications(store, state: dict, timeframe: str, alerts_enabled: bool):
+    """Retry pending Telegram events and refresh the in-memory snapshot.
+
+    The scan loop below consumes this same state snapshot. Keeping it in sync
+    with successful retries prevents an old pending event from being written
+    back to storage when the signal is updated later in the same scan.
+    """
+    for stored_signal in list(state["signals"].values()):
+        if stored_signal.get("timeframe") != timeframe:
+            continue
+        pending_events = _pending_notification_events(stored_signal)
+        if pending_events and stored_signal.get("alert_sent") and alerts_enabled:
+            updated = stored_signal
+            # Preserve event order. If Telegram is unavailable, leave this and
+            # all later events queued for the next scheduled scan.
+            for pending_event in pending_events:
+                previous_count = len(_pending_notification_events(updated))
+                updated = _notify_lifecycle_event(
+                    store, updated, pending_event, alerts_enabled
+                )
+                remaining = _pending_notification_events(updated)
+                if pending_event in remaining or len(remaining) >= previous_count:
+                    break
+            state["signals"][stored_signal["signal_id"]] = updated
+    return state
 
 
 def run_scheduled_scan(timeframe: str) -> dict:
@@ -166,16 +250,22 @@ def run_scheduled_scan(timeframe: str) -> dict:
     transitions = 0
     retried_alerts = 0
 
-    # Retry pending terminal-event notifications first. A failed Telegram
-    # request must not make an already-detected lifecycle event disappear.
-    for stored_signal in list(state["signals"].values()):
-        if stored_signal.get("timeframe") != timeframe:
-            continue
-        pending_event = stored_signal.get("pending_notification_event")
-        if pending_event and stored_signal.get("alert_sent") and alerts_enabled:
-            _notify_lifecycle_event(
-                store, stored_signal, pending_event, alerts_enabled
-            )
+    # Retry pending events first and refresh the in-memory snapshot so a
+    # successful retry cannot be overwritten by stale state later this scan.
+    pending_lifecycle_before = sum(
+        len(_pending_notification_events(signal))
+        for signal in state["signals"].values()
+        if signal.get("timeframe") == timeframe and signal.get("alert_sent")
+    )
+    state = _retry_pending_notifications(store, state, timeframe, alerts_enabled)
+    pending_lifecycle_after = sum(
+        len(_pending_notification_events(signal))
+        for signal in state["signals"].values()
+        if signal.get("timeframe") == timeframe and signal.get("alert_sent")
+    )
+    lifecycle_notifications_retried = max(
+        0, pending_lifecycle_before - pending_lifecycle_after
+    )
 
     # Continue monitoring price levels even after the entry window expires
     # or technical conditions invalidate the setup. The bot cannot know
@@ -208,13 +298,20 @@ def run_scheduled_scan(timeframe: str) -> dict:
         )
 
         if event:
-            updated["pending_notification_event"] = event
+            pending_events = _pending_notification_events(updated)
+            if event not in pending_events:
+                pending_events.append(event)
+            updated = _set_pending_notification_events(updated, pending_events)
             store.update(updated)
             transitions += 1
             if updated.get("alert_sent"):
-                _notify_lifecycle_event(store, updated, event, alerts_enabled)
+                # Do not send a newer event ahead of an older queued event.
+                if alerts_enabled and pending_events and pending_events[0] == event:
+                    updated = _notify_lifecycle_event(
+                        store, updated, event, alerts_enabled
+                    )
             else:
-                updated["pending_notification_event"] = None
+                updated = _set_pending_notification_events(updated, [])
                 store.update(updated)
             continue
 
@@ -289,6 +386,7 @@ def run_scheduled_scan(timeframe: str) -> dict:
         "lifecycle_transitions": transitions,
         "alerts_sent": sent,
         "alerts_retried": retried_alerts,
+        "lifecycle_notifications_retried": lifecycle_notifications_retried,
         "stale_candidates_skipped": stale_candidates_skipped,
         "alerts_enabled": alerts_enabled,
         "automatic_execution": False,

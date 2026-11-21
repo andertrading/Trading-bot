@@ -55,6 +55,14 @@ class SignalLifecycleTests(unittest.TestCase):
         second = make_signal_id("NVDA", "15m", "2026-11-21T12:00:00Z")
         self.assertNotEqual(first, second)
 
+    def test_build_signal_recomputes_risk_reward_from_validated_levels(self):
+        signal = build_signal_record(
+            candidate(risk_reward=999, entry_reference=180.0, stop=178.2, target=183.6),
+            NOW,
+            30,
+        )
+        self.assertEqual(signal["risk_reward"], 2.0)
+
     def test_build_signal_calculates_potential_and_expiry(self):
         signal = build_signal_record(candidate(), NOW, 30)
         self.assertEqual(signal["status"], "PENDING")
@@ -96,6 +104,24 @@ class SignalLifecycleTests(unittest.TestCase):
             build_signal_record(
                 candidate(minimum_remaining_risk_fraction=1.5), NOW, 30
             )
+
+    def test_build_signal_rejects_boolean_entry_zone_policy(self):
+        for field in ("minimum_risk_reward", "minimum_remaining_risk_fraction"):
+            with self.subTest(field=field):
+                with self.assertRaises(ValueError):
+                    build_signal_record(candidate(**{field: True}), NOW, 30)
+
+    def test_entry_zone_rejects_corrupted_boolean_policy(self):
+        signal = build_signal_record(candidate(), NOW, 30)
+        signal["minimum_risk_reward"] = True
+        with self.assertRaises(ValueError):
+            advance_signal(signal, NOW + timedelta(minutes=5), latest_price=179.5)
+
+    def test_build_signal_rejects_non_numeric_entry_zone_policy(self):
+        for value in ("not-a-number", None, float("inf"), float("nan")):
+            with self.subTest(value=value):
+                with self.assertRaises(ValueError):
+                    build_signal_record(candidate(minimum_risk_reward=value), NOW, 30)
 
     def test_build_signal_rejects_non_candidate(self):
         with self.assertRaises(ValueError):
@@ -156,6 +182,113 @@ class SignalLifecycleTests(unittest.TestCase):
         )
         self.assertEqual(event, "SIGNAL_INVALIDATED_STOP_LEVEL")
         self.assertEqual(updated["monitor_status"], "STOP_TOUCHED")
+
+    def test_out_of_order_candle_cannot_invalidate_signal(self):
+        signal = build_signal_record(candidate(), NOW, 30)
+        newer, event = advance_signal(
+            signal,
+            NOW + timedelta(minutes=20),
+            latest_price=179.5,
+            latest_high=179.8,
+            latest_low=179.2,
+            latest_data_timestamp=NOW + timedelta(minutes=15),
+        )
+        self.assertIsNone(event)
+        self.assertEqual(
+            newer["last_market_data_timestamp"],
+            (NOW + timedelta(minutes=15)).isoformat(),
+        )
+
+        stale, stale_event = advance_signal(
+            newer,
+            NOW + timedelta(minutes=25),
+            latest_price=178.0,
+            latest_high=179.0,
+            latest_low=177.5,
+            latest_data_timestamp=NOW + timedelta(minutes=10),
+        )
+        self.assertIsNone(stale_event)
+        self.assertEqual(stale["status"], "PENDING")
+        self.assertEqual(stale["monitor_status"], "ACTIVE")
+        self.assertEqual(
+            stale["last_market_data_timestamp"],
+            (NOW + timedelta(minutes=15)).isoformat(),
+        )
+
+    def test_duplicate_candle_cannot_trigger_a_second_market_event(self):
+        signal = build_signal_record(candidate(), NOW, 30)
+        newer, event = advance_signal(
+            signal,
+            NOW + timedelta(minutes=20),
+            latest_price=179.5,
+            latest_high=179.8,
+            latest_low=179.2,
+            latest_data_timestamp=NOW + timedelta(minutes=15),
+        )
+        self.assertIsNone(event)
+
+        duplicate, duplicate_event = advance_signal(
+            newer,
+            NOW + timedelta(minutes=21),
+            latest_price=178.0,
+            latest_high=179.0,
+            latest_low=177.5,
+            latest_data_timestamp=NOW + timedelta(minutes=15),
+        )
+        self.assertIsNone(duplicate_event)
+        self.assertEqual(duplicate["status"], "PENDING")
+        self.assertEqual(duplicate["monitor_status"], "ACTIVE")
+
+    def test_future_candle_cannot_trigger_or_advance_signal(self):
+        signal = build_signal_record(candidate(), NOW, 30)
+        updated, event = advance_signal(
+            signal,
+            NOW + timedelta(minutes=5),
+            latest_price=178.0,
+            latest_high=179.0,
+            latest_low=177.5,
+            conditions_valid=False,
+            latest_data_timestamp=NOW + timedelta(minutes=10),
+        )
+        self.assertIsNone(event)
+        self.assertEqual(updated["status"], "PENDING")
+        self.assertEqual(updated["monitor_status"], "ACTIVE")
+        self.assertNotIn("last_market_data_timestamp", updated)
+
+    def test_candle_close_outside_ohlc_range_is_rejected(self):
+        signal = build_signal_record(candidate(), NOW, 30)
+        with self.assertRaisesRegex(ValueError, "must not exceed latest_high"):
+            advance_signal(
+                signal,
+                NOW + timedelta(minutes=20),
+                latest_price=180.5,
+                latest_high=180.0,
+                latest_low=179.0,
+                latest_data_timestamp=NOW + timedelta(minutes=15),
+            )
+        self.assertNotIn("last_market_data_timestamp", signal)
+
+        with self.assertRaisesRegex(ValueError, "must not be below latest_low"):
+            advance_signal(
+                signal,
+                NOW + timedelta(minutes=20),
+                latest_price=178.5,
+                latest_high=180.0,
+                latest_low=179.0,
+                latest_data_timestamp=NOW + timedelta(minutes=15),
+            )
+
+    def test_incomplete_ohlc_range_is_rejected(self):
+        signal = build_signal_record(candidate(), NOW, 30)
+        with self.assertRaisesRegex(ValueError, "must be supplied together"):
+            advance_signal(
+                signal,
+                NOW + timedelta(minutes=20),
+                latest_price=179.5,
+                latest_high=180.0,
+                latest_data_timestamp=NOW + timedelta(minutes=15),
+            )
+        self.assertNotIn("last_market_data_timestamp", signal)
 
     def test_intrabar_stop_is_detected_even_when_close_is_above_stop(self):
         signal = build_signal_record(candidate(), NOW, 30)
@@ -319,6 +452,24 @@ class SignalLifecycleTests(unittest.TestCase):
                         "generated_at": "2026-11-20T00:00:00Z",
                         "last_checked_at": "2026-11-20T00:00:00Z",
                     },
+                    "pending_notification": {
+                        "signal_id": "pending_notification",
+                        "status": "EXPIRED",
+                        "generated_at": "2026-01-01T00:00:00Z",
+                        "last_checked_at": "2026-01-02T00:00:00Z",
+                        "pending_notification_event": "SIGNAL_EXPIRED",
+                    },
+                    "pending_notification_queue": {
+                        "signal_id": "pending_notification_queue",
+                        "status": "EXPIRED",
+                        "generated_at": "2026-01-01T00:00:00Z",
+                        "last_checked_at": "2026-01-02T00:00:00Z",
+                        "pending_notification_event": "SIGNAL_INVALIDATED",
+                        "pending_notification_events": [
+                            "SIGNAL_INVALIDATED",
+                            "SIGNAL_INVALIDATED_STOP_LEVEL",
+                        ],
+                    },
                     "pending": {
                         "signal_id": "pending",
                         "status": "PENDING",
@@ -348,6 +499,8 @@ class SignalLifecycleTests(unittest.TestCase):
         self.assertNotIn("old", loaded["signals"])
         self.assertIn("recent", loaded["signals"])
         self.assertIn("pending", loaded["signals"])
+        self.assertIn("pending_notification", loaded["signals"])
+        self.assertIn("pending_notification_queue", loaded["signals"])
 
     def test_upstash_store_requires_credentials(self):
         with self.assertRaises(ValueError):

@@ -149,6 +149,36 @@ def format_number(value, decimals=4):
         return "N/D"
 
 
+def _format_entry_window(generated_at, expires_at):
+    """Format the original entry window without assuming a timezone."""
+    try:
+        start = datetime.fromisoformat(
+            str(generated_at).strip().replace("Z", "+00:00")
+        )
+        end = datetime.fromisoformat(
+            str(expires_at).strip().replace("Z", "+00:00")
+        )
+        if start.tzinfo is None or end.tzinfo is None:
+            return "NO CONFIGURADA"
+        total_minutes = math.ceil((end - start).total_seconds() / 60)
+        if total_minutes <= 0:
+            return "NO CONFIGURADA"
+    except (TypeError, ValueError, OverflowError):
+        return "NO CONFIGURADA"
+
+    days, remainder = divmod(total_minutes, 1440)
+    hours, minutes = divmod(remainder, 60)
+    parts = []
+    if days:
+        parts.append(f"{days} día" if days == 1 else f"{days} días")
+    if hours:
+        parts.append(f"{hours} h")
+    if minutes:
+        parts.append(f"{minutes} min")
+    return " ".join(parts) or "1 min"
+
+
+
 def format_risk(value):
     try:
         number = float(value)
@@ -239,12 +269,19 @@ def send_telegram_photo(image_bytes, caption):
     if not image_bytes:
         return False
 
+    if not isinstance(caption, str) or len(caption) > 1024:
+        logger.error(
+            "TELEGRAM PHOTO CAPTION REJECTED | length=%s | limit=1024",
+            len(caption) if isinstance(caption, str) else "invalid",
+        )
+        return False
+
     try:
         response = requests.post(
             f"{TELEGRAM_API_URL}/sendPhoto",
             data={
                 "chat_id": TELEGRAM_CHAT_ID,
-                "caption": caption[:1024],
+                "caption": caption,
                 "parse_mode": "HTML",
             },
             files={
@@ -658,7 +695,28 @@ def build_telegram_messages(scan_result):
         entry = format_number(entry_value, 4)
         stop = format_number(stop_value, 4)
         target = format_number(target_value, 4)
-        rr = format_number(candidate.get("risk_reward"), 2)
+        # El RR mostrado debe derivarse de los niveles reales, no de un
+        # campo auxiliar que podría estar desactualizado o ser inconsistente.
+        try:
+            entry_numeric = float(entry_value)
+            stop_numeric = float(stop_value)
+            target_numeric = float(target_value)
+            if not all(
+                math.isfinite(value)
+                for value in (entry_numeric, stop_numeric, target_numeric)
+            ):
+                raise ValueError("non-finite signal levels")
+            reward_distance = target_numeric - entry_numeric
+            risk_distance = entry_numeric - stop_numeric
+            if reward_distance <= 0 or risk_distance <= 0:
+                raise ValueError("invalid LONG signal levels")
+            rr_numeric = reward_distance / risk_distance
+            if not math.isfinite(rr_numeric) or rr_numeric <= 0:
+                raise ValueError("invalid risk/reward")
+        except (TypeError, ValueError, OverflowError):
+            rr_numeric = None
+
+        rr = format_number(rr_numeric, 2)
 
         potential_reward = _percentage_between(
             entry_value, target_value
@@ -688,22 +746,16 @@ def build_telegram_messages(scan_result):
             risk_amount_text = "N/D"
             risk_amount = None
 
-        try:
-            rr_numeric = float(candidate.get("risk_reward"))
-            reward_amount = (
-                risk_amount * rr_numeric
-                if risk_amount is not None
-                and math.isfinite(rr_numeric)
-                and rr_numeric > 0
-                else None
-            )
-            reward_amount_text = (
-                f"{reward_amount:.2f} USD"
-                if reward_amount is not None and math.isfinite(reward_amount)
-                else "N/D"
-            )
-        except (TypeError, ValueError, OverflowError):
-            reward_amount_text = "N/D"
+        reward_amount = (
+            risk_amount * rr_numeric
+            if risk_amount is not None and rr_numeric is not None
+            else None
+        )
+        reward_amount_text = (
+            f"{reward_amount:.2f} USD"
+            if reward_amount is not None and math.isfinite(reward_amount)
+            else "N/D"
+        )
 
         data_timestamp = candidate.get("data_timestamp")
         data_age = candidate.get("data_age_minutes")
@@ -726,6 +778,9 @@ def build_telegram_messages(scan_result):
             expiry_text = escape_html(format_timestamp(signal_expiry))
         else:
             expiry_text = "NO CONFIGURADA"
+        entry_window_text = _format_entry_window(
+            candidate.get("generated_at"), signal_expiry
+        )
         try:
             age_value = float(data_age)
             age_text = f"{age_value:.1f} min" if math.isfinite(age_value) else "N/D"
@@ -813,6 +868,7 @@ def build_telegram_messages(scan_result):
             "━━━━━━━━━━━━━━━━━━\n"
             "Probabilidad histórica: <b>NO VALIDADA</b>\n"
             f"Caducidad de la señal: <b>{expiry_text}</b>\n"
+            f"Ventana para entrar: <b>{escape_html(entry_window_text)}</b>\n"
             f"Duración estimada de operación: <b>{escape_html(duration_text)}</b>\n"
             "Noticias y costes: <b>NO INCORPORADOS AÚN</b>\n"
             f"{escape_html(report_closing)}\n"
@@ -825,9 +881,8 @@ def build_telegram_messages(scan_result):
 
 def send_telegram_notifications(scan_result):
     """
-    Envía el resumen y las candidatas.
-    Si hay una candidata con datos disponibles,
-    adjunta también su gráfico.
+    Envía el resumen y los informes completos de las candidatas.
+    Los gráficos son adjuntos opcionales con un pie breve.
     """
 
     if not TELEGRAM_ENABLED:
@@ -855,34 +910,55 @@ def send_telegram_notifications(scan_result):
             else:
                 failed += 1
 
-        # Mensajes siguientes: candidatas y gráficos.
+        # Enviar siempre el informe completo como texto antes del gráfico.
+        # Telegram limita los pies de foto a 1024 caracteres y truncarlos
+        # podría ocultar la caducidad o las advertencias finales.
         for index, message in enumerate(messages[1:]):
-            if index < len(candidates):
-                candidate = candidates[index]
-
-                chart = generate_candidate_chart(
-                    candidate
-                )
-
-                if chart is not None:
-                    success = send_telegram_photo(
-                        chart,
-                        message,
-                    )
+            if index >= len(candidates):
+                if send_telegram_message(message):
+                    sent += 1
                 else:
-                    success = send_telegram_message(
-                        message
-                    )
+                    failed += 1
+                continue
 
-            else:
-                success = send_telegram_message(
-                    message
-                )
-
-            if success:
-                sent += 1
-            else:
+            candidate = candidates[index]
+            if not send_telegram_message(message):
                 failed += 1
+                continue
+
+            sent += 1
+            try:
+                chart = generate_candidate_chart(candidate)
+            except Exception:
+                logger.exception(
+                    "CHART GENERATION FAILED | %s | %s; full text report was sent",
+                    candidate.get("asset"),
+                    candidate.get("timeframe"),
+                )
+                chart = None
+
+            if chart is None:
+                continue
+
+            caption = (
+                "📈 <b>Gráfico técnico</b> · "
+                f"<b>{escape_html(candidate.get('asset', 'N/D'))}</b> · "
+                f"{escape_html(candidate.get('timeframe', 'N/D'))}\n"
+                "El informe completo se ha enviado en el mensaje anterior."
+            )
+            try:
+                if not send_telegram_photo(chart, caption):
+                    logger.warning(
+                        "CHART DELIVERY FAILED | %s | %s; full text report was sent",
+                        candidate.get("asset"),
+                        candidate.get("timeframe"),
+                    )
+            except Exception:
+                logger.exception(
+                    "CHART DELIVERY ERROR | %s | %s; full text report was sent",
+                    candidate.get("asset"),
+                    candidate.get("timeframe"),
+                )
 
         if failed == 0:
             logger.info(

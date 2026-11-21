@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch
 
 import Bot
 
@@ -31,6 +32,29 @@ class TestTelegramResearchReport(unittest.TestCase):
             "portfolio_status": {"status": "UNKNOWN"},
             "results": [self.candidate],
         }
+
+    @patch.object(Bot, "send_telegram_message", side_effect=[True, True])
+    @patch.object(Bot, "send_telegram_photo", return_value=True)
+    @patch.object(Bot, "generate_candidate_chart", return_value=b"chart")
+    def test_legacy_notification_sends_full_text_before_short_chart_caption(
+        self, generate_chart, send_photo, send_text
+    ):
+        """The older scan path must also avoid Telegram caption truncation."""
+        self.candidate["generated_at"] = "2026-11-21T12:00:00+00:00"
+        self.candidate["expires_at"] = "2026-11-21T12:30:00+00:00"
+        with patch.object(Bot, "TELEGRAM_ENABLED", True):
+            result = Bot.send_telegram_notifications(self.scan)
+
+        self.assertEqual(result, "sent:2")
+        self.assertEqual(send_text.call_count, 2)
+        full_report = send_text.call_args_list[1].args[0]
+        self.assertIn("Ventana para entrar: <b>30 min</b>", full_report)
+        send_photo.assert_called_once()
+        caption = send_photo.call_args.args[1]
+        self.assertLessEqual(len(caption), 1024)
+        self.assertIn("Gráfico técnico", caption)
+        self.assertIn("informe completo se ha enviado", caption)
+        self.assertNotEqual(caption, full_report)
 
     def test_report_contains_gross_reward_risk_and_reference_capital(self):
         messages = Bot.build_telegram_messages(self.scan)
@@ -70,6 +94,7 @@ class TestTelegramResearchReport(unittest.TestCase):
         report = Bot.build_telegram_messages(self.scan)[1]
         self.assertIn("Probabilidad histórica: <b>NO VALIDADA</b>", report)
         self.assertIn("Caducidad de la señal: <b>NO CONFIGURADA</b>", report)
+        self.assertIn("Ventana para entrar: <b>NO CONFIGURADA</b>", report)
         self.assertIn("Duración estimada de operación: <b>NO VALIDADA</b>", report)
         self.assertIn("Noticias y costes: <b>NO INCORPORADOS AÚN</b>", report)
 
@@ -103,11 +128,27 @@ class TestTelegramResearchReport(unittest.TestCase):
         self.assertIn("No se han detectado candidatas técnicas", messages[1])
 
 
-    def test_report_displays_calendar_aware_signal_expiry(self):
+    def test_report_displays_calendar_aware_signal_expiry_and_entry_window(self):
+        """The alert states how long the entry remains valid."""
+        self.candidate["generated_at"] = "2026-11-21T12:00:00+00:00"
         self.candidate["expires_at"] = "2026-11-21T12:30:00+00:00"
         report = Bot.build_telegram_messages(self.scan)[1]
         self.assertIn("Caducidad de la señal:", report)
         self.assertNotIn("Caducidad de la señal: <b>NO CONFIGURADA</b>", report)
+        self.assertIn("Ventana para entrar: <b>30 min</b>", report)
+
+    def test_report_recomputes_rr_instead_of_trusting_candidate_field(self):
+        self.candidate["risk_reward"] = 999
+        report = Bot.build_telegram_messages(self.scan)[1]
+        self.assertIn("Ratio riesgo/beneficio teórico: <b>2.00</b>", report)
+        self.assertIn("Beneficio teórico al TP: <b>5.00 USD</b>", report)
+        self.assertNotIn("999.00", report)
+
+    def test_report_marks_rr_unavailable_for_invalid_long_levels(self):
+        self.candidate["stop"] = 181.0
+        report = Bot.build_telegram_messages(self.scan)[1]
+        self.assertIn("Ratio riesgo/beneficio teórico: <b>N/D</b>", report)
+        self.assertIn("Beneficio teórico al TP: <b>N/D</b>", report)
 
     def test_candidate_without_valid_levels_does_not_crash(self):
         self.candidate["entry_reference"] = None

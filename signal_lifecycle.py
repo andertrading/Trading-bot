@@ -46,6 +46,13 @@ def _positive_number(value: Any, field: str) -> float:
         raise ValueError(f"{field} must be a finite positive number")
     return number
 
+def _policy_number(value: Any, field: str, *, maximum: float | None = None) -> float:
+    """Parse a finite positive policy value without accepting booleans."""
+    number = _positive_number(value, field)
+    if maximum is not None and number > maximum:
+        raise ValueError(f"{field} must be in (0, {maximum}]")
+    return number
+
 
 def make_signal_id(asset: str, timeframe: str, candle_timestamp: str,
                    direction: str = "LONG") -> str:
@@ -110,18 +117,14 @@ def build_signal_record(result: dict, generated_at: datetime | str,
     )
     risk_pct = abs(entry - stop) / entry * 100
     reward_pct = abs(target - entry) / entry * 100
-    minimum_rr = float(result.get("minimum_risk_reward", 2.0))
-    minimum_remaining = float(
-        result.get("minimum_remaining_risk_fraction", 0.5)
+    minimum_rr = _policy_number(
+        result.get("minimum_risk_reward", 2.0), "minimum_risk_reward"
     )
-    if not math.isfinite(minimum_rr) or minimum_rr <= 0:
-        raise ValueError("minimum_risk_reward must be positive")
-    if (
-        not math.isfinite(minimum_remaining)
-        or minimum_remaining <= 0
-        or minimum_remaining > 1
-    ):
-        raise ValueError("minimum_remaining_risk_fraction must be in (0, 1]")
+    minimum_remaining = _policy_number(
+        result.get("minimum_remaining_risk_fraction", 0.5),
+        "minimum_remaining_risk_fraction",
+        maximum=1.0,
+    )
 
     record = {
         "schema_version": SCHEMA_VERSION,
@@ -147,7 +150,9 @@ def build_signal_record(result: dict, generated_at: datetime | str,
         "entry_reference": entry,
         "stop": stop,
         "target": target,
-        "risk_reward": result.get("risk_reward"),
+        # Recompute from the validated levels instead of trusting a
+        # caller-supplied ratio that may be stale or inconsistent.
+        "risk_reward": round(reward_pct / risk_pct, 4),
         "potential_reward_pct": round(reward_pct, 4),
         "potential_risk_pct": round(risk_pct, 4),
         "data_provider": result.get("data_provider", "unknown"),
@@ -175,19 +180,14 @@ def _entry_zone_is_valid(signal: dict, price: float) -> bool:
     entry = _positive_number(signal.get("entry_reference"), "entry_reference")
     stop = _positive_number(signal.get("stop"), "stop")
     target = _positive_number(signal.get("target"), "target")
-    minimum_rr = float(signal.get("minimum_risk_reward", 2.0))
-    minimum_remaining = float(
-        signal.get("minimum_remaining_risk_fraction", 0.5)
+    minimum_rr = _policy_number(
+        signal.get("minimum_risk_reward", 2.0), "minimum_risk_reward"
     )
-
-    if not math.isfinite(minimum_rr) or minimum_rr <= 0:
-        raise ValueError("minimum_risk_reward must be positive")
-    if (
-        not math.isfinite(minimum_remaining)
-        or minimum_remaining <= 0
-        or minimum_remaining > 1
-    ):
-        raise ValueError("minimum_remaining_risk_fraction must be in (0, 1]")
+    minimum_remaining = _policy_number(
+        signal.get("minimum_remaining_risk_fraction", 0.5),
+        "minimum_remaining_risk_fraction",
+        maximum=1.0,
+    )
 
     if direction == "LONG":
         planned_risk = entry - stop
@@ -268,16 +268,40 @@ def advance_signal(
     # candles may advance the signal lifecycle.
     price_data_is_new = True
     signal_data_timestamp = updated.get("data_timestamp")
-    if latest_data_timestamp is not None and signal_data_timestamp:
-        price_data_is_new = (
-            _as_utc(latest_data_timestamp) > _as_utc(signal_data_timestamp)
-        )
+    last_market_timestamp = updated.get("last_market_data_timestamp")
+    if latest_data_timestamp is not None:
+        incoming_timestamp = _as_utc(latest_data_timestamp)
+        reference_timestamps = [
+            _as_utc(value)
+            for value in (signal_data_timestamp, last_market_timestamp)
+            if value
+        ]
+        # A candle timestamp later than the scan clock is not completed data.
+        # Ignore it rather than letting a provider clock error advance state.
+        if incoming_timestamp > current:
+            price_data_is_new = False
+        else:
+            # Ignore duplicate or out-of-order candles. Without this guard, a
+            # delayed provider response can invalidate a live entry using an old
+            # stop/target touch that predates the most recently processed candle.
+            price_data_is_new = not reference_timestamps or (
+                incoming_timestamp > max(reference_timestamps)
+            )
+        if price_data_is_new and (
+            latest_price is not None
+            or latest_high is not None
+            or latest_low is not None
+        ):
+            updated["last_market_data_timestamp"] = incoming_timestamp.isoformat()
 
     # Use the completed candle's high/low so intrabar stop/target touches
     # are not missed merely because the candle later closed back inside.
+    # Validate the OHLC envelope before accepting its timestamp as processed.
     high = None
     low = None
     if price_data_is_new and (latest_high is not None or latest_low is not None):
+        if (latest_high is None) != (latest_low is None):
+            raise ValueError("latest_high and latest_low must be supplied together")
         fallback = (
             _positive_number(latest_price, "latest_price")
             if latest_price is not None
@@ -295,10 +319,23 @@ def advance_signal(
         )
         if high is not None and low is not None and high < low:
             raise ValueError("latest_high must be greater than or equal to latest_low")
+        if latest_price is not None:
+            close = _positive_number(latest_price, "latest_price")
+            if high is not None and close > high:
+                raise ValueError("latest_price must not exceed latest_high")
+            if low is not None and close < low:
+                raise ValueError("latest_price must not be below latest_low")
     elif price_data_is_new and latest_price is not None:
         price = _positive_number(latest_price, "latest_price")
         high = price
         low = price
+
+    if price_data_is_new and latest_data_timestamp is not None and (
+        latest_price is not None or latest_high is not None or latest_low is not None
+    ):
+        updated["last_market_data_timestamp"] = _as_utc(
+            latest_data_timestamp
+        ).isoformat()
 
     direction = str(updated.get("direction", "LONG")).upper()
     stop = _positive_number(updated.get("stop"), "stop")
@@ -342,7 +379,7 @@ def advance_signal(
         if expired_now:
             updated["status"] = "EXPIRED"
             event = "SIGNAL_EXPIRED"
-        elif not conditions_valid:
+        elif price_data_is_new and not conditions_valid:
             updated["status"] = "INVALIDATED"
             event = "SIGNAL_INVALIDATED"
         elif price_data_is_new and latest_price is not None:
@@ -521,7 +558,7 @@ class UpstashSignalStateStore:
 
     def prune(self, now=None, retention_days: int = 90,
               max_terminal_records: int = 10000) -> int:
-        """Bound state growth while preserving every pending signal."""
+        """Bound state growth while preserving pending signals and undelivered events."""
         if isinstance(retention_days, bool) or retention_days <= 0:
             raise ValueError("retention_days must be positive")
         if isinstance(max_terminal_records, bool) or max_terminal_records <= 0:
@@ -538,6 +575,13 @@ class UpstashSignalStateStore:
 
             for signal_id, signal in list(signals.items()):
                 if signal.get("status") not in TERMINAL_STATUSES:
+                    continue
+                # An undelivered lifecycle alert is still operationally
+                # important. Keep it until Telegram delivery succeeds.
+                if (
+                    signal.get("pending_notification_event")
+                    or signal.get("pending_notification_events")
+                ):
                     continue
                 terminal_at = signal.get("last_checked_at") or signal.get("generated_at")
                 try:
