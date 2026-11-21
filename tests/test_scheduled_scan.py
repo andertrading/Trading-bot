@@ -286,6 +286,7 @@ class ScheduledScanTests(unittest.TestCase):
 
     @patch.object(scheduled_scan.Bot, "send_telegram_message", side_effect=[False, False, True, True])
     def test_multiple_failed_lifecycle_events_are_queued_and_retried_in_order(self, send):
+        """Previously failed lifecycle alerts must never be overwritten."""
         store = MemoryStore("url", "token")
         signal = {
             "signal_id": "queued-events",
