@@ -34,6 +34,7 @@ from config import (
     ETORO_EXECUTION_TYPES_CONFIRMED,
     ETORO_FEE_SCHEDULE_CONFIRMED,
     ETORO_ACCOUNT_CURRENCY_CONFIRMED,
+    ETORO_EXECUTION_PRICE_BASIS_CONFIRMED,
     TELEGRAM_TOKEN,
     TELEGRAM_CHAT_ID,
     TIMEZONE,
@@ -836,6 +837,11 @@ def get_validation_blockers(portfolio_status):
     if not SPREADS_CONFIRMED:
         blockers.append(
             "Spreads pendientes de confirmar"
+        )
+
+    if not ETORO_EXECUTION_PRICE_BASIS_CONFIRMED:
+        blockers.append(
+            "Correspondencia entre OHLC históricos y precios bid/ask ejecutables de eToro no verificada"
         )
 
     if not FX_CONVERSION_CONFIRMED:
