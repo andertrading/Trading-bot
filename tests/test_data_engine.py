@@ -2518,6 +2518,58 @@ class TestCoinbaseExactCryptoGapRepair(unittest.TestCase):
         self.assertIn("Coinbase Exchange", result.attrs["price_source_detail"])
         self.assertEqual(request.call_count, 2)
 
+    def test_coinbase_full_history_paginates_and_records_provider(self):
+        end = pd.Timestamp("2025-02-10T00:00:00Z")
+        candle_end = end - pd.Timedelta(minutes=15)
+        start = candle_end - pd.Timedelta(days=1) + pd.Timedelta(minutes=15)
+        index = pd.date_range(start, candle_end, freq="15min")
+        candles = [
+            [
+                int(stamp.timestamp()),
+                99.0,
+                102.0,
+                100.0,
+                101.0,
+                12.0,
+            ]
+            for stamp in reversed(index)
+        ]
+
+        class Response:
+            def __init__(self, payload):
+                self.payload = payload
+
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return self.payload
+
+        with (
+            patch.object(
+                engine.requests,
+                "get",
+                side_effect=[
+                    Response({
+                        "base_currency": "SOL",
+                        "quote_currency": "USD",
+                    }),
+                    Response(candles),
+                ],
+            ) as request,
+            patch.object(engine.time, "sleep"),
+        ):
+            result = engine._download_coinbase_crypto_history(
+                "SOL", lookback_days=1, end=end
+            )
+
+        self.assertIsNotNone(result)
+        self.assertTrue(result.index.equals(index))
+        self.assertEqual(len(result), 96)
+        self.assertEqual(result.attrs["provider"], "coinbase_exchange")
+        self.assertTrue(result.attrs["price_adjustment_verified"])
+        self.assertEqual(request.call_count, 2)
+
     def test_coinbase_gap_repair_rejects_incomplete_candle_coverage(self):
         start = pd.Timestamp("2025-02-09T22:00:00Z")
         end = pd.Timestamp("2025-02-09T23:15:00Z")
