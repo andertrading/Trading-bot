@@ -3,7 +3,7 @@ name: Research Strategy Variants and Walk Forward
 on:
   push:
     branches:
-      - research/rolling-oos-validation-20261121
+      - research/fixed-common-calendar-oos-20261121
 
 permissions:
   contents: read
@@ -89,6 +89,7 @@ jobs:
           print("Verified", len(combined), "unique snapshots.")
           PY
           python -m py_compile strategy_research.py
+          python -m unittest tests.test_strategy_research -v
 
       - name: Run fixed strategy hypotheses with chronological walk-forward split
         run: python strategy_research.py
@@ -106,3 +107,4 @@ jobs:
             strategy_research_trades.csv
             strategy_research_errors.csv
             strategy_research_portfolio.csv
+            strategy_research_oos_portfolio.csv
