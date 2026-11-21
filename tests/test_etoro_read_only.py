@@ -800,6 +800,23 @@ class AccountSnapshotTests(unittest.TestCase):
         with self.assertRaisesRegex(EtoroAPIError, "riesgo no está cuantificado"):
             normalize_account_snapshot(self.payload, "USD")
 
+    def test_active_entry_order_blocks_risk_snapshot(self):
+        self.payload["clientPortfolio"]["orders"] = [
+            {
+                "orderId": 55,
+                "instrumentId": 20,
+                "isBuy": True,
+                "rate": 100,
+                "stopLossRate": 95,
+                "amount": 200,
+                "leverage": 1,
+                "units": 2,
+                "isNoStopLoss": False,
+            }
+        ]
+        with self.assertRaisesRegex(EtoroAPIError, "órdenes activas"):
+            normalize_account_snapshot(self.payload, "USD")
+
     def test_non_usd_configuration_fails_closed(self):
         with self.assertRaises(EtoroAPIError):
             normalize_account_snapshot(self.payload, "EUR")
