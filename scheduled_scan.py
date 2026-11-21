@@ -269,13 +269,18 @@ def run_scheduled_scan(timeframe: str) -> dict:
         )
 
         if event:
-            updated["pending_notification_event"] = event
+            pending_events = _pending_notification_events(updated)
+            if event not in pending_events:
+                pending_events.append(event)
+            updated = _set_pending_notification_events(updated, pending_events)
             store.update(updated)
             transitions += 1
             if updated.get("alert_sent"):
-                _notify_lifecycle_event(store, updated, event, alerts_enabled)
-            else:
-                updated["pending_notification_event"] = None
+                updated = _notify_lifecycle_event(
+                    store, updated, event, alerts_enabled
+                )
+            elif not updated.get("alert_sent"):
+                updated = _set_pending_notification_events(updated, [])
                 store.update(updated)
             continue
 
