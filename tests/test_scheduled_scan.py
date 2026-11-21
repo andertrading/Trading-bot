@@ -136,6 +136,49 @@ class ScheduledScanTests(unittest.TestCase):
         self.assertEqual(updated["status"], "EXPIRED")
         self.assertEqual(result["lifecycle_transitions"], 1)
 
+
+    def test_alerts_remain_blocked_until_strategy_validation_passes(self):
+        store = MemoryStore("url", "token")
+        with patch.object(
+            scheduled_scan, "UpstashSignalStateStore", return_value=store
+        ), patch.object(
+            scheduled_scan.Bot, "run_scan", return_value=self.scan
+        ), patch.object(
+            scheduled_scan, "SIGNAL_ALERTS_ENABLED", True
+        ), patch.object(
+            scheduled_scan, "STRATEGY_VALIDATED", False
+        ), patch.object(
+            scheduled_scan.Bot, "send_telegram_message"
+        ) as send_message:
+            result = scheduled_scan.run_scheduled_scan("15m")
+
+        self.assertFalse(result["alerts_enabled"])
+        send_message.assert_not_called()
+
+    def test_alerts_send_only_when_strategy_and_telegram_are_enabled(self):
+        store = MemoryStore("url", "token")
+        with patch.object(
+            scheduled_scan, "UpstashSignalStateStore", return_value=store
+        ), patch.object(
+            scheduled_scan.Bot, "run_scan", return_value=self.scan
+        ), patch.object(
+            scheduled_scan, "SIGNAL_ALERTS_ENABLED", True
+        ), patch.object(
+            scheduled_scan, "STRATEGY_VALIDATED", True
+        ), patch.object(
+            scheduled_scan.Bot, "TELEGRAM_ENABLED", True
+        ), patch.object(
+            scheduled_scan.Bot, "generate_candidate_chart", return_value=None
+        ), patch.object(
+            scheduled_scan.Bot, "send_telegram_message", return_value=True
+        ) as send_message:
+            result = scheduled_scan.run_scheduled_scan("15m")
+
+        self.assertTrue(result["alerts_enabled"])
+        self.assertEqual(result["alerts_sent"], 1)
+        self.assertTrue(next(iter(store.state["signals"].values()))["alert_sent"])
+        send_message.assert_called_once()
+
     def test_invalid_timeframe_is_rejected_before_network_access(self):
         with self.assertRaises(ValueError):
             scheduled_scan.run_scheduled_scan("5m")
