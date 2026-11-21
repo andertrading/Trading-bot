@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 import os
 import re
 import time
