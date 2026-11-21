@@ -54,6 +54,17 @@ class TestCommonCalendarOutOfSampleSplit(unittest.TestCase):
         self.assertAlmostEqual(scaled[0]["hypothetical_risk_budget_usd"], 2.0)
         self.assertAlmostEqual(scaled[0]["hypothetical_gross_pnl_usd"], 2.0)
         self.assertAlmostEqual(scaled[0]["portfolio_allocated_notional_usd"], 200.0)
+        cost_rows = _broker_cost_sensitivity_rows(
+            scaled,
+            assets_config={"BTC": {"type": "CRYPTO", "currency": "USD"}},
+            spread_bps_values=(0,),
+        )
+        etoro = next(
+            row for row in cost_rows
+            if row["venue"] == "ETORO_REAL"
+            and row["fee_mode"] == "published_fee_scenario"
+        )
+        self.assertAlmostEqual(etoro["commission_scenario_usd"], 4.02)
 
     def test_synchronized_oos_trades_uses_shared_timeframe_midpoint_and_bounds(self):
         trades = [
