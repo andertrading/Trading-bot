@@ -1,0 +1,110 @@
+name: Research Strategy Variants and Walk Forward
+
+on:
+  push:
+    branches:
+      - research/fixed-common-calendar-oos-20261121
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  research:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      BACKTEST_DATA_MODE: replay
+      BACKTEST_SNAPSHOT_DIR: historicos_full_merged
+      BACKTEST_DAILY_LOOKBACK_DAYS: "730"
+      BACKTEST_EXTENDED_DAILY_HISTORY: "false"
+
+    steps:
+      - name: Checkout research-only strategy harness
+        uses: actions/checkout@v4
+
+      - name: Download original extended universe snapshots
+        uses: actions/download-artifact@v4
+        with:
+          name: extended-intraday-backtest-2026-11-21
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: andertrading/Trading-bot
+          run-id: 44862820157
+          path: sources/base
+
+      - name: Download corrected US equity M15 snapshots
+        uses: actions/download-artifact@v4
+        with:
+          name: us-equity-m15-filtered-backfill-2026-11-21
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: andertrading/Trading-bot
+          run-id: 44896519696
+          path: sources/stocks
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Merge immutable snapshots and compile research harness
+        run: |
+          python - <<'PY'
+          import json
+          import shutil
+          from pathlib import Path
+
+          base = Path("sources/base/historicos_backtest_extended")
+          stocks = Path("sources/stocks/historicos_us_equity_m15_filtered")
+          destination = Path("historicos_full_merged")
+          destination.mkdir(parents=True, exist_ok=True)
+
+          base_manifest = json.loads((base / "manifest.json").read_text(encoding="utf-8"))
+          stock_manifest = json.loads((stocks / "manifest.json").read_text(encoding="utf-8"))
+          combined = list(base_manifest)
+          existing = {(item["asset"], item["timeframe"]) for item in combined}
+
+          for item in stock_manifest:
+              key = (item["asset"], item["timeframe"])
+              if key in existing:
+                  raise SystemExit(f"Duplicate snapshot: {key}")
+              combined.append(item)
+              existing.add(key)
+
+          for source in (base, stocks):
+              for path in source.iterdir():
+                  if path.name != "manifest.json":
+                      shutil.copy2(path, destination / path.name)
+
+          if len(combined) != 23:
+              raise SystemExit(f"Expected 23 snapshots, found {len(combined)}")
+          (destination / "manifest.json").write_text(
+              json.dumps(combined, ensure_ascii=False, indent=2),
+              encoding="utf-8",
+          )
+          print("Verified", len(combined), "unique snapshots.")
+          PY
+          python -m py_compile strategy_research.py
+          python -m unittest discover -s tests -p "test_strategy_research.py" -v
+
+      - name: Run fixed strategy hypotheses with chronological walk-forward split
+        run: python strategy_research.py
+
+      - name: Upload research metrics and trade logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: strategy-variants-walkforward-2026-11-21
+          retention-days: 14
+          if-no-files-found: warn
+          path: |
+            strategy_research_summary.csv
+            strategy_research_walkforward.csv
+            strategy_research_trades.csv
+            strategy_research_errors.csv
+            strategy_research_portfolio.csv
+            strategy_research_oos_portfolio.csv
