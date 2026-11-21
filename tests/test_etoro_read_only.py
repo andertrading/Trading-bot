@@ -205,6 +205,14 @@ class AvailableCashTests(unittest.TestCase):
                 "orders": [{"amount": 5}],
             })
 
+    def test_negative_order_amount_cannot_inflate_available_cash(self):
+        with self.assertRaises(EtoroAPIError):
+            calculate_available_cash({
+                "credit": 100,
+                "ordersForOpen": [],
+                "orders": [{"amount": -50}],
+            })
+
 
 class AccountSnapshotTests(unittest.TestCase):
     def setUp(self):
