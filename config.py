@@ -32,7 +32,7 @@ RISK_TIERS = {
 INTRADAY_INTERVAL = "15m"
 SWING_INTERVAL = "1d"
 
-# Activos candidatos.
+# Activos candidatos. Las comisiones se centralizan en transaction_costs.py.
 # La moneda de cuenta es USD.
 ASSETS = {
     "CSPX": {
@@ -40,8 +40,6 @@ ASSETS = {
         "yahoo": "CSPX.L",
         "type": "ETF",
         "currency": "USD",
-        "entry_fee_type": "none",
-        "entry_fee": 0.0,
         "enabled": True,
     },
     "CNDX": {
@@ -58,8 +56,6 @@ ASSETS = {
         "yahoo": "TSLA",
         "type": "STOCK",
         "currency": "USD",
-        "entry_fee_type": "fixed",
-        "entry_fee": 1.0,
         "enabled": True,
     },
     "NVDA": {
@@ -103,8 +99,6 @@ ASSETS = {
         "yahoo": "BTC-USD",
         "type": "CRYPTO",
         "currency": "USD",
-        "entry_fee_type": "percentage",
-        "entry_fee": 0.01,
         "enabled": True,
     },
     "ETH": {
