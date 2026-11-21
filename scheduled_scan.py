@@ -236,7 +236,20 @@ def run_scheduled_scan(timeframe: str) -> dict:
 
     # Retry pending events first and refresh the in-memory snapshot so a
     # successful retry cannot be overwritten by stale state later this scan.
+    pending_lifecycle_before = sum(
+        len(_pending_notification_events(signal))
+        for signal in state["signals"].values()
+        if signal.get("timeframe") == timeframe and signal.get("alert_sent")
+    )
     state = _retry_pending_notifications(store, state, timeframe, alerts_enabled)
+    pending_lifecycle_after = sum(
+        len(_pending_notification_events(signal))
+        for signal in state["signals"].values()
+        if signal.get("timeframe") == timeframe and signal.get("alert_sent")
+    )
+    lifecycle_notifications_retried = max(
+        0, pending_lifecycle_before - pending_lifecycle_after
+    )
 
     # Continue monitoring price levels even after the entry window expires
     # or technical conditions invalidate the setup. The bot cannot know
@@ -358,6 +371,7 @@ def run_scheduled_scan(timeframe: str) -> dict:
         "lifecycle_transitions": transitions,
         "alerts_sent": sent,
         "alerts_retried": retried_alerts,
+        "lifecycle_notifications_retried": lifecycle_notifications_retried,
         "stale_candidates_skipped": stale_candidates_skipped,
         "alerts_enabled": alerts_enabled,
         "automatic_execution": False,
