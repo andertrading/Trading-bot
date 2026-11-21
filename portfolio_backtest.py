@@ -48,9 +48,6 @@ def _empty_result(capital, costs_included=False):
             "gross_pnl_usd": 0.0,
             "gross_return_pct": 0.0,
             "pnl_basis": "GROSS_EX_COSTS" if not costs_included else "NET_AFTER_ASSUMED_COSTS",
-            "net_pnl_usd": 0.0 if costs_included else None,
-            "total_entry_cost_usd": 0.0,
-            "total_exit_cost_usd": 0.0,
             "trades_considered": 0,
             "trades_accepted": 0,
             "trades_rejected": 0,
@@ -166,7 +163,12 @@ def simulate_portfolio(
                 exit_price = float(trade.get("exit", entry + result_r * (entry - stop)))
                 if not all(_finite(v) for v in (entry, stop, score, result_r, exit_price)):
                     raise ValueError("valor no finito")
-                if entry <= 0 or stop <= 0 or stop >= entry or exit_price <= 0:
+                if (
+                    entry <= 0
+                    or stop <= 0
+                    or stop >= entry
+                    or (execution_costs is not None and exit_price <= 0)
+                ):
                     raise ValueError("niveles long inválidos")
                 if exit_time < entry_time:
                     raise ValueError("salida anterior a entrada")
@@ -411,10 +413,6 @@ def simulate_portfolio(
         "ending_equity_usd": round(equity, 8),
         "gross_pnl_usd": round(gross_total_pnl if costs_included else equity - capital, 8),
         "gross_return_pct": round(((capital + (gross_total_pnl if costs_included else equity - capital)) / capital - 1) * 100, 6),
-        "net_pnl_usd": round(equity - capital, 8) if costs_included else None,
-        "net_return_pct": round((equity / capital - 1) * 100, 6) if costs_included else None,
-        "total_entry_cost_usd": round(total_entry_cost, 8),
-        "total_exit_cost_usd": round(total_exit_cost, 8),
         "pnl_basis": "NET_AFTER_ASSUMED_COSTS" if costs_included else "GROSS_EX_COSTS",
         "trades_accepted": len(accepted_rows),
         "trades_rejected": len(rejected),
@@ -431,6 +429,13 @@ def simulate_portfolio(
         "peak_open_notional_usd": round(peak_open_notional, 8),
         "costs_included": costs_included,
     })
+    if costs_included:
+        summary.update({
+            "net_pnl_usd": round(equity - capital, 8),
+            "net_return_pct": round((equity / capital - 1) * 100, 6),
+            "total_entry_cost_usd": round(total_entry_cost, 8),
+            "total_exit_cost_usd": round(total_exit_cost, 8),
+        })
     result["trades"] = accepted_rows
     result["rejections"] = rejected
     return result
