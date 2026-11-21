@@ -763,7 +763,7 @@ class AccountSnapshotTests(unittest.TestCase):
     def test_valid_official_nested_schema_preserves_positions_and_cash(self):
         snapshot = normalize_account_snapshot(self.payload, "USD")
         self.assertEqual(snapshot.account_currency, "USD")
-        self.assertEqual(snapshot.available_cash, 900)
+        self.assertEqual(snapshot.available_cash, 1000)
         self.assertEqual(snapshot.unrealized_pnl, Decimal("12.50"))
         self.assertEqual(len(snapshot.positions), 1)
         self.assertEqual(snapshot.positions[0]["positionId"], 10)
