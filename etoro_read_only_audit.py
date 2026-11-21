@@ -35,17 +35,31 @@ def _asset_candidates(symbol: str, asset: Mapping[str, Any]) -> list[tuple[str, 
     return candidates
 
 
-def _resolve_asset(client: EtoroReadOnlyClient, symbol: str, asset: Mapping[str, Any]):
+def _resolve_asset(
+    client: EtoroReadOnlyClient,
+    symbol: str,
+    asset: Mapping[str, Any],
+) -> tuple[Mapping[str, Any] | None, str]:
+    """Try every exact identifier; one rejected filter must not stop discovery."""
+    failure_codes: list[str] = []
     for field, value in _asset_candidates(symbol, asset):
         try:
-            response = client.search_instruments({field: value})
-        except Exception:
-            return None
-        try:
-            return resolve_unique_instrument(response, value)
-        except Exception:
+            response = client.search_instruments({field: value}, page_size=1000)
+        except Exception as exc:
+            # Keep diagnostics useful without exposing response bodies or credentials.
+            message = str(exc)
+            if "HTTP " in message:
+                suffix = message.split("HTTP ", 1)[1][:3]
+                failure_codes.append(f"HTTP_{suffix}" if suffix.isdigit() else "API_ERROR")
+            else:
+                failure_codes.append(type(exc).__name__.upper())
             continue
-    return None
+        try:
+            return resolve_unique_instrument(response, value), "RESOLVED"
+        except Exception as exc:
+            failure_codes.append(type(exc).__name__.upper())
+            continue
+    return None, (failure_codes[-1] if failure_codes else "NO_EXACT_CANDIDATE")
 
 
 def _fee_class(instrument_type: Any) -> str | None:
@@ -82,8 +96,10 @@ def run_audit(
     }
 
     resolved: dict[str, Mapping[str, Any]] = {}
+    resolution_status: dict[str, str] = {}
     for symbol, asset in enabled_assets.items():
-        item = _resolve_asset(client, symbol, asset)
+        item, status = _resolve_asset(client, symbol, asset)
+        resolution_status[symbol] = status
         if item is not None:
             resolved[symbol] = item
 
@@ -148,6 +164,7 @@ def run_audit(
             "symbol": symbol,
             "expected_asset_type": asset.get("type"),
             "candidate_found": symbol in resolved,
+            "resolution_status": resolution_status[symbol],
             "instrument_id": (
                 resolved[symbol]["instrumentId"] if symbol in resolved else None
             ),
