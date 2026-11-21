@@ -345,6 +345,24 @@ class ScheduledScanTests(unittest.TestCase):
         generate_chart.assert_called_once()
         send_text.assert_called_once_with("signal text")
 
+    @patch.object(scheduled_scan.Bot, "send_telegram_message", return_value=True)
+    @patch.object(scheduled_scan.Bot, "send_telegram_photo", return_value=False)
+    @patch.object(scheduled_scan.Bot, "generate_candidate_chart", return_value=b"chart")
+    @patch.object(
+        scheduled_scan.Bot, "build_telegram_messages",
+        return_value=["summary", "signal text"],
+    )
+    def test_photo_send_failure_falls_back_to_text(
+        self, build_messages, generate_chart, send_photo, send_text
+    ):
+        result = scheduled_scan._send_signal_report(
+            self.scan, self.scan["results"][0],
+            {"expires_at": "2026-11-21T12:30:00+00:00", "signal_id": "photo-fallback"},
+        )
+        self.assertTrue(result)
+        send_photo.assert_called_once_with(b"chart", "signal text")
+        send_text.assert_called_once_with("signal text")
+
     def test_invalid_timeframe_is_rejected_before_network_access(self):
         with self.assertRaises(ValueError):
             scheduled_scan.run_scheduled_scan("5m")
