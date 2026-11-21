@@ -47,8 +47,6 @@ ASSETS = {
         "yahoo": "CNDX.L",
         "type": "ETF",
         "currency": "USD",
-        "entry_fee_type": "none",
-        "entry_fee": 0.0,
         "enabled": True,
     },
     "TSLA": {
@@ -63,8 +61,6 @@ ASSETS = {
         "yahoo": "NVDA",
         "type": "STOCK",
         "currency": "USD",
-        "entry_fee_type": "fixed",
-        "entry_fee": 1.0,
         "enabled": True,
     },
     "AAPL": {
@@ -72,8 +68,6 @@ ASSETS = {
         "yahoo": "AAPL",
         "type": "STOCK",
         "currency": "USD",
-        "entry_fee_type": "fixed",
-        "entry_fee": 1.0,
         "enabled": True,
     },
     "MSFT": {
@@ -81,8 +75,6 @@ ASSETS = {
         "yahoo": "MSFT",
         "type": "STOCK",
         "currency": "USD",
-        "entry_fee_type": "fixed",
-        "entry_fee": 1.0,
         "enabled": True,
     },
     "TTWO": {
@@ -90,8 +82,6 @@ ASSETS = {
         "yahoo": "TTWO",
         "type": "STOCK",
         "currency": "USD",
-        "entry_fee_type": "fixed",
-        "entry_fee": 1.0,
         "enabled": True,
     },
     "BTC": {
@@ -106,8 +96,6 @@ ASSETS = {
         "yahoo": "ETH-USD",
         "type": "CRYPTO",
         "currency": "USD",
-        "entry_fee_type": "percentage",
-        "entry_fee": 0.01,
         "enabled": True,
     },
     "SOL": {
@@ -115,8 +103,6 @@ ASSETS = {
         "yahoo": "SOL-USD",
         "type": "CRYPTO",
         "currency": "USD",
-        "entry_fee_type": "percentage",
-        "entry_fee": 0.01,
         "enabled": True,
     },
     "XLM": {
@@ -124,8 +110,6 @@ ASSETS = {
         "yahoo": "XLM-USD",
         "type": "CRYPTO",
         "currency": "USD",
-        "entry_fee_type": "percentage",
-        "entry_fee": 0.01,
         "enabled": True,
     },
     "XRP": {
@@ -133,8 +117,6 @@ ASSETS = {
         "yahoo": "XRP-USD",
         "type": "CRYPTO",
         "currency": "USD",
-        "entry_fee_type": "percentage",
-        "entry_fee": 0.01,
         "enabled": True,
     },
 }
