@@ -156,103 +156,137 @@ def _metrics_row(strategy_name, asset, timeframe, period, trades):
     }
 
 
-def _walk_forward_rows(strategy_name, trades, asset, timeframe):
-    """Early-history diagnostic plus three fixed chronological OOS windows.
+def _utc_timestamp(value):
+    stamp = pd.Timestamp(value)
+    if pd.isna(stamp):
+        raise ValueError("invalid history boundary")
+    if stamp.tzinfo is None:
+        return stamp.tz_localize("UTC")
+    return stamp.tz_convert("UTC")
 
-    Strategy rules are fixed and are not fitted on the early period; this is
-    time-sliced out-of-sample evaluation, not parameter-optimizing walk-forward.
+
+def _chronological_period_bounds(history_start, history_end):
+    """Return common calendar-based early/OOS boundaries for one data series."""
+    if history_start is None or history_end is None:
+        return None
+    try:
+        start_time = _utc_timestamp(history_start)
+        end_time = _utc_timestamp(history_end)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if end_time <= start_time:
+        return None
+
+    early_end = start_time + (end_time - start_time) * 0.5
+    oos_duration = (end_time - early_end) / 3
+    folds = []
+    for fold in range(1, 4):
+        fold_start = early_end + oos_duration * (fold - 1)
+        fold_end = end_time if fold == 3 else early_end + oos_duration * fold
+        folds.append((fold_start, fold_end))
+    return start_time, early_end, end_time, folds
+
+
+def _out_of_sample_trades(trades, history_start, history_end):
+    """Select trades after the shared first-half calendar cutoff."""
+    bounds = _chronological_period_bounds(history_start, history_end)
+    if bounds is None:
+        return []
+    _, early_end, _, _ = bounds
+    selected = []
+    for trade in trades or []:
+        try:
+            entry_time = _utc_timestamp(trade["entry_time"])
+        except (KeyError, TypeError, ValueError, OverflowError):
+            continue
+        if entry_time > early_end:
+            selected.append(dict(trade))
+    return selected
+
+
+def _walk_forward_rows(
+    strategy_name, trades, asset, timeframe, history_start, history_end
+):
+    """Early diagnostic plus three fixed calendar-based chronological OOS windows.
+
+    Boundaries come from the complete price history, not the first/last trade.
+    This keeps the same asset/timeframe split identical across all strategies,
+    including strategies that generate very few trades.
     """
-    empty_rows = [
-        _metrics_row(strategy_name, asset, timeframe, "EARLY_HISTORY_DIAGNOSTIC", []),
-        *[
-            _metrics_row(
-                strategy_name, asset, timeframe, f"OUT_OF_SAMPLE_FOLD_{fold}", []
-            )
-            for fold in range(1, 4)
-        ],
-    ]
-    if not trades:
-        for row in empty_rows:
+    bounds = _chronological_period_bounds(history_start, history_end)
+    if bounds is None:
+        periods = [
+            "EARLY_HISTORY_DIAGNOSTIC",
+            "OUT_OF_SAMPLE_FOLD_1",
+            "OUT_OF_SAMPLE_FOLD_2",
+            "OUT_OF_SAMPLE_FOLD_3",
+        ]
+        rows = [
+            _metrics_row(strategy_name, asset, timeframe, period, [])
+            for period in periods
+        ]
+        for row in rows:
             row.update({
                 "fold_start_utc": None,
                 "fold_end_utc": None,
                 "sample_size_sufficient": False,
                 "probability_calibrated": False,
-            })
-        return empty_rows
-
-    frame = pd.DataFrame(trades)
-    frame["_entry_time"] = pd.to_datetime(
-        frame["entry_time"], utc=True, errors="coerce"
-    )
-    frame = frame.dropna(subset=["_entry_time"]).sort_values("_entry_time")
-    if frame.empty:
-        return empty_rows
-
-    start_time = frame["_entry_time"].min()
-    end_time = frame["_entry_time"].max()
-    if end_time <= start_time:
-        early = frame.drop(columns=["_entry_time"]).to_dict("records")
-        rows = [
-            _metrics_row(
-                strategy_name, asset, timeframe, "EARLY_HISTORY_DIAGNOSTIC", early
-            ),
-            *[
-                _metrics_row(
-                    strategy_name, asset, timeframe,
-                    f"OUT_OF_SAMPLE_FOLD_{fold}", []
-                )
-                for fold in range(1, 4)
-            ],
-        ]
-        for row in rows:
-            row.update({
-                "fold_start_utc": start_time.isoformat(),
-                "fold_end_utc": end_time.isoformat(),
-                "sample_size_sufficient": False,
-                "probability_calibrated": False,
+                "history_bounds_valid": False,
             })
         return rows
 
-    early_end = start_time + (end_time - start_time) * 0.5
-    early_frame = frame[frame["_entry_time"] <= early_end]
-    early_trades = early_frame.drop(columns=["_entry_time"]).to_dict("records")
+    start_time, early_end, end_time, folds = bounds
+    frame = pd.DataFrame(trades or [])
+    if not frame.empty and "entry_time" in frame:
+        frame["_entry_time"] = pd.to_datetime(
+            frame["entry_time"], utc=True, errors="coerce"
+        )
+        frame = frame.dropna(subset=["_entry_time"]).sort_values("_entry_time")
+    else:
+        frame = pd.DataFrame(columns=["_entry_time"])
+
+    early = (
+        frame.loc[frame["_entry_time"] <= early_end]
+        .drop(columns=["_entry_time"], errors="ignore")
+        .to_dict("records")
+    )
     rows = [_metrics_row(
-        strategy_name, asset, timeframe,
-        "EARLY_HISTORY_DIAGNOSTIC", early_trades
+        strategy_name, asset, timeframe, "EARLY_HISTORY_DIAGNOSTIC", early
     )]
     rows[0].update({
         "fold_start_utc": start_time.isoformat(),
         "fold_end_utc": early_end.isoformat(),
-        "sample_size_sufficient": len(early_trades) >= 100,
+        "sample_size_sufficient": len(early) >= 100,
         "probability_calibrated": False,
+        "history_bounds_valid": True,
     })
 
-    oos_duration = (end_time - early_end) / 3
-    for fold in range(1, 4):
-        fold_start = early_end + oos_duration * (fold - 1)
-        fold_end = end_time if fold == 3 else early_end + oos_duration * fold
-        mask = (
-            (frame["_entry_time"] > early_end)
-            & (frame["_entry_time"] >= fold_start)
-            & (
-                (frame["_entry_time"] <= fold_end)
-                if fold == 3
-                else (frame["_entry_time"] < fold_end)
+    for fold_number, (fold_start, fold_end) in enumerate(folds, start=1):
+        if frame.empty:
+            fold_trades = []
+        else:
+            mask = (
+                (frame["_entry_time"] > early_end)
+                & (frame["_entry_time"] >= fold_start)
+                & (
+                    (frame["_entry_time"] <= fold_end)
+                    if fold_number == 3
+                    else (frame["_entry_time"] < fold_end)
+                )
             )
-        )
-        fold_trades = frame.loc[mask].drop(
-            columns=["_entry_time"]
-        ).to_dict("records")
+            fold_trades = frame.loc[mask].drop(
+                columns=["_entry_time"], errors="ignore"
+            ).to_dict("records")
         row = _metrics_row(
             strategy_name, asset, timeframe,
-            f"OUT_OF_SAMPLE_FOLD_{fold}", fold_trades
+            f"OUT_OF_SAMPLE_FOLD_{fold_number}", fold_trades
         )
         row.update({
             "fold_start_utc": fold_start.isoformat(),
             "fold_end_utc": fold_end.isoformat(),
             "sample_size_sufficient": len(fold_trades) >= 100,
             "probability_calibrated": False,
+            "history_bounds_valid": True,
         })
         rows.append(row)
     return rows
