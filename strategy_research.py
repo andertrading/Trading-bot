@@ -736,10 +736,11 @@ def _broker_cost_sensitivity_rows(
         asset_type = group[0]["_asset_type"]
         venues = []
 
-        # Conservative published eToro fee assumptions for REAL positions:
-        # maximum published stock fee ($2 each side), ETFs zero commission,
-        # and standard 1% crypto fee on each side. Market spread remains
-        # separately unknown and is varied below.
+        # Published eToro fee assumptions for a Spain-based account trading
+        # this universe: $1 per side for these US-listed individual shares,
+        # ETFs zero commission, and standard 1% crypto fee on each side.
+        # Club-tier crypto discounts and actual ticket details still require
+        # confirmation. Market spread remains separately unknown below.
         if asset_type in {"STOCK", "ETF", "CRYPTO"}:
             venues.append(("ETORO_REAL", "published_fee_scenario"))
 
@@ -788,7 +789,7 @@ def _broker_cost_sensitivity_rows(
                         turnover = trade["_turnover"]
                         if venue == "ETORO_REAL":
                             if asset_type == "STOCK":
-                                commission = 4.0
+                                commission = 2.0
                             elif asset_type == "ETF":
                                 commission = 0.0
                             else:
