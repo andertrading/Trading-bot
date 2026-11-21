@@ -17,6 +17,7 @@ import pandas as pd
 import requests
 
 from config import ASSETS
+from eodhd_provider import download_eodhd_daily
 
 logger = logging.getLogger(__name__)
 
@@ -997,7 +998,6 @@ def _log_dataframe_timestamps(provider, asset, interval, df):
 
     first_timestamp = df.index[0]
     last_timestamp = df.index[-1]
-
     age_minutes = (
         pd.Timestamp.now(tz="UTC") - last_timestamp
     ).total_seconds() / 60
@@ -1498,7 +1498,6 @@ def _download_yahoo(asset, config, interval):
         )
         return None
 
-
 # ---------------------------------------------------------------------
 # DESCARGA PRINCIPAL
 # ---------------------------------------------------------------------
@@ -1545,7 +1544,15 @@ def download_data(asset, interval="15m"):
 
     provider = PROVIDER_MAP.get(asset)
 
-    if provider == "twelvedata":
+    if asset in LONDON_ASSETS and interval == "1d":
+        dataframe = download_eodhd_daily(
+            asset,
+            config.get("currency"),
+            _remove_incomplete_candle,
+            _has_daily_gaps,
+        )
+
+    elif provider == "twelvedata":
         dataframe = _download_twelvedata(
             asset,
             config,
