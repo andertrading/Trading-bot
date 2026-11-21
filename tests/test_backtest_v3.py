@@ -19,7 +19,7 @@ class TestBacktestV3(unittest.TestCase):
 
         close = [100.0 + i * 0.1 for i in range(rows)]
 
-        return pd.DataFrame(
+        data = pd.DataFrame(
             {
                 "Open": close,
                 "High": [price + 1 for price in close],
@@ -29,6 +29,12 @@ class TestBacktestV3(unittest.TestCase):
             },
             index=index,
         )
+        data.attrs.update({
+            "data_provider": "twelvedata",
+            "price_adjustment_policy": "raw_unadjusted_intraday",
+            "price_adjustment_verified": True,
+        })
+        return data
 
     def make_execution_data(self, rows=14):
         index = pd.date_range(
