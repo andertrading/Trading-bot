@@ -105,6 +105,16 @@ class ReadOnlyAuditTests(unittest.TestCase):
         self.assertFalse(report["overall_pass"])
         self.assertNotIn("sensitive quote payload", str(report))
 
+    def test_eligibility_failure_blocks_overall_pass_without_leaking_details(self):
+        client = FakeAuditClient()
+        client.get_validated_instrument_eligibility = Mock(
+            side_effect=RuntimeError("private eligibility detail")
+        )
+        report = run_audit(client, self.assets, "USD", self.now)
+        self.assertFalse(report["instrument_eligibility_validated"])
+        self.assertFalse(report["overall_pass"])
+        self.assertNotIn("private eligibility detail", str(report))
+
 
 if __name__ == "__main__":
     unittest.main()
