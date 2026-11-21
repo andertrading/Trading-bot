@@ -1237,7 +1237,8 @@ def _twelvedata_request(params):
 
 
 def _download_twelvedata(
-    asset, config, interval, start_date=None, end_date=None
+    asset, config, interval, start_date=None, end_date=None,
+    validate_gaps=True,
 ):
     api_key = os.getenv("TWELVE_DATA_API_KEY")
 
@@ -1434,7 +1435,7 @@ def _download_twelvedata(
             asset,
         )
 
-        if df is None or len(df) < 220:
+        if df is None or (validate_gaps and len(df) < 220):
             logger.warning(
                 "Histórico insuficiente para %s %s",
                 asset,
@@ -1442,18 +1443,19 @@ def _download_twelvedata(
             )
             return None
 
-        has_gaps = (
-            _has_intraday_gaps(df, asset)
-            if interval == "15m"
-            else _has_daily_gaps(df, asset)
-        )
-        if has_gaps:
-            logger.error(
-                "HISTÓRICO RECHAZADO POR HUECOS | %s | %s",
-                asset,
-                interval,
+        if validate_gaps:
+            has_gaps = (
+                _has_intraday_gaps(df, asset)
+                if interval == "15m"
+                else _has_daily_gaps(df, asset)
             )
-            return None
+            if has_gaps:
+                logger.error(
+                    "HISTÓRICO RECHAZADO POR HUECOS | %s | %s",
+                    asset,
+                    interval,
+                )
+                return None
 
         _log_dataframe_timestamps(
             "Twelve Data FINAL",
@@ -1566,6 +1568,7 @@ def _download_twelvedata_extended(asset, config, interval):
             interval,
             start_date=start.strftime("%Y-%m-%d %H:%M:%S"),
             end_date=end.strftime("%Y-%m-%d %H:%M:%S"),
+            validate_gaps=False,
         )
         if chunk is None or chunk.empty:
             logger.error(
@@ -1584,6 +1587,51 @@ def _download_twelvedata_extended(asset, config, interval):
     if combined is None or len(combined) < 220:
         logger.error("BACKFILL INSUFICIENTE | %s", asset)
         return None
+
+    if asset in CRYPTO_ASSETS:
+        # Repair isolated provider omissions by requesting only the missing
+        # timestamps plus their surrounding candles. Never synthesize OHLC.
+        for repair_round in range(2):
+            timestamps = pd.DatetimeIndex(combined.index).sort_values()
+            differences = timestamps.to_series().diff().dropna()
+            gaps = differences[differences > pd.Timedelta(minutes=15)]
+            if gaps.empty:
+                break
+            if len(gaps) > 20:
+                logger.error(
+                    "BACKFILL REPARACIÓN ABORTADA | %s | %s huecos",
+                    asset,
+                    len(gaps),
+                )
+                break
+
+            repair_frames = []
+            for next_timestamp, gap_size in gaps.items():
+                previous_timestamp = next_timestamp - gap_size
+                repair_start = previous_timestamp
+                repair_end = next_timestamp
+                logger.warning(
+                    "REINTENTO DE VELAS AUSENTES | %s | %s -> %s",
+                    asset,
+                    repair_start.isoformat(),
+                    repair_end.isoformat(),
+                )
+                repair = _download_twelvedata(
+                    asset,
+                    config,
+                    interval,
+                    start_date=repair_start.strftime("%Y-%m-%d %H:%M:%S"),
+                    end_date=repair_end.strftime("%Y-%m-%d %H:%M:%S"),
+                    validate_gaps=False,
+                )
+                if repair is not None and not repair.empty:
+                    repair_frames.append(repair)
+
+            if not repair_frames:
+                break
+            combined = pd.concat([combined, *repair_frames]).sort_index()
+            combined = combined.loc[~combined.index.duplicated(keep="last")]
+            combined = _normalise_dataframe(combined)
 
     if _has_intraday_gaps(combined, asset):
         logger.error(
