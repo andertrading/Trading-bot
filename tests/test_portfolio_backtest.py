@@ -122,6 +122,31 @@ class TestPortfolioBacktest(unittest.TestCase):
         self.assertAlmostEqual(result["summary"]["gross_return_pct"], 1.0)
         self.assertNotIn("net_pnl_usd", result["summary"])
 
+    def test_gross_pnl_uses_actual_exit_price_not_rounded_result_r(self):
+        trade = self.make_trade(
+            asset="BTC",
+            entry=100.0,
+            stop=90.0,
+            score=80,
+            result_R=0.123456,
+        )
+        trade["exit"] = 101.234567
+
+        result = simulate_portfolio([trade], capital_usd=1000.0)
+
+        expected_quantity = 5.0 / 10.0
+        expected_pnl = (101.234567 - 100.0) * expected_quantity
+        self.assertAlmostEqual(
+            result["trades"][0]["realized_pnl_usd"],
+            expected_pnl,
+            places=8,
+        )
+        self.assertAlmostEqual(
+            result["summary"]["gross_pnl_usd"],
+            expected_pnl,
+            places=8,
+        )
+
     def test_net_costs_reduce_equity_and_future_position_sizing(self):
         first = self.make_trade(
             asset="AAPL",
