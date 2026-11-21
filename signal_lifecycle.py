@@ -169,8 +169,8 @@ def advance_signal(signal: dict, now: datetime | str,
             updated["status"] = "TARGET_REACHED"
             event = "TARGET_LEVEL_REACHED"
         elif direction == "SHORT" and price <= target:
-            updated["status"] = "MISSED_ENTRY"
-            event = "TARGET_REACHED_BEFORE_ENTRY"
+            updated["status"] = "TARGET_REACHED"
+            event = "TARGET_LEVEL_REACHED"
         else:
             return updated, None
     else:
