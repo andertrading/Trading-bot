@@ -2171,3 +2171,41 @@ class TestTwelveDataHistoricalWindows(unittest.TestCase):
                 lookback_days=50,
             )
 
+
+
+class TestTwelveDataDateRangeFormatting(unittest.TestCase):
+
+    def test_extended_backfill_uses_documented_space_separated_datetimes(self):
+        start = datetime(2026, 11, 20, 0, 0, tzinfo=timezone.utc)
+        end = datetime(2026, 11, 21, 0, 0, tzinfo=timezone.utc)
+        frame = make_ohlcv(
+            pd.date_range(
+                "2026-11-18T00:00:00Z",
+                periods=220,
+                freq="15min",
+            )
+        )
+        with (
+            patch.object(
+                engine, "twelvedata_history_windows", return_value=[(start, end)]
+            ),
+            patch.object(
+                engine, "_download_twelvedata", return_value=frame
+            ) as download,
+            patch.object(engine, "_normalise_dataframe", return_value=frame),
+            patch.object(engine, "_has_intraday_gaps", return_value=False),
+        ):
+            result = engine._download_twelvedata_extended(
+                "BTC", {"symbol": "BTC/USD"}, "15m"
+            )
+
+        self.assertIsNotNone(result)
+        self.assertEqual(
+            download.call_args.kwargs["start_date"],
+            "2026-11-20 00:00:00",
+        )
+        self.assertEqual(
+            download.call_args.kwargs["end_date"],
+            "2026-11-21 00:00:00",
+        )
+
