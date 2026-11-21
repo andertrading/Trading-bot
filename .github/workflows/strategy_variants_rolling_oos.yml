@@ -122,7 +122,7 @@ jobs:
                   time.sleep(9)
 
           for label, symbol, interval, threshold, days in [
-              ("CSPX 15m", "CSPX.L", "15m", 72, 60),
+              ("CSPX 15m", "CSPX.L", "15m", 72, 55),
               ("CSPX 1d", "CSPX.L", "1d", 96, 400),
           ]:
               payload = get_json(
