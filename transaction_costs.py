@@ -46,6 +46,9 @@ def estimate_etoro_trade_costs(
     quote_to_account=None,
     fx_conversion_fee_pct=None,
     overnight_charge_units=0.0,
+    leverage=1.0,
+    side="BUY",
+    country_code="ES",
 ):
     """Estimate known costs for a long trade; report every unpriced component.
 
@@ -91,6 +94,12 @@ def estimate_etoro_trade_costs(
     execution_type = (
         execution_type or ETORO_EXECUTION_TYPES.get(asset)
     )
+    side = str(side).upper()
+    country_code = str(country_code).upper()
+    if not _finite(leverage) or float(leverage) < 1.0 or side not in {"BUY", "SELL"}:
+        result["unpriced_costs"].append("invalid_leverage_or_side")
+        return result
+    leverage = float(leverage)
     execution_type = str(execution_type or "").upper()
     if execution_type not in {"REAL", "CFD"}:
         result["unpriced_costs"].append("execution_type_unknown")
@@ -180,6 +189,25 @@ def estimate_etoro_trade_costs(
 
     if execution_type == "REAL":
         result["overnight_cost"] = 0.0
+    elif (
+        asset_type in {"STOCK", "ETF"}
+        and side == "BUY"
+        and leverage == 1.0
+    ):
+        result["overnight_cost"] = 0.0
+        result["assumptions"].append(
+            "CFD largo sin apalancamiento en acción/ETF: sin tarifa nocturna según eToro"
+        )
+    elif (
+        asset_type == "CRYPTO"
+        and country_code == "DE"
+        and side == "BUY"
+        and leverage == 1.0
+    ):
+        result["overnight_cost"] = 0.0
+        result["assumptions"].append(
+            "CFD cripto largo sin apalancamiento para cliente alemán: sin tarifa nocturna"
+        )
     elif overnight_charge_units is None:
         result["unpriced_costs"].append("cfd_overnight_charge_units_missing")
     elif not _finite(overnight_charge_units) or float(overnight_charge_units) < 0:
