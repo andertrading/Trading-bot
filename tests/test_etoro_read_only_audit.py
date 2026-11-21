@@ -30,39 +30,21 @@ class FakeAuditClient:
             has_unbounded_stop_risk=False,
         )
 
-    def search_instruments(self, filters, *, page_size=100, page_number=1):
-        self.search_calls.append(dict(filters))
-        field, value = next(iter(filters.items()))
-        if field in self.rejected_fields:
-            raise RuntimeError("simulated unsupported search filter")
-        symbol = value
+    def search_instrument_by_symbol(self, symbol, page_size=100):
+        self.search_calls.append(symbol)
         if symbol in self.missing_symbols:
-            items = []
-        elif field == "internalSymbolFull" and value == "TSLA":
-            items = [{
-                "instrumentId": 123,
-                "displayname": "Tesla",
-                "internalSymbolFull": "TSLA",
-                "instrumentType": "Stock",
-                "isCurrentlyTradable": True,
-                "isActiveInPlatform": True,
-                "isBuyEnabled": True,
-                "isDelisted": False,
-            }]
-        elif field == "displayname" and value == "Tesla":
-            items = [{
-                "instrumentId": 123,
-                "displayname": "Tesla",
-                "internalSymbolFull": "TSLA",
-                "instrumentType": "Stock",
-                "isCurrentlyTradable": True,
-                "isActiveInPlatform": True,
-                "isBuyEnabled": True,
-                "isDelisted": False,
-            }]
+            results = []
         else:
-            items = []
-        return EtoroResponse({"items": items, "totalItems": len(items)}, 200, {})
+            results = [{
+                "instrumentId": 123,
+                "displayName": "Tesla",
+                "symbol": "TSLA",
+                "type": "Stocks",
+            }] if symbol == "TSLA" else []
+        return EtoroResponse({
+            "results": results,
+            "pagination": {"hasNext": False, "nextPageToken": None, "pageSize": page_size},
+        }, 200, {})
 
     def get_validated_instrument_eligibility(self, instrument_ids, currency="USD"):
         return {
@@ -111,20 +93,30 @@ class ReadOnlyAuditTests(unittest.TestCase):
         self.assertEqual(client.quote_calls, [])
 
 
-    def test_search_continues_after_first_filter_error(self):
-        client = FakeAuditClient(rejected_fields={"internalSymbolFull"})
+    def test_audit_uses_exact_v2_symbol_search(self):
+        client = FakeAuditClient()
         report = run_audit(client, self.assets, "USD", self.now)
         self.assertTrue(report["instrument_resolution"][0]["candidate_found"])
-        self.assertEqual(
-            report["instrument_resolution"][0]["resolution_status"], "RESOLVED"
-        )
-        self.assertEqual(
-            client.search_calls,
-            [
-                {"internalSymbolFull": "TSLA"},
-                {"displayname": "Tesla"},
-            ],
-        )
+        self.assertEqual(report["instrument_resolution"][0]["resolution_status"], "RESOLVED")
+        self.assertEqual(client.search_calls, ["TSLA"])
+
+    def test_audit_reports_type_mismatch_without_accepting_instrument(self):
+        class WrongTypeClient(FakeAuditClient):
+            def search_instrument_by_symbol(self, symbol, page_size=100):
+                self.search_calls.append(symbol)
+                return EtoroResponse({
+                    "results": [{
+                        "instrumentId": 123,
+                        "displayName": "Tesla",
+                        "symbol": "TSLA",
+                        "type": "ETF",
+                    }],
+                    "pagination": {"hasNext": False, "nextPageToken": None, "pageSize": page_size},
+                }, 200, {})
+        report = run_audit(WrongTypeClient(), self.assets, "USD", self.now)
+        self.assertFalse(report["instrument_resolution"][0]["candidate_found"])
+        self.assertEqual(report["instrument_resolution"][0]["resolution_status"], "ASSET_TYPE_MISMATCH")
+
 
     def test_account_snapshot_failure_is_redacted_and_blocks_overall_pass(self):
         client = FakeAuditClient(account_ok=False)
@@ -162,7 +154,8 @@ class ReadOnlyAuditTests(unittest.TestCase):
             self.assets, "USD", self.now,
         )
         self.assertEqual(http_report["account_snapshot_status"], "ETORO_HTTP_403")
-        self.assertEqual(position_report["account_snapshot_status"], "INVALID_POSITION_SCHEMA")
+        self.assertEqual(position_report["account_snapshot_status"], "POSITION_MISSING_FIELDS")
+        self.assertEqual(position_report["account_snapshot_missing_fields"], ["cid"])
 
     def test_expected_asset_types_are_read_from_each_asset_not_last_loop_value(self):
         client = FakeAuditClient()
