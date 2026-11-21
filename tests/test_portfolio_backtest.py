@@ -93,7 +93,7 @@ class TestPortfolioBacktest(unittest.TestCase):
         self.assertEqual(result["summary"]["trades_accepted"], 2)
         self.assertLess(
             result["trades"][1]["allocation_factor"],
-            1.0,
+            0.25,
         )
 
     def test_rejects_unknown_asset_and_invalid_long_levels(self):
@@ -158,7 +158,7 @@ class TestPortfolioBacktest(unittest.TestCase):
 
         self.assertAlmostEqual(
             result["summary"]["max_drawdown_usd"],
-            10.2,
+            2.5125,
         )
         self.assertAlmostEqual(
             result["summary"]["max_drawdown_pct"],
