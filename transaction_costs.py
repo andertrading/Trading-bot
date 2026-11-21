@@ -174,13 +174,13 @@ def estimate_etoro_trade_costs(
                 * float(quote_to_account)
             )
 
-    if not _finite(overnight_charge_units):
-        overnight_charge_units = -1.0
-    else:
-        overnight_charge_units = float(overnight_charge_units)
-    if overnight_charge_units < 0:
+    if execution_type == "REAL":
+        result["overnight_cost"] = 0.0
+    elif overnight_charge_units is None:
+        result["unpriced_costs"].append("cfd_overnight_charge_units_missing")
+    elif not _finite(overnight_charge_units) or float(overnight_charge_units) < 0:
         result["unpriced_costs"].append("invalid_overnight_charge_units")
-    elif execution_type == "REAL" or overnight_charge_units == 0:
+    elif float(overnight_charge_units) == 0:
         result["overnight_cost"] = 0.0
     elif asset_type in {"STOCK", "ETF"}:
         rate = ETORO_CFD_OVERNIGHT_USD_PER_1000_PER_DAY.get(asset)
