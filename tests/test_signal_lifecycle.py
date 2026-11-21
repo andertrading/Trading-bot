@@ -97,6 +97,24 @@ class SignalLifecycleTests(unittest.TestCase):
                 candidate(minimum_remaining_risk_fraction=1.5), NOW, 30
             )
 
+    def test_build_signal_rejects_boolean_entry_zone_policy(self):
+        for field in ("minimum_risk_reward", "minimum_remaining_risk_fraction"):
+            with self.subTest(field=field):
+                with self.assertRaises(ValueError):
+                    build_signal_record(candidate(**{field: True}), NOW, 30)
+
+    def test_entry_zone_rejects_corrupted_boolean_policy(self):
+        signal = build_signal_record(candidate(), NOW, 30)
+        signal["minimum_risk_reward"] = True
+        with self.assertRaises(ValueError):
+            advance_signal(signal, NOW + timedelta(minutes=5), latest_price=179.5)
+
+    def test_build_signal_rejects_non_numeric_entry_zone_policy(self):
+        for value in ("not-a-number", None, float("inf"), float("nan")):
+            with self.subTest(value=value):
+                with self.assertRaises(ValueError):
+                    build_signal_record(candidate(minimum_risk_reward=value), NOW, 30)
+
     def test_build_signal_rejects_non_candidate(self):
         with self.assertRaises(ValueError):
             build_signal_record(candidate(action="NO TRADE"), NOW, 30)
