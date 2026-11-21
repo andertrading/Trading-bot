@@ -127,7 +127,7 @@ def normalize_account_snapshot(payload: Mapping[str, Any]) -> EtoroAccountSnapsh
         raise EtoroAPIError("La respuesta de cuenta no es un objeto JSON")
 
     currency_id = payload.get("accountCurrencyId")
-    if isinstance(currency_id, bool) or currency_id != 1:
+    if isinstance(currency_id, bool) or not isinstance(currency_id, int) or currency_id != 1:
         raise EtoroAPIError("La divisa de cuenta no está confirmada como USD (ID 1)")
 
     portfolio = payload.get("clientPortfolio")
