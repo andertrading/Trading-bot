@@ -2390,10 +2390,10 @@ class TestTwelveDataHistoricalWindows(unittest.TestCase):
         windows = engine.twelvedata_history_windows(
             "BTC", end=end, lookback_days=700
         )
-        self.assertEqual(len(windows), 14)
+        self.assertEqual(len(windows), 28)
         self.assertEqual(windows[-1][1], datetime(2026, 11, 21, 3, 15, tzinfo=timezone.utc))
         for start, finish in windows:
-            self.assertEqual(finish - start, timedelta(days=50))
+            self.assertEqual(finish - start, timedelta(days=25))
 
     def test_equity_history_uses_larger_contiguous_windows(self):
         end = datetime(2026, 11, 21, 3, 23, tzinfo=timezone.utc)
@@ -2465,6 +2465,215 @@ class TestTwelveDataDateRangeFormatting(unittest.TestCase):
             "2026-11-21 00:00:00",
         )
 
+
+
+class TestCoinbaseExactCryptoGapRepair(unittest.TestCase):
+
+    def test_coinbase_usd_candles_are_mapped_and_verified_exactly(self):
+        start = pd.Timestamp("2025-02-09T22:00:00Z")
+        end = pd.Timestamp("2025-02-09T23:15:00Z")
+        index = pd.date_range(start, end, freq="15min")
+        candles = [
+            [
+                int(stamp.timestamp()),
+                99.0,
+                102.0,
+                100.0,
+                101.0,
+                12.0,
+            ]
+            for stamp in reversed(index)
+        ]
+
+        class Response:
+            def __init__(self, payload):
+                self.payload = payload
+
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return self.payload
+
+        with patch.object(
+            engine.requests,
+            "get",
+            side_effect=[
+                Response({
+                    "base_currency": "SOL",
+                    "quote_currency": "USD",
+                }),
+                Response(candles),
+            ],
+        ) as request:
+            result = engine._download_coinbase_crypto_gap(
+                "SOL", start, end
+            )
+
+        self.assertIsNotNone(result)
+        self.assertTrue(result.index.equals(index))
+        self.assertAlmostEqual(result.iloc[0]["Open"], 100.0)
+        self.assertAlmostEqual(result.iloc[-1]["Close"], 101.0)
+        self.assertTrue(result.attrs["price_adjustment_verified"])
+        self.assertIn("Coinbase Exchange", result.attrs["price_source_detail"])
+        self.assertEqual(request.call_count, 2)
+
+    def test_coinbase_full_history_paginates_and_records_provider(self):
+        end = pd.Timestamp("2025-02-10T00:00:00Z")
+        candle_end = end - pd.Timedelta(minutes=15)
+        start = candle_end - pd.Timedelta(days=1) + pd.Timedelta(minutes=15)
+        index = pd.date_range(start, candle_end, freq="15min")
+        candles = [
+            [
+                int(stamp.timestamp()),
+                99.0,
+                102.0,
+                100.0,
+                101.0,
+                12.0,
+            ]
+            for stamp in reversed(index)
+        ]
+
+        class Response:
+            def __init__(self, payload):
+                self.payload = payload
+                self.status_code = 200
+
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return self.payload
+
+        with (
+            patch.object(
+                engine.requests,
+                "get",
+                side_effect=[
+                    Response({
+                        "base_currency": "SOL",
+                        "quote_currency": "USD",
+                    }),
+                    Response(candles),
+                ],
+            ) as request,
+            patch.object(engine.time, "sleep"),
+        ):
+            result = engine._download_coinbase_crypto_history(
+                "SOL", lookback_days=1, end=end
+            )
+
+        self.assertIsNotNone(result)
+        self.assertTrue(result.index.equals(index))
+        self.assertEqual(len(result), 96)
+        self.assertEqual(result.attrs["provider"], "coinbase_exchange")
+        self.assertTrue(result.attrs["price_adjustment_verified"])
+        self.assertEqual(request.call_count, 2)
+
+    def test_coinbase_full_history_repairs_missing_candle_from_twelve_data(self):
+        end = pd.Timestamp("2025-02-10T00:00:00Z")
+        candle_end = end - pd.Timedelta(minutes=15)
+        start = candle_end - pd.Timedelta(days=1) + pd.Timedelta(minutes=15)
+        index = pd.date_range(start, candle_end, freq="15min")
+        missing_stamp = index[20]
+        coinbase_index = index.delete(20)
+        candles = [
+            [
+                int(stamp.timestamp()),
+                99.0,
+                102.0,
+                100.0,
+                101.0,
+                12.0,
+            ]
+            for stamp in reversed(coinbase_index)
+        ]
+        repair_frame = make_ohlcv([missing_stamp])
+
+        class Response:
+            def __init__(self, payload):
+                self.payload = payload
+                self.status_code = 200
+
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return self.payload
+
+        with (
+            patch.dict("os.environ", {"TWELVE_DATA_API_KEY": "test"}),
+            patch.object(
+                engine.requests,
+                "get",
+                side_effect=[
+                    Response({
+                        "base_currency": "SOL",
+                        "quote_currency": "USD",
+                    }),
+                    Response(candles),
+                ],
+            ),
+            patch.object(
+                engine,
+                "_download_twelvedata",
+                return_value=repair_frame,
+            ) as twelve,
+            patch.object(engine.time, "sleep"),
+        ):
+            result = engine._download_coinbase_crypto_history(
+                "SOL", lookback_days=1, end=end
+            )
+
+        self.assertIsNotNone(result)
+        self.assertTrue(result.index.equals(index))
+        self.assertEqual(result.attrs["provider"], "coinbase_exchange+twelvedata_gap_repair")
+        twelve.assert_called_once()
+        self.assertFalse(twelve.call_args.kwargs["validate_gaps"])
+
+    def test_coinbase_gap_repair_rejects_incomplete_candle_coverage(self):
+        start = pd.Timestamp("2025-02-09T22:00:00Z")
+        end = pd.Timestamp("2025-02-09T23:15:00Z")
+        index = pd.date_range(start, end, freq="15min").delete(2)
+        candles = [
+            [
+                int(stamp.timestamp()),
+                99.0,
+                102.0,
+                100.0,
+                101.0,
+                12.0,
+            ]
+            for stamp in reversed(index)
+        ]
+
+        class Response:
+            def __init__(self, payload):
+                self.payload = payload
+
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return self.payload
+
+        with patch.object(
+            engine.requests,
+            "get",
+            side_effect=[
+                Response({
+                    "base_currency": "SOL",
+                    "quote_currency": "USD",
+                }),
+                Response(candles),
+            ],
+        ):
+            result = engine._download_coinbase_crypto_gap(
+                "SOL", start, end
+            )
+
+        self.assertIsNone(result)
 
 
 if __name__ == "__main__":

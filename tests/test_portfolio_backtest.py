@@ -122,6 +122,113 @@ class TestPortfolioBacktest(unittest.TestCase):
         self.assertAlmostEqual(result["summary"]["gross_return_pct"], 1.0)
         self.assertNotIn("net_pnl_usd", result["summary"])
 
+    def test_gross_pnl_uses_actual_exit_price_not_rounded_result_r(self):
+        trade = self.make_trade(
+            asset="BTC",
+            entry=100.0,
+            stop=90.0,
+            score=80,
+            result_R=0.123456,
+        )
+        trade["exit"] = 101.234567
+
+        result = simulate_portfolio([trade], capital_usd=1000.0)
+
+        expected_quantity = 5.0 / 10.0
+        expected_pnl = (101.234567 - 100.0) * expected_quantity
+        self.assertAlmostEqual(
+            result["trades"][0]["realized_pnl_usd"],
+            expected_pnl,
+            places=8,
+        )
+        self.assertAlmostEqual(
+            result["summary"]["gross_pnl_usd"],
+            expected_pnl,
+            places=8,
+        )
+
+    def test_net_costs_reduce_equity_and_future_position_sizing(self):
+        first = self.make_trade(
+            asset="AAPL",
+            entry_time="2026-01-01T10:00:00Z",
+            exit_time="2026-01-01T11:00:00Z",
+            result_R=1.0,
+        )
+        second = self.make_trade(
+            asset="MSFT",
+            entry_time="2026-01-01T12:00:00Z",
+            exit_time="2026-01-01T13:00:00Z",
+            result_R=0.0,
+        )
+
+        gross = simulate_portfolio([first, second], capital_usd=1000.0)
+        net = simulate_portfolio(
+            [first, second],
+            capital_usd=1000.0,
+            execution_costs={"venue": "ETORO_REAL", "spread_bps": 0},
+        )
+
+        self.assertAlmostEqual(gross["trades"][1]["allocated_risk_usd"], 5.025)
+        self.assertAlmostEqual(net["trades"][1]["allocated_risk_usd"], 5.015)
+        self.assertAlmostEqual(net["summary"]["gross_pnl_usd"], 5.0)
+        self.assertAlmostEqual(net["summary"]["total_entry_cost_usd"], 2.0)
+        self.assertAlmostEqual(net["summary"]["total_exit_cost_usd"], 2.0)
+        self.assertAlmostEqual(net["summary"]["net_pnl_usd"], 1.0)
+        self.assertAlmostEqual(net["summary"]["ending_equity_usd"], 1001.0)
+        self.assertTrue(net["summary"]["costs_included"])
+        self.assertEqual(net["summary"]["pnl_basis"], "NET_AFTER_ASSUMED_COSTS")
+
+
+    def test_crypto_exit_cost_reserve_uses_expected_exit_notional_and_spread(self):
+        trade = self.make_trade(
+            asset="BTC",
+            entry=100.0,
+            stop=90.0,
+            result_R=10.0,
+        )
+        trade["exit"] = 200.0
+
+        result = simulate_portfolio(
+            [trade],
+            capital_usd=1000.0,
+            execution_costs={"venue": "ETORO_REAL", "spread_bps": 100},
+        )
+
+        position = result["trades"][0]
+        quantity = position["quantity"]
+        expected_exit_notional = 200.0 * quantity
+        expected_exit_cost = expected_exit_notional * 0.01
+        expected_exit_cost += expected_exit_notional * 100 / 20000.0
+        self.assertAlmostEqual(
+            position["reserved_exit_cost_usd"],
+            expected_exit_cost,
+            places=8,
+        )
+        self.assertGreater(
+            position["reserved_exit_cost_usd"],
+            position["entry_cost_usd"],
+        )
+
+    def test_crypto_commission_is_charged_on_entry_and_exit_notional(self):
+        trade = self.make_trade(
+            asset="BTC",
+            entry=100.0,
+            stop=90.0,
+            result_R=1.0,
+        )
+        trade["exit"] = 110.0
+        result = simulate_portfolio(
+            [trade],
+            capital_usd=1000.0,
+            execution_costs={"venue": "ETORO_REAL", "spread_bps": 0},
+        )
+
+        self.assertAlmostEqual(result["summary"]["gross_pnl_usd"], 5.0)
+        self.assertAlmostEqual(result["summary"]["total_entry_cost_usd"], 0.5)
+        self.assertAlmostEqual(result["summary"]["total_exit_cost_usd"], 0.55)
+        self.assertAlmostEqual(result["summary"]["net_pnl_usd"], 3.95)
+        self.assertAlmostEqual(result["trades"][0]["net_realized_pnl_usd"], 3.95)
+
     def test_simultaneous_exits_are_aggregated_for_drawdown(self):
         winning = self.make_trade(
             asset="AAPL",
@@ -206,6 +313,98 @@ class TestPortfolioBacktest(unittest.TestCase):
         self.assertEqual(len(later_rejection), 1)
         self.assertEqual(
             later_rejection[0]["reason"],
+            "limite_de_riesgo_o_capital_disponible",
+        )
+
+    def test_crypto_commission_rate_can_be_overridden_per_asset(self):
+        btc = self.make_trade(
+            asset="BTC",
+            entry=100.0,
+            stop=90.0,
+            score=80,
+            result_R=1.0,
+        )
+        xlm = self.make_trade(
+            asset="XLM",
+            entry=100.0,
+            stop=90.0,
+            score=80,
+            result_R=1.0,
+        )
+        btc["exit"] = 110.0
+        xlm["exit"] = 110.0
+
+        result = simulate_portfolio(
+            [btc, xlm],
+            capital_usd=1000.0,
+            execution_costs={
+                "venue": "ETORO_REAL",
+                "spread_bps": 0,
+                "crypto_rate_per_side": 0.01,
+                "crypto_rate_by_asset": {
+                    "BTC": 0.0005,
+                    "XLM": 0.0015,
+                },
+            },
+        )
+
+        self.assertAlmostEqual(result["summary"]["total_entry_cost_usd"], 0.1)
+        self.assertAlmostEqual(result["summary"]["total_exit_cost_usd"], 0.11)
+        self.assertAlmostEqual(result["summary"]["gross_pnl_usd"], 10.0)
+        self.assertAlmostEqual(result["summary"]["net_pnl_usd"], 9.79)
+
+    def test_entry_commission_is_reserved_against_available_cash(self):
+        trade = self.make_trade(
+            asset="BTC",
+            entry=100.0,
+            stop=99.9,
+            score=80,
+            result_R=0.0,
+        )
+        result = simulate_portfolio(
+            [trade],
+            capital_usd=100.0,
+            execution_costs={
+                "venue": "ETORO_REAL",
+                "crypto_rate_per_side": 0.10,
+                "spread_bps": 0,
+            },
+        )
+
+        position = result["trades"][0]
+        committed_cash = (
+            position["notional_usd"]
+            + position["entry_cost_usd"]
+            + position["reserved_exit_cost_usd"]
+        )
+        self.assertLessEqual(committed_cash, 100.0 + 1e-8)
+        self.assertLess(position["notional_usd"], 100.0)
+        self.assertAlmostEqual(result["summary"]["ending_equity_usd"], 83.33333333, places=7)
+
+    def test_exit_fee_reserve_prevents_fixed_commission_overdraw(self):
+        trade = self.make_trade(
+            asset="AAPL",
+            entry=100.0,
+            stop=90.0,
+            score=80,
+            result_R=-1.0,
+        )
+        trade["exit"] = 1.0
+
+        result = simulate_portfolio(
+            [trade],
+            capital_usd=2.0,
+            execution_costs={
+                "venue": "ETORO_REAL",
+                "stock_fee_per_side_usd": 1.0,
+                "spread_bps": 0,
+            },
+        )
+
+        self.assertEqual(result["summary"]["trades_accepted"], 0)
+        self.assertAlmostEqual(result["summary"]["ending_equity_usd"], 2.0)
+        self.assertEqual(
+            result["rejections"][0]["reason"],
             "limite_de_riesgo_o_capital_disponible",
         )
 

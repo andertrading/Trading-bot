@@ -6,10 +6,15 @@ on:
       - research/fixed-common-calendar-oos-20261121
       - research/explicit-universe-coverage-20261121
       - research/broker-cost-sensitivity-20261121
+      - research/history-calendar-audit-20261121
 
 permissions:
   contents: read
   actions: read
+
+concurrency:
+  group: strategy-research-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   research:
@@ -52,6 +57,173 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+      - name: Recover missing SOL 15m snapshot from Coinbase USD history
+        env:
+          TWELVE_DATA_API_KEY: ${{ secrets.TWELVE_DATA_API_KEY }}
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          import backtest_v3
+          import data_engine
+
+          source_dir = Path("sources/base/historicos_backtest_extended")
+          manifest_path = source_dir / "manifest.json"
+          manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+          if any(
+              item.get("asset") == "SOL" and item.get("timeframe") == "15m"
+              for item in manifest
+          ):
+              print("SOL 15m already exists in the source manifest; no replacement.")
+              raise SystemExit(0)
+
+          frame = data_engine._download_coinbase_crypto_history(
+              "SOL", lookback_days=700
+          )
+          if frame is None or frame.empty:
+              raise SystemExit(
+                  "Coinbase SOL-USD 15m history is incomplete or invalid; "
+                  "the universe remains explicitly partial."
+              )
+
+          backtest_v3.SNAPSHOT_DIR = source_dir
+          backtest_v3.SNAPSHOT_MANIFEST = list(manifest)
+          metadata = backtest_v3._save_snapshot(
+              "SOL", "SOL-USD", "15m", frame
+          )
+          if (
+              not metadata
+              or metadata.get("row_count", 0) < 60000
+              or not str(metadata.get("provider", "")).startswith("coinbase_exchange")
+          ):
+              raise SystemExit("SOL 15m snapshot metadata validation failed.")
+          backtest_v3._write_snapshot_manifest()
+          print(
+              "SOL 15m recovered:",
+              metadata["row_count"],
+              metadata["first_timestamp"],
+              "->",
+              metadata["last_timestamp"],
+              "| provider=",
+              metadata["provider"],
+          )
+          PY
+
+      - name: Probe current market-data provider timestamps
+        continue-on-error: true
+        env:
+          TWELVE_DATA_API_KEY: ${{ secrets.TWELVE_DATA_API_KEY }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import time
+          from datetime import datetime, timezone
+          from urllib.parse import urlencode
+          from urllib.request import Request, urlopen
+
+          key = os.environ.get("TWELVE_DATA_API_KEY")
+          if not key:
+              raise SystemExit("TWELVE_DATA_API_KEY secret is missing")
+          now = datetime.now(timezone.utc)
+          results = []
+
+          def get_json(url, params):
+              request = Request(
+                  url + "?" + urlencode(params),
+                  headers={"User-Agent": "TradingBot-Research-Freshness/1.0"},
+              )
+              with urlopen(request, timeout=30) as response:
+                  return json.loads(response.read().decode("utf-8"))
+
+          def record(label, provider, stamp, threshold_hours):
+              latest = datetime.fromisoformat(str(stamp).replace("Z", "+00:00"))
+              if latest.tzinfo is None:
+                  latest = latest.replace(tzinfo=timezone.utc)
+              latest = latest.astimezone(timezone.utc)
+              age = (now - latest).total_seconds() / 3600
+              fresh = age <= threshold_hours
+              results.append({
+                  "series": label, "provider": provider,
+                  "latest_timestamp_utc": latest.isoformat(),
+                  "age_hours": round(age, 2),
+                  "threshold_hours": threshold_hours, "fresh": fresh,
+              })
+              print(
+                  f"{label}: {latest.isoformat()} age={age:.2f}h "
+                  f"threshold={threshold_hours}h status={'FRESH' if fresh else 'STALE'}"
+              )
+
+          for i, (label, symbol, interval, threshold) in enumerate([
+              ("AAPL 15m", "AAPL", "15min", 72),
+              ("AAPL 1d", "AAPL", "1day", 96),
+              ("BTC 15m", "BTC/USD", "15min", 0.75),
+              ("BTC 1d", "BTC/USD", "1day", 48),
+          ]):
+              try:
+                  payload = get_json(
+                      "https://api.twelvedata.com/time_series",
+                      {
+                          "symbol": symbol, "interval": interval,
+                          "outputsize": 2, "timezone": "UTC", "apikey": key,
+                      },
+                  )
+                  values = payload.get("values") or []
+                  if not values or not values[0].get("datetime"):
+                      raise ValueError(
+                          f"no provider timestamp; code={payload.get('code')} "
+                          f"message={payload.get('message')}"
+                      )
+                  record(label, "Twelve Data", values[0]["datetime"], threshold)
+              except Exception as exc:
+                  results.append({
+                      "series": label, "provider": "Twelve Data",
+                      "fresh": False, "error": f"{type(exc).__name__}: {exc}",
+                  })
+                  print(f"{label}: PROVIDER ERROR {type(exc).__name__}: {exc}")
+              if i < 3:
+                  time.sleep(9)
+
+          for label, symbol, interval, threshold, days in [
+              ("CSPX 15m", "CSPX.L", "15m", 72, 55),
+              ("CSPX 1d", "CSPX.L", "1d", 96, 400),
+          ]:
+              try:
+                  payload = get_json(
+                      f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}",
+                      {
+                          "period1": int(now.timestamp() - days * 86400),
+                          "period2": int(now.timestamp()),
+                          "interval": interval, "events": "history",
+                          "includeAdjustedClose": "true",
+                      },
+                  )
+                  chart = payload.get("chart") or {}
+                  series = chart.get("result") or []
+                  timestamps = series[0].get("timestamp") if series else None
+                  if chart.get("error") or not timestamps:
+                      raise ValueError("Yahoo returned no usable timestamps")
+                  latest = datetime.fromtimestamp(timestamps[-1], timezone.utc)
+                  record(label, "Yahoo Finance", latest.isoformat(), threshold)
+              except Exception as exc:
+                  results.append({
+                      "series": label, "provider": "Yahoo Finance",
+                      "fresh": False, "error": f"{type(exc).__name__}: {exc}",
+                  })
+                  print(f"{label}: PROVIDER ERROR {type(exc).__name__}: {exc}")
+
+          report = {
+              "generated_at_utc": now.isoformat(),
+              "status": "FRESH" if all(row["fresh"] for row in results) else "STALE",
+              "results": results,
+          }
+          with open("provider_freshness.json", "w", encoding="utf-8") as output:
+              json.dump(report, output, indent=2)
+          print("Provider freshness summary:", report["status"])
+          PY
+
 
       - name: Merge immutable snapshots and compile research harness
         run: |
@@ -119,9 +291,84 @@ jobs:
               raise SystemExit("No snapshots available for research")
           PY
           python -m py_compile strategy_research.py
+          python -m unittest discover -s tests -p "test_data_engine.py" -v
+          python -m unittest discover -s tests -p "test_backtest_v3.py" -v
           python -m unittest discover -s tests -p "test_strategy_research.py" -v
           python -m unittest discover -s tests -p "test_portfolio_backtest.py" -v
           python -m unittest discover -s tests -p "test_transaction_costs.py" -v
+
+      - name: Audit internal candle gaps across every immutable snapshot
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          import pandas as pd
+          import data_engine
+
+          root = Path("historicos_full_merged")
+          manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
+          results = []
+          failures = []
+
+          for item in manifest:
+              asset = str(item["asset"]).upper()
+              timeframe = str(item["timeframe"]).lower()
+              path = root / f"{asset}__{timeframe}.csv"
+              frame = pd.read_csv(path, parse_dates=["timestamp"])
+              if "timestamp" not in frame.columns or frame.empty:
+                  failures.append({
+                      "asset": asset, "timeframe": timeframe,
+                      "reason": "missing_or_empty_timestamp_data",
+                  })
+                  continue
+              frame = frame.set_index("timestamp")
+              frame.index = pd.DatetimeIndex(
+                  pd.to_datetime(frame.index, utc=True, errors="coerce")
+              )
+              if frame.index.hasnans or frame.index.has_duplicates:
+                  failures.append({
+                      "asset": asset, "timeframe": timeframe,
+                      "reason": "invalid_or_duplicate_timestamps",
+                  })
+                  continue
+
+              has_gaps = (
+                  data_engine._has_intraday_gaps(frame, asset)
+                  if timeframe == "15m"
+                  else data_engine._has_daily_gaps(frame, asset)
+              )
+              row = {
+                  "asset": asset,
+                  "timeframe": timeframe,
+                  "rows": len(frame),
+                  "first_timestamp_utc": frame.index[0].isoformat(),
+                  "last_timestamp_utc": frame.index[-1].isoformat(),
+                  "gap_free": not has_gaps,
+              }
+              results.append(row)
+              if has_gaps:
+                  failures.append({
+                      "asset": asset, "timeframe": timeframe,
+                      "reason": "internal_candle_gap_or_incomplete_session",
+                  })
+
+          report = {
+              "status": "PASS" if not failures and len(results) == 24 else "FAIL",
+              "expected_series": 24,
+              "audited_series": len(results),
+              "gap_free_series": sum(row["gap_free"] for row in results),
+              "results": results,
+              "failures": failures,
+          }
+          Path("snapshot_quality.json").write_text(
+              json.dumps(report, ensure_ascii=False, indent=2),
+              encoding="utf-8",
+          )
+          print(json.dumps(report, ensure_ascii=False))
+          if report["status"] != "PASS":
+              raise SystemExit("Snapshot gap audit failed; do not trust OOS metrics.")
+          PY
 
       - name: Run fixed strategy hypotheses with chronological walk-forward split
         run: python strategy_research.py
@@ -144,3 +391,12 @@ jobs:
             strategy_research_status.json
             snapshot_coverage.json
             strategy_research_broker_cost_scenarios.csv
+            strategy_research_history_calendar_coverage.csv
+            strategy_research_synchronized_broker_cost_scenarios.csv
+            strategy_research_net_aware_portfolio.csv
+            strategy_research_synchronized_calendar.csv
+            strategy_research_core_history_calendar_coverage.csv
+            strategy_research_core_synchronized_calendar.csv
+            strategy_research_core_net_aware_portfolio.csv
+            provider_freshness.json
+            snapshot_quality.json

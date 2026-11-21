@@ -892,12 +892,15 @@ def _has_intraday_gaps(df, asset):
     if asset in CRYPTO_ASSETS:
         differences = timestamps.to_series().diff().dropna()
 
-        if not (
-            differences == pd.Timedelta(minutes=15)
-        ).all():
+        invalid = differences[differences != pd.Timedelta(minutes=15)]
+        if not invalid.empty:
+            first_position = differences.index.get_loc(invalid.index[0])
             logger.error(
-                "HUECO INTRADIA | %s | mercado cripto",
+                "HUECO INTRADIA | %s | mercado cripto | anterior=%s | siguiente=%s | intervalo=%s",
                 asset,
+                timestamps[first_position],
+                invalid.index[0],
+                invalid.iloc[0],
             )
             return True
 
@@ -1213,28 +1216,52 @@ def _log_dataframe_timestamps(provider, asset, interval, df):
 def _twelvedata_request(params):
     global _last_api_request
 
-    with _api_lock:
-        elapsed = time.monotonic() - _last_api_request
-        wait_time = TWELVE_DATA_MIN_INTERVAL - elapsed
+    for attempt in range(3):
+        with _api_lock:
+            elapsed = time.monotonic() - _last_api_request
+            wait_time = TWELVE_DATA_MIN_INTERVAL - elapsed
 
-        if wait_time > 0:
-            logger.info(
-                "Límite Twelve Data: esperando %.1f segundos",
-                wait_time,
+            if wait_time > 0:
+                logger.info(
+                    "Límite Twelve Data: esperando %.1f segundos",
+                    wait_time,
+                )
+                time.sleep(wait_time)
+
+            _last_api_request = time.monotonic()
+            response = requests.get(
+                TWELVE_DATA_URL,
+                params=params,
+                timeout=30,
             )
-            time.sleep(wait_time)
 
-        _last_api_request = time.monotonic()
+        if response.status_code != 429 and response.status_code < 500:
+            return response
 
-        return requests.get(
-            TWELVE_DATA_URL,
-            params=params,
-            timeout=30,
+        if attempt == 2:
+            return response
+
+        retry_after = response.headers.get("Retry-After")
+        try:
+            retry_delay = float(retry_after)
+        except (TypeError, ValueError):
+            retry_delay = 10.0 * (2 ** attempt)
+
+        retry_delay = min(max(retry_delay, 1.0), 60.0)
+        logger.warning(
+            "Twelve Data HTTP %s; reintento %s/2 en %.1f segundos",
+            response.status_code,
+            attempt + 1,
+            retry_delay,
         )
+        time.sleep(retry_delay)
+
+    return response
 
 
 def _download_twelvedata(
-    asset, config, interval, start_date=None, end_date=None
+    asset, config, interval, start_date=None, end_date=None,
+    validate_gaps=True,
 ):
     api_key = os.getenv("TWELVE_DATA_API_KEY")
 
@@ -1431,7 +1458,7 @@ def _download_twelvedata(
             asset,
         )
 
-        if df is None or len(df) < 220:
+        if df is None or (validate_gaps and len(df) < 220):
             logger.warning(
                 "Histórico insuficiente para %s %s",
                 asset,
@@ -1439,18 +1466,19 @@ def _download_twelvedata(
             )
             return None
 
-        has_gaps = (
-            _has_intraday_gaps(df, asset)
-            if interval == "15m"
-            else _has_daily_gaps(df, asset)
-        )
-        if has_gaps:
-            logger.error(
-                "HISTÓRICO RECHAZADO POR HUECOS | %s | %s",
-                asset,
-                interval,
+        if validate_gaps:
+            has_gaps = (
+                _has_intraday_gaps(df, asset)
+                if interval == "15m"
+                else _has_daily_gaps(df, asset)
             )
-            return None
+            if has_gaps:
+                logger.error(
+                    "HISTÓRICO RECHAZADO POR HUECOS | %s | %s",
+                    asset,
+                    interval,
+                )
+                return None
 
         _log_dataframe_timestamps(
             "Twelve Data FINAL",
@@ -1469,10 +1497,11 @@ def _download_twelvedata(
 
         return df
 
-    except requests.RequestException:
+    except requests.RequestException as exc:
         logger.error(
-            "Error de conexión Twelve Data para %s",
+            "Error de conexión Twelve Data para %s: %s",
             asset,
+            exc,
         )
         return None
 
@@ -1509,9 +1538,11 @@ def twelvedata_history_windows(asset, end=None, lookback_days=700):
     )
     start_utc = end_utc - timedelta(days=lookback_days)
 
-    # 50 calendar days produce at most 4,800 crypto 15m bars.
+    # Smaller crypto windows reduce provider-side truncation and make
+    # isolated historical gaps easier to diagnose while staying below
+    # Twelve Data's 5,000-bar request ceiling.
     # 180 calendar days stay comfortably below 5,000 US-equity session bars.
-    chunk_days = 50 if asset in CRYPTO_ASSETS else 180
+    chunk_days = 25 if asset in CRYPTO_ASSETS else 180
     windows = []
     cursor = start_utc
 
@@ -1521,6 +1552,325 @@ def twelvedata_history_windows(asset, end=None, lookback_days=700):
         cursor = chunk_end
 
     return windows
+
+
+def _download_coinbase_crypto_history(
+    asset, lookback_days=700, end=None
+):
+    """Download a complete USD-quoted 15m crypto history for research replay."""
+    if asset not in CRYPTO_ASSETS:
+        raise ValueError("Coinbase historical fallback is limited to crypto assets")
+    if (
+        isinstance(lookback_days, bool)
+        or not isinstance(lookback_days, int)
+        or lookback_days <= 0
+    ):
+        raise ValueError("lookback_days must be a positive integer")
+
+    if end is None:
+        end_utc = pd.Timestamp(datetime.now(timezone.utc))
+    else:
+        end_utc = pd.Timestamp(end)
+    if end_utc.tzinfo is None:
+        raise ValueError("end must be timezone-aware")
+    end_utc = end_utc.tz_convert("UTC")
+    # End at the most recent fully closed 15m candle, not the live candle.
+    end_utc = end_utc.floor("15min") - pd.Timedelta(minutes=15)
+    # Match the completed-candle convention used by the other crypto
+    # snapshots: first timestamp is one interval after the lookback boundary.
+    start_utc = (
+        end_utc - pd.Timedelta(days=lookback_days)
+        + pd.Timedelta(minutes=15)
+    )
+
+    product_id = f"{asset}-USD"
+    base_url = "https://api.exchange.coinbase.com"
+    headers = {
+        "Accept": "application/json",
+        "User-Agent": "TradingBot-Historical-Research/1.0",
+    }
+
+    try:
+        product_response = requests.get(
+            f"{base_url}/products/{product_id}",
+            headers=headers,
+            timeout=20,
+        )
+        product_response.raise_for_status()
+        product = product_response.json()
+        if (
+            str(product.get("base_currency", "")).upper() != asset
+            or str(product.get("quote_currency", "")).upper() != "USD"
+        ):
+            logger.error(
+                "COINBASE PAR NO VERIFICADO | %s | %s",
+                asset,
+                product_id,
+            )
+            return None
+
+        # Coinbase caps a response at 300 candles. Use 299 inclusive
+        # timestamps per request and overlap one boundary for safe stitching.
+        chunk_duration = pd.Timedelta(minutes=15 * 298)
+        frames = []
+        cursor = start_utc
+        request_count = 0
+
+        while cursor <= end_utc:
+            chunk_end = min(cursor + chunk_duration, end_utc)
+            response = requests.get(
+                f"{base_url}/products/{product_id}/candles",
+                params={
+                    "granularity": 900,
+                    "start": cursor.isoformat().replace("+00:00", "Z"),
+                    "end": chunk_end.isoformat().replace("+00:00", "Z"),
+                },
+                headers=headers,
+                timeout=30,
+            )
+            if response.status_code == 429:
+                retry_after = response.headers.get("Retry-After", "2")
+                try:
+                    delay = min(max(float(retry_after), 1.0), 30.0)
+                except (TypeError, ValueError):
+                    delay = 2.0
+                logger.warning(
+                    "Coinbase HTTP 429 | %s | espera %.1f segundos",
+                    asset,
+                    delay,
+                )
+                time.sleep(delay)
+                response = requests.get(
+                    f"{base_url}/products/{product_id}/candles",
+                    params={
+                        "granularity": 900,
+                        "start": cursor.isoformat().replace("+00:00", "Z"),
+                        "end": chunk_end.isoformat().replace("+00:00", "Z"),
+                    },
+                    headers=headers,
+                    timeout=30,
+                )
+            response.raise_for_status()
+            values = response.json()
+            if not isinstance(values, list) or not values:
+                logger.error(
+                    "COINBASE HISTÓRICO VACÍO | %s | %s -> %s",
+                    asset,
+                    cursor.isoformat(),
+                    chunk_end.isoformat(),
+                )
+                return None
+
+            frame = pd.DataFrame(
+                values,
+                columns=[
+                    "timestamp", "Low", "High", "Open", "Close", "Volume"
+                ],
+            )
+            frame["timestamp"] = pd.to_datetime(
+                frame["timestamp"], unit="s", utc=True, errors="coerce"
+            )
+            frame = frame.set_index("timestamp").sort_index()
+            frame = frame.loc[
+                (frame.index >= cursor) & (frame.index <= chunk_end)
+            ]
+            frame = _normalise_dataframe(frame)
+            if frame is None or frame.empty:
+                return None
+            frames.append(frame)
+            request_count += 1
+            cursor = chunk_end + pd.Timedelta(minutes=15)
+            time.sleep(0.15)
+
+        combined = pd.concat(frames).sort_index()
+        combined = combined.loc[~combined.index.duplicated(keep="last")]
+        combined = _normalise_dataframe(combined)
+        if combined is None:
+            return None
+
+        expected = pd.date_range(start_utc, end_utc, freq="15min")
+        missing = expected.difference(combined.index)
+        twelvedata_repair_used = False
+
+        if len(missing) and os.getenv("TWELVE_DATA_API_KEY"):
+            # Coinbase omits buckets with no published candle. Retry only
+            # 25-day windows containing missing timestamps, then copy only
+            # those exact USD candles into the Coinbase primary history.
+            repair_windows = {}
+            window_duration = pd.Timedelta(days=25)
+            for stamp in missing:
+                offset_seconds = (stamp - start_utc).total_seconds()
+                window_number = int(
+                    offset_seconds // window_duration.total_seconds()
+                )
+                window_start = start_utc + window_duration * window_number
+                window_end = min(window_start + window_duration, end_utc)
+                repair_windows.setdefault(
+                    (window_start, window_end), []
+                ).append(stamp)
+
+            for (repair_start, repair_end), missing_group in sorted(
+                repair_windows.items()
+            ):
+                repair = _download_twelvedata(
+                    asset,
+                    ASSETS[asset],
+                    "15m",
+                    start_date=repair_start.strftime("%Y-%m-%d %H:%M:%S"),
+                    end_date=repair_end.strftime("%Y-%m-%d %H:%M:%S"),
+                    validate_gaps=False,
+                )
+                if repair is None or repair.empty:
+                    continue
+                repair = repair.loc[repair.index.isin(missing_group)]
+                if not repair.empty:
+                    combined = pd.concat([combined, repair]).sort_index()
+                    combined = combined.loc[
+                        ~combined.index.duplicated(keep="last")
+                    ]
+                    combined = _normalise_dataframe(combined)
+                    twelvedata_repair_used = True
+
+            missing = expected.difference(combined.index)
+
+        if len(missing):
+            logger.error(
+                "COINBASE HISTÓRICO INCOMPLETO | %s | esperadas=%s | recibidas=%s | faltantes=%s | primeros=%s",
+                asset,
+                len(expected),
+                len(combined),
+                len(missing),
+                [stamp.isoformat() for stamp in missing[:20]],
+            )
+            _has_intraday_gaps(combined, asset)
+            return None
+
+        if _has_intraday_gaps(combined, asset):
+            logger.error(
+                "COINBASE HISTÓRICO RECHAZADO POR HUECOS | %s",
+                asset,
+            )
+            return None
+
+        combined.attrs["price_adjustment_policy"] = "raw_unadjusted_intraday"
+        combined.attrs["price_adjustment_verified"] = True
+        combined.attrs["provider"] = (
+            "coinbase_exchange+twelvedata_gap_repair"
+            if twelvedata_repair_used
+            else "coinbase_exchange"
+        )
+        combined.attrs["price_source_detail"] = (
+            "Coinbase Exchange public USD spot candles; 15m UTC; "
+            f"{request_count} paginated requests; "
+            + (
+                "missing timestamps repaired from Twelve Data USD candles; "
+                if twelvedata_repair_used else ""
+            )
+            + "exact continuous coverage"
+        )
+        logger.info(
+            "COINBASE EXTENDED HISTORY OK | %s | %s velas | %s -> %s | requests=%s",
+            asset,
+            len(combined),
+            combined.index[0].isoformat(),
+            combined.index[-1].isoformat(),
+            request_count,
+        )
+        return combined
+    except (requests.RequestException, ValueError, TypeError, KeyError) as exc:
+        logger.exception("COINBASE EXTENDED HISTORY FAILED | %s | %s", asset, exc)
+        return None
+
+
+def _download_coinbase_crypto_gap(asset, start, end):
+    """Fetch a missing historical USD-quoted crypto interval without synthesis."""
+    if asset not in CRYPTO_ASSETS:
+        return None
+
+    product_id = f"{asset}-USD"
+    base_url = "https://api.exchange.coinbase.com"
+    headers = {
+        "Accept": "application/json",
+        "User-Agent": "TradingBot-Historical-Research/1.0",
+    }
+    start_utc = pd.Timestamp(start).tz_convert("UTC")
+    end_utc = pd.Timestamp(end).tz_convert("UTC")
+
+    try:
+        product_response = requests.get(
+            f"{base_url}/products/{product_id}",
+            headers=headers,
+            timeout=20,
+        )
+        product_response.raise_for_status()
+        product = product_response.json()
+        if (
+            str(product.get("base_currency", "")).upper() != asset
+            or str(product.get("quote_currency", "")).upper() != "USD"
+        ):
+            logger.error(
+                "COINBASE PAR NO VERIFICADO | %s | %s",
+                asset,
+                product_id,
+            )
+            return None
+
+        response = requests.get(
+            f"{base_url}/products/{product_id}/candles",
+            params={
+                "granularity": 900,
+                "start": start_utc.isoformat().replace("+00:00", "Z"),
+                "end": end_utc.isoformat().replace("+00:00", "Z"),
+            },
+            headers=headers,
+            timeout=20,
+        )
+        response.raise_for_status()
+        values = response.json()
+        if not isinstance(values, list) or not values:
+            return None
+
+        frame = pd.DataFrame(
+            values,
+            columns=["timestamp", "Low", "High", "Open", "Close", "Volume"],
+        )
+        frame["timestamp"] = pd.to_datetime(
+            frame["timestamp"], unit="s", utc=True, errors="coerce"
+        )
+        frame = frame.set_index("timestamp").sort_index()
+        frame = frame.loc[
+            (frame.index >= start_utc) & (frame.index <= end_utc)
+        ]
+        frame = _normalise_dataframe(frame)
+        if frame is None or frame.empty:
+            return None
+
+        expected = pd.date_range(start_utc, end_utc, freq="15min")
+        if not frame.index.equals(expected):
+            logger.warning(
+                "COINBASE NO CUBRE TODO EL HUECO | %s | esperadas=%s | recibidas=%s",
+                asset,
+                len(expected),
+                len(frame),
+            )
+            return None
+
+        frame.attrs["price_adjustment_policy"] = "raw_unadjusted_intraday"
+        frame.attrs["price_adjustment_verified"] = True
+        frame.attrs["price_source_detail"] = (
+            "Twelve Data primary; Coinbase Exchange SOL-USD exact-gap repair"
+        )
+        logger.info(
+            "COINBASE GAP REPAIR OK | %s | %s velas | %s -> %s",
+            asset,
+            len(frame),
+            frame.index[0].isoformat(),
+            frame.index[-1].isoformat(),
+        )
+        return frame
+    except (requests.RequestException, ValueError, TypeError, KeyError):
+        logger.exception("COINBASE GAP REPAIR FAILED | %s", asset)
+        return None
 
 
 def _download_twelvedata_extended(asset, config, interval):
@@ -1561,6 +1911,7 @@ def _download_twelvedata_extended(asset, config, interval):
             interval,
             start_date=start.strftime("%Y-%m-%d %H:%M:%S"),
             end_date=end.strftime("%Y-%m-%d %H:%M:%S"),
+            validate_gaps=False,
         )
         if chunk is None or chunk.empty:
             logger.error(
@@ -1579,6 +1930,71 @@ def _download_twelvedata_extended(asset, config, interval):
     if combined is None or len(combined) < 220:
         logger.error("BACKFILL INSUFICIENTE | %s", asset)
         return None
+
+    coinbase_repair_used = False
+    if asset in CRYPTO_ASSETS:
+        # Repair isolated provider omissions by requesting only the missing
+        # timestamps plus their surrounding candles. Never synthesize OHLC.
+        for repair_round in range(2):
+            timestamps = pd.DatetimeIndex(combined.index).sort_values()
+            differences = timestamps.to_series().diff().dropna()
+            gaps = differences[differences > pd.Timedelta(minutes=15)]
+            if gaps.empty:
+                break
+            if len(gaps) > 20:
+                logger.error(
+                    "BACKFILL REPARACIÓN ABORTADA | %s | %s huecos",
+                    asset,
+                    len(gaps),
+                )
+                break
+
+            repair_frames = []
+            for next_timestamp, gap_size in gaps.items():
+                previous_timestamp = next_timestamp - gap_size
+                repair_start = previous_timestamp
+                repair_end = next_timestamp
+                logger.warning(
+                    "REINTENTO DE VELAS AUSENTES | %s | %s -> %s",
+                    asset,
+                    repair_start.isoformat(),
+                    repair_end.isoformat(),
+                )
+                repair = _download_twelvedata(
+                    asset,
+                    config,
+                    interval,
+                    start_date=repair_start.strftime("%Y-%m-%d %H:%M:%S"),
+                    end_date=repair_end.strftime("%Y-%m-%d %H:%M:%S"),
+                    validate_gaps=False,
+                )
+                if repair is None or repair.empty:
+                    # Independent USD-quoted exchange source, only for the
+                    # exact missing interval; never interpolate or forward-fill.
+                    repair = _download_coinbase_crypto_gap(
+                        asset,
+                        previous_timestamp + pd.Timedelta(minutes=15),
+                        next_timestamp - pd.Timedelta(minutes=15),
+                    )
+                    if repair is not None and not repair.empty:
+                        coinbase_repair_used = True
+                if repair is not None and not repair.empty:
+                    repair_frames.append(repair)
+
+            if not repair_frames:
+                break
+            combined = pd.concat([combined, *repair_frames]).sort_index()
+            combined = combined.loc[~combined.index.duplicated(keep="last")]
+            combined = _normalise_dataframe(combined)
+
+    if combined is not None:
+        combined.attrs["price_adjustment_policy"] = "raw_unadjusted_intraday"
+        combined.attrs["price_adjustment_verified"] = True
+        combined.attrs["price_source_detail"] = (
+            "Twelve Data primary with exact-gap Coinbase Exchange USD repair"
+            if coinbase_repair_used
+            else "Twelve Data historical intraday"
+        )
 
     if _has_intraday_gaps(combined, asset):
         logger.error(
