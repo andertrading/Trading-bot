@@ -1577,6 +1577,36 @@ def _download_twelvedata_extended(asset, config, interval):
 # YAHOO FINANCE
 # ---------------------------------------------------------------------
 
+def _drop_invalid_ohlc_rows(dataframe, asset, interval):
+    """
+    Extended daily backtests may discard Yahoo rows with missing OHLC.
+    The normal daily-gap validator still rejects any missing trading session.
+    Live data and intraday data retain the original strict behavior.
+    """
+    extended_daily_backtest = (
+        interval == "1d"
+        and os.getenv(
+            "BACKTEST_EXTENDED_DAILY_HISTORY", "false"
+        ).strip().lower() in {"1", "true", "yes", "on"}
+    )
+    if not extended_daily_backtest or dataframe is None or dataframe.empty:
+        return dataframe
+
+    required = ["Open", "High", "Low", "Close"]
+    numeric = dataframe[required].apply(pd.to_numeric, errors="coerce")
+    valid_rows = np.isfinite(numeric.to_numpy(dtype=float)).all(axis=1)
+    dropped = int((~valid_rows).sum())
+
+    if dropped:
+        logger.warning(
+            "YAHOO EXTENDED DAILY | %s | descartadas=%s velas con OHLC incompleto",
+            asset,
+            dropped,
+        )
+
+    return dataframe.loc[valid_rows].copy()
+
+
 def _download_yahoo(asset, config, interval):
     ticker = config.get("yahoo")
 
@@ -1750,6 +1780,12 @@ def _download_yahoo(asset, config, interval):
             df,
             interval,
             asset,
+        )
+
+        df = _drop_invalid_ohlc_rows(
+            df,
+            asset,
+            interval,
         )
 
         df = _normalise_dataframe(df)
