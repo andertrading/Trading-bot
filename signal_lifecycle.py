@@ -150,7 +150,9 @@ def build_signal_record(result: dict, generated_at: datetime | str,
         "entry_reference": entry,
         "stop": stop,
         "target": target,
-        "risk_reward": result.get("risk_reward"),
+        # Recompute from the validated levels instead of trusting a
+        # caller-supplied ratio that may be stale or inconsistent.
+        "risk_reward": round(reward_pct / risk_pct, 4),
         "potential_reward_pct": round(reward_pct, 4),
         "potential_risk_pct": round(risk_pct, 4),
         "data_provider": result.get("data_provider", "unknown"),
