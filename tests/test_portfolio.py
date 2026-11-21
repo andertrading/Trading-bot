@@ -151,6 +151,37 @@ class TestPortfolio(unittest.TestCase):
                     "BLOCKED",
                 )
 
+    def test_single_trade_risk_cannot_exceed_one_percent(self):
+        result = can_add_trade(
+            proposed_risk_usd=10.01,
+            open_positions=[],
+            positions_confirmed=True,
+            capital_usd=1000,
+        )
+        self.assertFalse(result["allowed"])
+        self.assertIn("límite absoluto del 1 %", result["reason"])
+        self.assertAlmostEqual(result["max_single_trade_risk_usd"], 10.0)
+
+    def test_single_trade_limit_is_hard_capped_even_if_config_is_higher(self):
+        with patch("portfolio.MAX_RISK_PER_TRADE", 0.05):
+            result = can_add_trade(
+                proposed_risk_usd=10.01,
+                open_positions=[],
+                positions_confirmed=True,
+                capital_usd=1000,
+            )
+        self.assertFalse(result["allowed"])
+        self.assertAlmostEqual(result["max_single_trade_risk_usd"], 10.0)
+
+    def test_single_trade_at_one_percent_can_be_allowed_if_portfolio_has_room(self):
+        result = can_add_trade(
+            proposed_risk_usd=10.0,
+            open_positions=[{"risk_usd": 15.0}],
+            positions_confirmed=True,
+            capital_usd=1000,
+        )
+        self.assertTrue(result["allowed"])
+
     def test_invalid_proposed_risk_is_rejected(self):
         invalid_values = (
             float("nan"),
