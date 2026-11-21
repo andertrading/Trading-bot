@@ -178,7 +178,7 @@ ETORO_CFD_CRYPTO_OVERNIGHT_USD_PER_UNIT_DAY = {
     asset: None for asset in ASSETS
 }
 ETORO_FEE_SCHEDULE_CONFIRMED = False
-ETORO_ACCOUNT_CURRENCY_CONFIRMED = False
+ETORO_ACCOUNT_CURRENCY_CONFIRMED = True  # Usuario confirma cuenta eToro denominada en USD
 
 # Antigüedad máxima general de datos.
 DATA_MAX_AGE_MINUTES = 30
