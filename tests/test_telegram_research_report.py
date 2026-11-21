@@ -41,6 +41,8 @@ class TestTelegramResearchReport(unittest.TestCase):
         self.assertIn("+2.00%", report)
         self.assertIn("1.00%", report)
         self.assertIn("2.50 USD", report)
+        self.assertIn("5.00 USD", report)
+        self.assertIn("suponiendo que el tamaño se ajusta al riesgo", report)
         self.assertIn("antes de costes y slippage", report)
 
     def test_report_separates_strategy_reasons_from_validation_blockers(self):
@@ -62,6 +64,7 @@ class TestTelegramResearchReport(unittest.TestCase):
         report = Bot.build_telegram_messages(self.scan)[1]
         self.assertIn("Probabilidad histórica: <b>NO VALIDADA</b>", report)
         self.assertIn("Caducidad de la señal: <b>NO CONFIGURADA</b>", report)
+        self.assertIn("Duración estimada de operación: <b>NO VALIDADA</b>", report)
         self.assertIn("Noticias y costes: <b>NO INCORPORADOS AÚN</b>", report)
 
 

@@ -680,6 +680,24 @@ def build_telegram_messages(scan_result):
             risk_amount_text = f"{risk_amount:.2f} USD"
         except (TypeError, ValueError, OverflowError):
             risk_amount_text = "N/D"
+            risk_amount = None
+
+        try:
+            rr_numeric = float(candidate.get("risk_reward"))
+            reward_amount = (
+                risk_amount * rr_numeric
+                if risk_amount is not None
+                and math.isfinite(rr_numeric)
+                and rr_numeric > 0
+                else None
+            )
+            reward_amount_text = (
+                f"{reward_amount:.2f} USD"
+                if reward_amount is not None and math.isfinite(reward_amount)
+                else "N/D"
+            )
+        except (TypeError, ValueError, OverflowError):
+            reward_amount_text = "N/D"
 
         data_timestamp = candidate.get("data_timestamp")
         data_age = candidate.get("data_age_minutes")
@@ -688,6 +706,12 @@ def build_telegram_messages(scan_result):
             candidate.get("price_adjustment_policy", "N/D")
         )
         signal_expiry = candidate.get("expires_at")
+        duration_estimate = candidate.get("duration_estimate")
+        duration_text = (
+            str(duration_estimate)
+            if duration_estimate not in (None, "", "N/D")
+            else "NO VALIDADA"
+        )
         if data_timestamp:
             data_time_text = escape_html(format_timestamp(data_timestamp))
         else:
@@ -765,9 +789,11 @@ def build_telegram_messages(scan_result):
             "<i>Porcentajes sobre niveles OHLC; antes de costes y slippage.</i>\n\n"
             "🧮 <b>RIESGO DE REFERENCIA</b>\n"
             f"Tier provisional: <b>{risk}</b>\n"
-            f"Riesgo teórico sobre {INITIAL_CAPITAL_USD:.0f} USD: "
+            f"Pérdida teórica al SL sobre {INITIAL_CAPITAL_USD:.0f} USD: "
             f"<b>{risk_amount_text}</b>\n"
-            "<i>No es tamaño de posición ni riesgo agregado de cartera.</i>\n\n"
+            f"Beneficio teórico al TP: <b>{reward_amount_text}</b>\n"
+            "<i>Estimación suponiendo que el tamaño se ajusta al riesgo indicado; "
+            "no es tamaño real ni incluye costes.</i>\n\n"
             "📊 <b>JUSTIFICACIÓN TÉCNICA</b>\n"
             f"{technical_text}\n\n"
             "🕒 <b>CALIDAD DEL DATO</b>\n"
@@ -780,6 +806,7 @@ def build_telegram_messages(scan_result):
             "━━━━━━━━━━━━━━━━━━\n"
             "Probabilidad histórica: <b>NO VALIDADA</b>\n"
             f"Caducidad de la señal: <b>{expiry_text}</b>\n"
+            f"Duración estimada de operación: <b>{escape_html(duration_text)}</b>\n"
             "Noticias y costes: <b>NO INCORPORADOS AÚN</b>\n"
             f"{escape_html(report_closing)}\n"
             "Este informe no constituye asesoramiento financiero."
