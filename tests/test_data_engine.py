@@ -2166,6 +2166,24 @@ class TestAutomatedScanSchedulingHelpers(unittest.TestCase):
         )
         self.assertEqual(expiry, datetime(2026, 11, 30, 15, 0, tzinfo=timezone.utc))
 
+    def test_london_intraday_expiry_respects_christmas_eve_early_close(self):
+        expiry = engine.signal_expiry_at(
+            "CSPX", "15m",
+            generated_at="2026-12-24T12:20:00Z",
+            data_timestamp="2026-12-24T12:15:00Z",
+            validity_bars=2,
+        )
+        self.assertEqual(expiry, datetime(2026, 12, 29, 8, 30, tzinfo=timezone.utc))
+
+    def test_london_intraday_expiry_respects_new_years_eve_early_close(self):
+        expiry = engine.signal_expiry_at(
+            "CNDX", "15m",
+            generated_at="2026-12-31T12:20:00Z",
+            data_timestamp="2026-12-31T12:15:00Z",
+            validity_bars=2,
+        )
+        self.assertEqual(expiry, datetime(2027, 1, 4, 8, 30, tzinfo=timezone.utc))
+
     def test_crypto_daily_expiry_uses_utc_day_boundaries(self):
         expiry = engine.signal_expiry_at(
             "BTC",
