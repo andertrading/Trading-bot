@@ -1,0 +1,56 @@
+name: One-off ETF Five Year Daily Backfill (Full UK Calendar)
+
+on:
+  push:
+    branches:
+      - oneoff/etf-five-year-daily-backfill-final4-20261121
+
+permissions:
+  contents: read
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      BACKTEST_DATA_MODE: download
+      BACKTEST_EXTENDED_DAILY_HISTORY: "true"
+      BACKTEST_DAILY_LOOKBACK_DAYS: "1825"
+      BACKTEST_SNAPSHOT_DIR: historicos_etf_daily_5y
+      BACKTEST_TIMEFRAMES: "1d"
+      BACKTEST_ASSETS: "CSPX,CNDX"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Download and validate five years of ETF daily history
+        run: python backtest_v3.py
+      - name: Upload ETF snapshots and results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: etf-five-year-daily-backfill-final4-2026-11-21
+          retention-days: 14
+          if-no-files-found: warn
+          path: |
+            historicos_etf_daily_5y/**
+            operaciones_backtest_v3.csv
+            resultados_backtest_v3.csv
+            errores_backtest_v3.csv
+            resumen_operaciones_v3.csv
+            diagnostico_senales_v3.csv
+            velas_ohlc_excluidas_v3.csv
+            rechazos_rr_backtest_v3.csv
+            senales_solapadas_v3.csv
+            costes_backtest_v3.csv
+            operaciones_cartera_backtest_v3.csv
+            rechazos_cartera_backtest_v3.csv
+            resultados_cartera_backtest_v3.csv
