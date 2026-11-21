@@ -174,8 +174,11 @@ def estimate_etoro_trade_costs(
                 * float(quote_to_account)
             )
 
-    overnight_charge_units = float(overnight_charge_units)
-    if not _finite(overnight_charge_units) or overnight_charge_units < 0:
+    if not _finite(overnight_charge_units):
+        overnight_charge_units = -1.0
+    else:
+        overnight_charge_units = float(overnight_charge_units)
+    if overnight_charge_units < 0:
         result["unpriced_costs"].append("invalid_overnight_charge_units")
     elif execution_type == "REAL" or overnight_charge_units == 0:
         result["overnight_cost"] = 0.0
