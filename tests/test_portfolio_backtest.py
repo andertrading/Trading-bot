@@ -165,6 +165,46 @@ class TestPortfolioBacktest(unittest.TestCase):
             0.25,
         )
 
+    def test_open_risk_percentage_tracks_realized_loss_and_blocks_new_risk(self):
+        trades = [
+            self.make_trade(
+                asset=asset,
+                entry_time="2026-01-01T10:00:00Z",
+                exit_time=(
+                    "2026-01-01T11:00:00Z"
+                    if asset == "AAPL"
+                    else "2026-01-01T14:00:00Z"
+                ),
+                result_R=-50.0 if asset == "AAPL" else 0.0,
+            )
+            for asset in ("AAPL", "MSFT", "NVDA", "TSLA", "TTWO", "BTC")
+        ]
+        later = self.make_trade(
+            asset="ETH",
+            entry_time="2026-01-01T12:00:00Z",
+            exit_time="2026-01-01T13:00:00Z",
+        )
+        result = simulate_portfolio(
+            trades + [later],
+            capital_usd=1000.0,
+        )
+
+        summary = result["summary"]
+        self.assertGreater(
+            summary["peak_open_risk_pct_of_equity"],
+            summary["portfolio_risk_limit_pct"],
+        )
+        self.assertGreaterEqual(summary["risk_limit_breach_events"], 1)
+        later_rejection = [
+            row for row in result["rejections"]
+            if row["source_index"] == len(trades)
+        ]
+        self.assertEqual(len(later_rejection), 1)
+        self.assertEqual(
+            later_rejection[0]["reason"],
+            "limite_de_riesgo_o_capital_disponible",
+        )
+
     def test_invalid_capital_fails_closed(self):
         with self.assertRaises(ValueError):
             simulate_portfolio([], capital_usd=0)
