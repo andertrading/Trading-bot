@@ -1985,5 +1985,74 @@ class TestDataTimestamp(unittest.TestCase):
         )
 
 
+class TestAutomatedScanSchedulingHelpers(unittest.TestCase):
+
+    def test_intraday_scan_skips_before_us_open(self):
+        with patch.object(engine, "datetime", FrozenDateTimeBeforeOpen):
+            self.assertFalse(engine.is_intraday_market_open("AAPL"))
+
+    def test_intraday_scan_runs_during_us_session(self):
+        with patch.object(engine, "datetime", FrozenDateTimeDuringSession):
+            self.assertTrue(engine.is_intraday_market_open("AAPL"))
+
+
+    def test_intraday_scan_allows_brief_post_close_data_publication_window(self):
+        now = datetime(2026, 11, 19, 21, 3, tzinfo=timezone.utc)
+        self.assertTrue(engine.is_intraday_market_open("AAPL", now=now))
+
+    def test_intraday_scan_skips_after_us_close(self):
+        with patch.object(engine, "datetime", FrozenDateTimeAfterClose):
+            self.assertFalse(engine.is_intraday_market_open("AAPL"))
+
+    def test_intraday_scan_skips_after_early_us_close(self):
+        with patch.object(engine, "datetime", FrozenDateTimeEarlyClose):
+            self.assertFalse(engine.is_intraday_market_open("AAPL"))
+
+    def test_intraday_scan_uses_london_session(self):
+        now = datetime(2026, 11, 19, 15, 50, tzinfo=timezone.utc)
+        self.assertTrue(engine.is_intraday_market_open("CSPX", now=now))
+
+    def test_crypto_intraday_scan_runs_on_sunday(self):
+        sunday = datetime(2026, 11, 22, 12, 0, tzinfo=timezone.utc)
+        self.assertTrue(engine.is_intraday_market_open("BTC", now=sunday))
+
+    def test_intraday_expiry_uses_completed_candle_and_two_future_bars(self):
+        expiry = engine.signal_expiry_at(
+            "BTC",
+            "15m",
+            generated_at="2026-11-21T12:03:00Z",
+            data_timestamp="2026-11-21T11:45:00Z",
+            validity_bars=2,
+        )
+        self.assertEqual(expiry, datetime(2026, 11, 21, 12, 30, tzinfo=timezone.utc))
+
+    def test_crypto_daily_expiry_uses_utc_day_boundaries(self):
+        expiry = engine.signal_expiry_at(
+            "BTC",
+            "1d",
+            generated_at=datetime(2026, 11, 21, 0, 30, tzinfo=timezone.utc),
+            validity_bars=2,
+        )
+        self.assertEqual(expiry, datetime(2026, 11, 23, 0, 0, tzinfo=timezone.utc))
+
+    def test_us_daily_expiry_uses_next_two_sessions(self):
+        generated = datetime(2026, 11, 19, 15, 50, tzinfo=timezone.utc)
+        expiry = engine.signal_expiry_at(
+            "AAPL", "1d", generated_at=generated, validity_bars=2
+        )
+        self.assertEqual(expiry, datetime(2026, 11, 20, 21, 30, tzinfo=timezone.utc))
+
+    def test_us_daily_expiry_skips_weekend(self):
+        generated = datetime(2026, 11, 21, 12, 0, tzinfo=timezone.utc)
+        expiry = engine.signal_expiry_at(
+            "AAPL", "1d", generated_at=generated, validity_bars=2
+        )
+        self.assertEqual(expiry, datetime(2026, 11, 24, 21, 30, tzinfo=timezone.utc))
+
+    def test_expiry_rejects_unknown_timeframe(self):
+        with self.assertRaises(ValueError):
+            engine.signal_expiry_at("AAPL", "5m")
+
+
 if __name__ == "__main__":
     unittest.main()

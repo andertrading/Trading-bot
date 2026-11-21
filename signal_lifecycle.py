@@ -12,13 +12,16 @@ import math
 import os
 import tempfile
 import threading
+from urllib.parse import quote
+
+import requests
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
 
 SCHEMA_VERSION = 1
-TERMINAL_STATUSES = {"EXPIRED", "INVALIDATED", "MISSED_ENTRY"}
+TERMINAL_STATUSES = {"EXPIRED", "INVALIDATED", "TARGET_REACHED"}
 
 
 def _as_utc(value: datetime | str) -> datetime:
@@ -56,22 +59,36 @@ def make_signal_id(asset: str, timeframe: str, candle_timestamp: str,
 
 
 def build_signal_record(result: dict, generated_at: datetime | str,
-                        validity_minutes: int) -> dict:
-    """Convert a valid technical candidate into a time-bounded research signal.
+                        validity_minutes: int | None = None,
+                        expires_at: datetime | str | None = None) -> dict:
+    """Convert a technical candidate into a time-bounded research signal.
 
-    The caller must choose validity_minutes from a validated timeframe policy;
-    this function deliberately does not invent a universal expiry window.
+    The caller supplies either a validated duration or an explicit calendar-aware
+    expiry. This function deliberately does not invent a universal expiry window.
     """
     if not isinstance(result, dict):
         raise ValueError("result must be a dictionary")
     if result.get("action") != "BUY CANDIDATE":
         raise ValueError("only technical candidates can become signals")
-    if isinstance(validity_minutes, bool) or not isinstance(validity_minutes, int):
-        raise ValueError("validity_minutes must be a positive integer")
-    if validity_minutes <= 0:
-        raise ValueError("validity_minutes must be a positive integer")
+    if (validity_minutes is None) == (expires_at is None):
+        raise ValueError("supply exactly one of validity_minutes or expires_at")
+    if validity_minutes is not None:
+        if isinstance(validity_minutes, bool) or not isinstance(validity_minutes, int):
+            raise ValueError("validity_minutes must be a positive integer")
+        if validity_minutes <= 0:
+            raise ValueError("validity_minutes must be a positive integer")
 
     generated = _as_utc(generated_at)
+    expiry = (
+        generated + timedelta(minutes=validity_minutes)
+        if expires_at is None
+        else _as_utc(expires_at)
+    )
+    if expiry <= generated:
+        raise ValueError("expires_at must be later than generated_at")
+    effective_validity_minutes = max(
+        1, math.ceil((expiry - generated).total_seconds() / 60)
+    )
     entry = _positive_number(result.get("entry_reference"), "entry_reference")
     stop = _positive_number(result.get("stop"), "stop")
     target = _positive_number(result.get("target"), "target")
@@ -102,16 +119,27 @@ def build_signal_record(result: dict, generated_at: datetime | str,
         "direction": direction,
         "status": "PENDING",
         "generated_at": generated.isoformat(),
-        "expires_at": (generated + timedelta(minutes=validity_minutes)).isoformat(),
-        "validity_minutes": validity_minutes,
+        "expires_at": expiry.isoformat(),
+        "validity_minutes": effective_validity_minutes,
         "data_timestamp": _as_utc(candle_timestamp).isoformat(),
         "entry_reference": entry,
         "stop": stop,
         "target": target,
+        "risk_reward": result.get("risk_reward"),
         "potential_reward_pct": round(reward_pct, 4),
         "potential_risk_pct": round(risk_pct, 4),
+        "data_provider": result.get("data_provider", "unknown"),
+        "price_adjustment_policy": result.get(
+            "price_adjustment_policy", "unknown"
+        ),
+        "currency": result.get("currency", "USD"),
         "score": result.get("score"),
         "reasons": list(result.get("reasons") or []),
+        "validation_reasons": list(result.get("validation_reasons") or []),
+        "provisional_risk_pct": result.get("provisional_risk_pct"),
+        "data_age_minutes": result.get("data_age_minutes"),
+        "alert_sent": False,
+        "pending_notification_event": None,
         "probability": None,
         "probability_status": "NOT_CALIBRATED",
         "position_status": "UNKNOWN",
@@ -131,33 +159,34 @@ def advance_signal(signal: dict, now: datetime | str,
     current = _as_utc(now)
     expires = _as_utc(updated["expires_at"])
 
-    if not conditions_valid:
-        updated["status"] = "INVALIDATED"
-        event = "SIGNAL_INVALIDATED"
-    elif current >= expires:
+    if current >= expires:
         updated["status"] = "EXPIRED"
         event = "SIGNAL_EXPIRED"
-    elif latest_price is not None:
-        price = _positive_number(latest_price, "latest_price")
-        direction = updated.get("direction", "LONG")
-        stop = float(updated["stop"])
-        target = float(updated["target"])
-        if direction == "LONG" and price <= stop:
-            updated["status"] = "INVALIDATED"
-            event = "SIGNAL_INVALIDATED_STOP_LEVEL"
-        elif direction == "SHORT" and price >= stop:
-            updated["status"] = "INVALIDATED"
-            event = "SIGNAL_INVALIDATED_STOP_LEVEL"
-        elif direction == "LONG" and price >= target:
-            updated["status"] = "MISSED_ENTRY"
-            event = "TARGET_REACHED_BEFORE_ENTRY"
-        elif direction == "SHORT" and price <= target:
-            updated["status"] = "MISSED_ENTRY"
-            event = "TARGET_REACHED_BEFORE_ENTRY"
-        else:
-            return updated, None
     else:
-        return updated, None
+        event = None
+        if latest_price is not None:
+            price = _positive_number(latest_price, "latest_price")
+            direction = updated.get("direction", "LONG")
+            stop = float(updated["stop"])
+            target = float(updated["target"])
+            if direction == "LONG" and price <= stop:
+                updated["status"] = "INVALIDATED"
+                event = "SIGNAL_INVALIDATED_STOP_LEVEL"
+            elif direction == "SHORT" and price >= stop:
+                updated["status"] = "INVALIDATED"
+                event = "SIGNAL_INVALIDATED_STOP_LEVEL"
+            elif direction == "LONG" and price >= target:
+                updated["status"] = "TARGET_REACHED"
+                event = "TARGET_LEVEL_REACHED"
+            elif direction == "SHORT" and price <= target:
+                updated["status"] = "TARGET_REACHED"
+                event = "TARGET_LEVEL_REACHED"
+
+        if event is None and not conditions_valid:
+            updated["status"] = "INVALIDATED"
+            event = "SIGNAL_INVALIDATED"
+        elif event is None:
+            return updated, None
 
     updated["last_event"] = event
     updated["last_checked_at"] = current.isoformat()
@@ -232,3 +261,137 @@ class SignalStateStore:
             except OSError:
                 pass
             raise
+
+
+
+class UpstashSignalStateStore:
+    """Persistent signal store backed by the Upstash Redis REST API.
+
+    The scheduler must serialize writers (the GitHub Actions workflow does so
+    with a concurrency group). Render Free local files are not durable storage.
+    """
+
+    def __init__(self, url: str, token: str, key: str = "tradingbot:signals:v1",
+                 timeout: int = 10):
+        if not url or not token:
+            raise ValueError("Upstash REST URL and token are required")
+        self.url = url.rstrip("/")
+        self.token = token
+        self.key = key
+        self.timeout = timeout
+        self._lock = threading.RLock()
+        self._headers = {
+            "Authorization": f"Bearer {self.token}",
+            "Content-Type": "application/json",
+        }
+
+    def _get_raw(self):
+        endpoint = f"{self.url}/get/{quote(self.key, safe=':')}"
+        response = requests.get(
+            endpoint, headers=self._headers, timeout=self.timeout
+        )
+        response.raise_for_status()
+        payload = response.json()
+        if not isinstance(payload, dict) or "error" in payload:
+            raise RuntimeError("Upstash GET command failed")
+        return payload.get("result")
+
+    def _set_raw(self, value: str) -> None:
+        endpoint = f"{self.url}/set/{quote(self.key, safe=':')}"
+        response = requests.post(
+            endpoint,
+            data=value.encode("utf-8"),
+            headers=self._headers,
+            timeout=self.timeout,
+        )
+        response.raise_for_status()
+        payload = response.json()
+        if not isinstance(payload, dict) or payload.get("result") != "OK":
+            raise RuntimeError("Upstash SET command failed")
+
+    def load(self) -> dict:
+        with self._lock:
+            raw = self._get_raw()
+            if raw is None:
+                return {"schema_version": SCHEMA_VERSION, "signals": {}}
+            try:
+                payload = json.loads(raw) if isinstance(raw, str) else raw
+            except (TypeError, json.JSONDecodeError) as exc:
+                raise ValueError("Upstash signal state contains invalid JSON") from exc
+            if (
+                not isinstance(payload, dict)
+                or payload.get("schema_version") != SCHEMA_VERSION
+                or not isinstance(payload.get("signals"), dict)
+            ):
+                raise ValueError("Upstash signal state schema is invalid")
+            return payload
+
+    def upsert(self, signal: dict) -> bool:
+        signal_id = signal.get("signal_id") if isinstance(signal, dict) else None
+        if not signal_id:
+            raise ValueError("signal must contain signal_id")
+        with self._lock:
+            payload = self.load()
+            if signal_id in payload["signals"]:
+                return False
+            payload["signals"][signal_id] = dict(signal)
+            self._set_raw(json.dumps(
+                payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True
+            ))
+            return True
+
+    def update(self, signal: dict) -> None:
+        signal_id = signal.get("signal_id") if isinstance(signal, dict) else None
+        if not signal_id:
+            raise ValueError("signal must contain signal_id")
+        with self._lock:
+            payload = self.load()
+            if signal_id not in payload["signals"]:
+                raise KeyError(signal_id)
+            payload["signals"][signal_id] = dict(signal)
+            self._set_raw(json.dumps(
+                payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True
+            ))
+
+    def prune(self, now=None, retention_days: int = 90,
+              max_terminal_records: int = 10000) -> int:
+        """Bound state growth while preserving every pending signal."""
+        if isinstance(retention_days, bool) or retention_days <= 0:
+            raise ValueError("retention_days must be positive")
+        if isinstance(max_terminal_records, bool) or max_terminal_records <= 0:
+            raise ValueError("max_terminal_records must be positive")
+
+        current = _as_utc(now or datetime.now(timezone.utc))
+        cutoff = current - timedelta(days=retention_days)
+
+        with self._lock:
+            payload = self.load()
+            signals = payload["signals"]
+            removed = 0
+            terminal = []
+
+            for signal_id, signal in list(signals.items()):
+                if signal.get("status") not in TERMINAL_STATUSES:
+                    continue
+                terminal_at = signal.get("last_checked_at") or signal.get("generated_at")
+                try:
+                    terminal_time = _as_utc(terminal_at)
+                except (TypeError, ValueError):
+                    terminal_time = current
+                if terminal_time < cutoff:
+                    del signals[signal_id]
+                    removed += 1
+                else:
+                    terminal.append((terminal_time, signal_id))
+
+            if len(terminal) > max_terminal_records:
+                terminal.sort(reverse=True)
+                for _, signal_id in terminal[max_terminal_records:]:
+                    del signals[signal_id]
+                    removed += 1
+
+            if removed:
+                self._set_raw(json.dumps(
+                    payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True
+                ))
+            return removed

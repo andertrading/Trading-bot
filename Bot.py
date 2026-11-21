@@ -44,6 +44,7 @@ from data_engine import (
     download_data,
     get_data_timestamp,
     is_data_fresh,
+    is_intraday_market_open,
 )
 
 from strategies import evaluate_signal
@@ -682,10 +683,19 @@ def build_telegram_messages(scan_result):
 
         data_timestamp = candidate.get("data_timestamp")
         data_age = candidate.get("data_age_minutes")
+        data_provider = escape_html(candidate.get("data_provider", "N/D"))
+        adjustment_policy = escape_html(
+            candidate.get("price_adjustment_policy", "N/D")
+        )
+        signal_expiry = candidate.get("expires_at")
         if data_timestamp:
             data_time_text = escape_html(format_timestamp(data_timestamp))
         else:
             data_time_text = "N/D"
+        if signal_expiry:
+            expiry_text = escape_html(format_timestamp(signal_expiry))
+        else:
+            expiry_text = "NO CONFIGURADA"
         try:
             age_value = float(data_age)
             age_text = f"{age_value:.1f} min" if math.isfinite(age_value) else "N/D"
@@ -705,17 +715,44 @@ def build_telegram_messages(scan_result):
         blockers = candidate.get("validation_reasons", [])
         if not isinstance(blockers, list):
             blockers = [str(blockers)]
+        blockers_display = []
+        for reason in blockers:
+            if "Cartera no confirmada" in str(reason):
+                blockers_display.append(
+                    "Riesgo agregado de cartera no verificado; el bot no consulta "
+                    "posiciones. Comprueba manualmente el límite del 3%."
+                )
+            else:
+                blockers_display.append(str(reason))
         blocker_text = "\n".join(
             f"• {escape_html(reason)}"
-            for reason in blockers
+            for reason in blockers_display
         ) or "• Validación pendiente."
         if len(blocker_text) > 600:
             blocker_text = blocker_text[:600] + "..."
 
+        strategy_validated = candidate.get("strategy_validated") is True
+        if strategy_validated:
+            report_title = "📡 <b>SEÑAL TÉCNICA · DECISIÓN MANUAL</b>"
+            report_status = (
+                "⚠️ <b>CONFIRMA COSTES Y CONDICIONES ANTES DE ENTRAR</b>"
+            )
+            report_closing = (
+                "La estrategia ha superado la validación histórica definida. "
+                "La decisión y ejecución siguen siendo manuales."
+            )
+        else:
+            report_title = "🔎 <b>CANDIDATA TÉCNICA · SOLO INVESTIGACIÓN</b>"
+            report_status = "🚫 <b>NO OPERAR — ESTRATEGIA NO VALIDADA</b>"
+            report_closing = (
+                "La estrategia aún no ha superado la validación histórica. "
+                "No utilizar como instrucción de entrada."
+            )
+
         message = (
-            "🔎 <b>CANDIDATA TÉCNICA · SOLO INVESTIGACIÓN</b>\n"
+            f"{report_title}\n"
             "━━━━━━━━━━━━━━━━━━\n"
-            "🚫 <b>NO OPERAR — ESTRATEGIA NO VALIDADA</b>\n\n"
+            f"{report_status}\n\n"
             f"📌 <b>{asset}</b>  |  {timeframe}  |  Score <b>{score}/100</b>\n"
             "🟢 Dirección: <b>LONG</b>\n\n"
             "💰 <b>NIVELES Y MOVIMIENTO POTENCIAL</b>\n"
@@ -735,15 +772,17 @@ def build_telegram_messages(scan_result):
             f"{technical_text}\n\n"
             "🕒 <b>CALIDAD DEL DATO</b>\n"
             f"Última vela: {data_time_text}\n"
-            f"Antigüedad al analizar: <b>{age_text}</b>\n\n"
+            f"Antigüedad al analizar: <b>{age_text}</b>\n"
+            f"Proveedor: <b>{data_provider}</b>\n"
+            f"Ajuste OHLC: <code>{adjustment_policy}</code>\n\n"
             "🔒 <b>VALIDACIONES PENDIENTES</b>\n"
             f"{blocker_text}\n\n"
             "━━━━━━━━━━━━━━━━━━\n"
             "Probabilidad histórica: <b>NO VALIDADA</b>\n"
-            "Ventana de entrada/caducidad: <b>NO CONFIGURADA</b>\n"
+            f"Caducidad de la señal: <b>{expiry_text}</b>\n"
             "Noticias y costes: <b>NO INCORPORADOS AÚN</b>\n"
-            "Este informe es investigación, no asesoramiento ni una orden.\n"
-            "<b>NO OPERAR.</b>"
+            f"{escape_html(report_closing)}\n"
+            "Este informe no constituye asesoramiento financiero."
         )
         messages.append(message)
 
@@ -845,6 +884,7 @@ def no_trade(asset, timeframe, reason):
         "mode": "PAPER_ONLY",
         "tradable": False,
         "validated": False,
+        "data_valid": False,
     }
 
 
@@ -1072,6 +1112,12 @@ def analyze_asset(asset, timeframe):
         result["timeframe"] = timeframe
         result["data_timestamp"] = timestamp.isoformat()
         result["data_age_minutes"] = round(age_minutes, 2)
+        result["data_valid"] = True
+        result["last_price"] = float(df["Close"].iloc[-1])
+        result["data_provider"] = df.attrs.get("data_provider", "unknown")
+        result["price_adjustment_policy"] = df.attrs.get(
+            "price_adjustment_policy", "unknown"
+        )
         result["mode"] = "PAPER_ONLY"
         result["currency"] = ACCOUNT_CURRENCY
 
@@ -1106,10 +1152,24 @@ def analyze_asset(asset, timeframe):
         )
 
 
-def run_scan():
+def run_scan(timeframes=None):
+    """Analyze selected timeframes without requiring broker/account access."""
     results = []
 
-    logger.info("SCAN LOOP START")
+    if timeframes is None:
+        selected_timeframes = (INTRADAY_INTERVAL, SWING_INTERVAL)
+    else:
+        selected_timeframes = tuple(dict.fromkeys(timeframes))
+        if not selected_timeframes or any(
+            timeframe not in (INTRADAY_INTERVAL, SWING_INTERVAL)
+            for timeframe in selected_timeframes
+        ):
+            raise ValueError("Temporalidades de escaneo no válidas")
+
+    logger.info(
+        "SCAN LOOP START | timeframes=%s",
+        selected_timeframes,
+    )
 
     # No existe conexión ni confirmación automática
     # de las posiciones abiertas en eToro.
@@ -1145,15 +1205,29 @@ def run_scan():
         portfolio_status.get("status"),
     )
 
-    for asset, settings in ASSETS.items():
-        if not settings.get("enabled", False):
-            continue
+    enabled_assets = [
+        asset for asset, settings in ASSETS.items()
+        if settings.get("enabled", False)
+    ]
+    total_analyses = len(enabled_assets) * len(selected_timeframes)
 
-        for timeframe in (
-            INTRADAY_INTERVAL,
-            SWING_INTERVAL,
-        ):
-            result = analyze_asset(asset, timeframe)
+    with state_lock:
+        scan_state["total_analyses"] = total_analyses
+
+    for asset in enabled_assets:
+        for timeframe in selected_timeframes:
+            if (
+                timeframe == INTRADAY_INTERVAL
+                and not is_intraday_market_open(asset)
+            ):
+                result = no_trade(
+                    asset,
+                    timeframe,
+                    "Mercado cerrado o aún sin vela intradía completa",
+                )
+                result["market_closed"] = True
+            else:
+                result = analyze_asset(asset, timeframe)
 
             result = apply_validation_gate(
                 result,
@@ -1169,7 +1243,7 @@ def run_scan():
             logger.info(
                 "SCAN PROGRESS | %s/%s",
                 len(results),
-                scan_state["total_analyses"],
+                total_analyses,
             )
 
     technical_candidates = [
@@ -1201,6 +1275,7 @@ def run_scan():
         "status": "analysis_completed",
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "analyses_completed": len(results),
+        "timeframes": list(selected_timeframes),
         "technical_candidates_found": len(technical_candidates),
         "candidates_blocked": len(blocked_candidates),
         "validated_candidates": len(validated_candidates),

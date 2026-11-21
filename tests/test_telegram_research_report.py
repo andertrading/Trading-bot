@@ -50,11 +50,36 @@ class TestTelegramResearchReport(unittest.TestCase):
         self.assertIn("VALIDACIONES PENDIENTES", report)
         self.assertIn("Spread not confirmed", report)
 
+
+    def test_report_displays_data_provider_and_ohlc_policy(self):
+        self.candidate["data_provider"] = "twelvedata"
+        self.candidate["price_adjustment_policy"] = "raw_unadjusted_intraday"
+        report = Bot.build_telegram_messages(self.scan)[1]
+        self.assertIn("Proveedor: <b>twelvedata</b>", report)
+        self.assertIn("raw_unadjusted_intraday", report)
+
     def test_report_discloses_unvalidated_probability_and_expiry(self):
         report = Bot.build_telegram_messages(self.scan)[1]
         self.assertIn("Probabilidad histórica: <b>NO VALIDADA</b>", report)
-        self.assertIn("Ventana de entrada/caducidad: <b>NO CONFIGURADA</b>", report)
+        self.assertIn("Caducidad de la señal: <b>NO CONFIGURADA</b>", report)
         self.assertIn("Noticias y costes: <b>NO INCORPORADOS AÚN</b>", report)
+
+
+    def test_strategy_validated_report_still_requires_manual_cost_checks(self):
+        self.candidate["strategy_validated"] = True
+        report = Bot.build_telegram_messages(self.scan)[1]
+        self.assertIn("SEÑAL TÉCNICA · DECISIÓN MANUAL", report)
+        self.assertIn("CONFIRMA COSTES Y CONDICIONES", report)
+        self.assertNotIn("NO OPERAR — ESTRATEGIA NO VALIDADA", report)
+        self.assertIn("La decisión y ejecución siguen siendo manuales", report)
+
+    def test_unknown_portfolio_is_explained_without_broker_access(self):
+        self.candidate["validation_reasons"] = [
+            "Cartera no confirmada o riesgo de cartera bloqueado"
+        ]
+        report = Bot.build_telegram_messages(self.scan)[1]
+        self.assertIn("el bot no consulta posiciones", report)
+        self.assertIn("límite del 3%", report)
 
     def test_report_escapes_untrusted_text(self):
         self.candidate["reasons"] = ["Breakout <script>"]
@@ -67,6 +92,13 @@ class TestTelegramResearchReport(unittest.TestCase):
         messages = Bot.build_telegram_messages(self.scan)
         self.assertEqual(len(messages), 2)
         self.assertIn("No se han detectado candidatas técnicas", messages[1])
+
+
+    def test_report_displays_calendar_aware_signal_expiry(self):
+        self.candidate["expires_at"] = "2026-11-21T12:30:00+00:00"
+        report = Bot.build_telegram_messages(self.scan)[1]
+        self.assertIn("Caducidad de la señal:", report)
+        self.assertNotIn("Caducidad de la señal: <b>NO CONFIGURADA</b>", report)
 
     def test_candidate_without_valid_levels_does_not_crash(self):
         self.candidate["entry_reference"] = None

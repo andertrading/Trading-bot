@@ -3,9 +3,11 @@ import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest.mock import patch
 
 from signal_lifecycle import (
     SignalStateStore,
+    UpstashSignalStateStore,
     advance_signal,
     build_signal_record,
     make_signal_id,
@@ -31,6 +33,17 @@ def candidate(**overrides):
     return result
 
 
+class FakeResponse:
+    def __init__(self, payload):
+        self.payload = payload
+
+    def raise_for_status(self):
+        return None
+
+    def json(self):
+        return self.payload
+
+
 class SignalLifecycleTests(unittest.TestCase):
     def test_signal_id_is_stable_for_same_candle(self):
         first = make_signal_id("nvda", "15M", "2026-11-21T11:45:00Z")
@@ -51,11 +64,23 @@ class SignalLifecycleTests(unittest.TestCase):
         self.assertIsNone(signal["probability"])
         self.assertEqual(signal["position_status"], "UNKNOWN")
 
+    def test_build_signal_accepts_calendar_aware_expiry(self):
+        expiry = NOW + timedelta(days=4, hours=2)
+        signal = build_signal_record(candidate(), NOW, expires_at=expiry)
+        self.assertEqual(signal["expires_at"], expiry.isoformat())
+        self.assertEqual(signal["validity_minutes"], 5880)
+
     def test_build_signal_rejects_invalid_validity(self):
         for validity in (0, -1, 1.5, True):
             with self.subTest(validity=validity):
                 with self.assertRaises(ValueError):
                     build_signal_record(candidate(), NOW, validity)
+
+    def test_build_signal_requires_exactly_one_expiry_policy(self):
+        with self.assertRaises(ValueError):
+            build_signal_record(candidate(), NOW)
+        with self.assertRaises(ValueError):
+            build_signal_record(candidate(), NOW, 30, NOW + timedelta(hours=1))
 
     def test_build_signal_rejects_non_candidate(self):
         with self.assertRaises(ValueError):
@@ -81,11 +106,11 @@ class SignalLifecycleTests(unittest.TestCase):
         self.assertEqual(event, "SIGNAL_INVALIDATED_STOP_LEVEL")
         self.assertEqual(updated["position_status"], "UNKNOWN")
 
-    def test_target_before_entry_marks_missed_not_trade_won(self):
+    def test_target_level_event_does_not_infer_whether_user_entered(self):
         signal = build_signal_record(candidate(), NOW, 30)
         updated, event = advance_signal(signal, NOW + timedelta(minutes=5), 184.0)
-        self.assertEqual(updated["status"], "MISSED_ENTRY")
-        self.assertEqual(event, "TARGET_REACHED_BEFORE_ENTRY")
+        self.assertEqual(updated["status"], "TARGET_REACHED")
+        self.assertEqual(event, "TARGET_LEVEL_REACHED")
         self.assertEqual(updated["position_status"], "UNKNOWN")
 
     def test_invalid_conditions_invalidate_pending_signal(self):
@@ -119,6 +144,82 @@ class SignalLifecycleTests(unittest.TestCase):
             signal = build_signal_record(candidate(), NOW, 30)
             with self.assertRaises(KeyError):
                 store.update(signal)
+
+    def test_upstash_store_persists_and_deduplicates(self):
+        remote = {}
+
+        def fake_get(url, **kwargs):
+            return FakeResponse({"result": remote.get("state")})
+
+        def fake_post(url, data=None, **kwargs):
+            remote["state"] = data.decode("utf-8")
+            return FakeResponse({"result": "OK"})
+
+        with patch("signal_lifecycle.requests.get", side_effect=fake_get), patch(
+            "signal_lifecycle.requests.post", side_effect=fake_post
+        ):
+            store = UpstashSignalStateStore(
+                "https://example.upstash.io", "test-token"
+            )
+            signal = build_signal_record(candidate(), NOW, 30)
+            self.assertTrue(store.upsert(signal))
+            self.assertFalse(store.upsert(signal))
+            loaded = store.load()
+            self.assertEqual(
+                loaded["signals"][signal["signal_id"]]["status"], "PENDING"
+            )
+
+
+    def test_upstash_prune_removes_old_terminal_but_keeps_pending(self):
+        remote = {
+            "state": json.dumps({
+                "schema_version": 1,
+                "signals": {
+                    "old": {
+                        "signal_id": "old",
+                        "status": "EXPIRED",
+                        "generated_at": "2026-01-01T00:00:00Z",
+                        "last_checked_at": "2026-01-02T00:00:00Z",
+                    },
+                    "recent": {
+                        "signal_id": "recent",
+                        "status": "INVALIDATED",
+                        "generated_at": "2026-11-20T00:00:00Z",
+                        "last_checked_at": "2026-11-20T00:00:00Z",
+                    },
+                    "pending": {
+                        "signal_id": "pending",
+                        "status": "PENDING",
+                        "generated_at": "2026-01-01T00:00:00Z",
+                    },
+                },
+            })
+        }
+
+        def fake_get(url, **kwargs):
+            return FakeResponse({"result": remote["state"]})
+
+        def fake_post(url, data=None, **kwargs):
+            remote["state"] = data.decode("utf-8")
+            return FakeResponse({"result": "OK"})
+
+        with patch("signal_lifecycle.requests.get", side_effect=fake_get), patch(
+            "signal_lifecycle.requests.post", side_effect=fake_post
+        ):
+            store = UpstashSignalStateStore(
+                "https://example.upstash.io", "test-token"
+            )
+            removed = store.prune(now=NOW, retention_days=90)
+            loaded = store.load()
+
+        self.assertEqual(removed, 1)
+        self.assertNotIn("old", loaded["signals"])
+        self.assertIn("recent", loaded["signals"])
+        self.assertIn("pending", loaded["signals"])
+
+    def test_upstash_store_requires_credentials(self):
+        with self.assertRaises(ValueError):
+            UpstashSignalStateStore("", "")
 
 
 if __name__ == "__main__":
