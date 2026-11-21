@@ -467,6 +467,10 @@ class EtoroReadOnlyClient:
             for value in instrument_ids
         ):
             raise ValueError("instrument_ids debe contener IDs enteros positivos")
+        if len(instrument_ids) > 1000:
+            raise ValueError("eToro admite como máximo 1000 instrumentIds por petición")
+        if len(set(instrument_ids)) != len(instrument_ids):
+            raise ValueError("instrument_ids no puede contener duplicados")
         return self._request(
             "GET",
             "/api/v2/market-data/rates",
