@@ -2127,6 +2127,62 @@ if __name__ == "__main__":
 
 
 
+class TestExtendedDailyHistoryIsBacktestOnly(unittest.TestCase):
+    def setUp(self):
+        engine._data_cache.clear()
+
+    @patch.dict(os.environ, {"BACKTEST_EXTENDED_DAILY_HISTORY": "true"})
+    @patch.object(engine, "_get_cached_data")
+    @patch.object(engine, "_download_yahoo")
+    @patch.object(engine, "download_eodhd_daily")
+    @patch.object(engine, "_save_cached_data")
+    def test_london_extended_daily_uses_yahoo_and_bypasses_cache(
+        self, save_cache, eodhd, yahoo, get_cache
+    ):
+        frame = make_valid_ohlcv_frame(260, "1d")
+        yahoo.return_value = frame
+
+        result = engine.download_data("CSPX", "1d")
+
+        get_cache.assert_not_called()
+        yahoo.assert_called_once()
+        eodhd.assert_not_called()
+        self.assertEqual(result.attrs["data_provider"], "yahoo")
+        self.assertTrue(result.attrs["price_adjustment_verified"])
+
+    @patch.dict(os.environ, {"BACKTEST_EXTENDED_DAILY_HISTORY": "false"})
+    @patch.object(engine, "_get_cached_data", return_value=None)
+    @patch.object(engine, "_download_yahoo")
+    @patch.object(engine, "download_eodhd_daily")
+    @patch.object(engine, "_save_cached_data")
+    def test_live_london_daily_keeps_eodhd(
+        self, save_cache, eodhd, yahoo, get_cache
+    ):
+        frame = make_valid_ohlcv_frame(260, "1d")
+        eodhd.return_value = frame
+
+        result = engine.download_data("CSPX", "1d")
+
+        eodhd.assert_called_once()
+        yahoo.assert_not_called()
+        self.assertEqual(result.attrs["data_provider"], "eodhd")
+
+    @patch.dict(os.environ, {"BACKTEST_EXTENDED_DAILY_HISTORY": "true"})
+    @patch.object(engine, "_get_cached_data")
+    @patch.object(engine, "_download_twelvedata")
+    @patch.object(engine, "_save_cached_data")
+    def test_extended_daily_twelvedata_bypasses_cache(
+        self, save_cache, twelvedata, get_cache
+    ):
+        frame = make_valid_ohlcv_frame(260, "1d")
+        twelvedata.return_value = frame
+
+        result = engine.download_data("BTC", "1d")
+
+        get_cache.assert_not_called()
+        twelvedata.assert_called_once()
+        self.assertEqual(result.attrs["data_provider"], "twelvedata")
+
 class TestExtendedHistoryIsBacktestOnly(unittest.TestCase):
 
     def setUp(self):
