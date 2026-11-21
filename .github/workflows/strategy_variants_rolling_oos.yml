@@ -7,6 +7,7 @@ on:
       - research/explicit-universe-coverage-20261121
       - research/broker-cost-sensitivity-20261121
       - research/history-calendar-audit-20261121
+      - research/net-stop-risk-accounting-20261121
 
 permissions:
   contents: read
