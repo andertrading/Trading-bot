@@ -1,0 +1,119 @@
+name: One-off Merged 23 of 24 Asset-Timeframe Replay
+
+on:
+  push:
+    branches:
+      - oneoff/merged-23-of-24-universe-replay-20261121
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      BACKTEST_DATA_MODE: replay
+      BACKTEST_SNAPSHOT_DIR: historicos_full_merged
+
+    steps:
+      - name: Checkout latest risk-fixed main
+        uses: actions/checkout@v4
+
+      - name: Download original extended universe snapshots
+        uses: actions/download-artifact@v4
+        with:
+          name: extended-intraday-backtest-2026-11-21
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: andertrading/Trading-bot
+          run-id: 44862820157
+          path: sources/base
+
+      - name: Download five corrected US equity M15 snapshots
+        uses: actions/download-artifact@v4
+        with:
+          name: us-equity-m15-filtered-backfill-2026-11-21
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: andertrading/Trading-bot
+          run-id: 44896519696
+          path: sources/stocks
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Merge and verify immutable historical snapshots
+        run: |
+          python - <<'PY'
+          import json
+          import shutil
+          from pathlib import Path
+
+          base = Path("sources/base/historicos_backtest_extended")
+          stocks = Path("sources/stocks/historicos_us_equity_m15_filtered")
+          destination = Path("historicos_full_merged")
+          destination.mkdir(parents=True, exist_ok=True)
+
+          base_manifest = json.loads((base / "manifest.json").read_text(encoding="utf-8"))
+          stock_manifest = json.loads((stocks / "manifest.json").read_text(encoding="utf-8"))
+          combined = list(base_manifest)
+
+          existing = {(item["asset"], item["timeframe"]) for item in combined}
+          for item in stock_manifest:
+              key = (item["asset"], item["timeframe"])
+              if key in existing:
+                  raise SystemExit(f"Duplicate snapshot: {key}")
+              combined.append(item)
+              existing.add(key)
+
+          for source in (base, stocks):
+              for path in source.iterdir():
+                  if path.name == "manifest.json":
+                      continue
+                  shutil.copy2(path, destination / path.name)
+
+          if len(combined) != 23:
+              raise SystemExit(f"Expected 23 snapshots, found {len(combined)}")
+          if len(existing) != len(combined):
+              raise SystemExit("Duplicate asset/timeframe pairs detected")
+
+          (destination / "manifest.json").write_text(
+              json.dumps(combined, ensure_ascii=False, indent=2),
+              encoding="utf-8",
+          )
+          print(f"Verified {len(combined)} unique historical snapshots.")
+          print("Missing expected pair: SOL / 15m (provider history not available).")
+          for item in combined:
+              print(item["asset"], item["timeframe"], item["row_count"])
+          PY
+
+      - name: Replay the full available universe with risk safeguards
+        run: python backtest_v3.py
+
+      - name: Upload merged full-universe results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: merged-23-of-24-risk-fixed-replay-2026-11-21
+          retention-days: 14
+          if-no-files-found: warn
+          path: |
+            operaciones_backtest_v3.csv
+            resultados_backtest_v3.csv
+            errores_backtest_v3.csv
+            resumen_operaciones_v3.csv
+            diagnostico_senales_v3.csv
+            velas_ohlc_excluidas_v3.csv
+            rechazos_rr_backtest_v3.csv
+            senales_solapadas_v3.csv
+            costes_backtest_v3.csv
+            operaciones_cartera_backtest_v3.csv
+            rechazos_cartera_backtest_v3.csv
+            resultados_cartera_backtest_v3.csv
