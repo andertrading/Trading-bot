@@ -1,0 +1,71 @@
+name: One-off Current Provider Backtest
+
+on:
+  push:
+    branches:
+      - oneoff/current-provider-backtest-20261121
+
+permissions:
+  contents: read
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      BACKTEST_DATA_MODE: download
+      BACKTEST_SNAPSHOT_DIR: historicos_backtest_current
+      TWELVE_DATA_API_KEY: ${{ secrets.TWELVE_DATA_API_KEY }}
+      EODHD_API_KEY: ${{ secrets.EODHD_API_KEY }}
+
+    steps:
+      - name: Checkout current main-based code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Verify provider credentials without exposing values
+        run: |
+          python - <<'PY'
+          import os
+          missing = [
+              key for key in ("TWELVE_DATA_API_KEY", "EODHD_API_KEY")
+              if not os.getenv(key)
+          ]
+          if missing:
+              raise SystemExit("Missing Actions secrets: " + ", ".join(missing))
+          print("Provider secrets are present.")
+          PY
+
+      - name: Run current-provider backtest
+        run: python backtest_v3.py
+
+      - name: Upload reproducible results and provider snapshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: current-provider-backtest-2026-11-21
+          retention-days: 14
+          if-no-files-found: warn
+          path: |
+            operaciones_backtest_v3.csv
+            resultados_backtest_v3.csv
+            errores_backtest_v3.csv
+            resumen_operaciones_v3.csv
+            diagnostico_senales_v3.csv
+            velas_ohlc_excluidas_v3.csv
+            rechazos_rr_backtest_v3.csv
+            senales_solapadas_v3.csv
+            costes_backtest_v3.csv
+            operaciones_cartera_backtest_v3.csv
+            rechazos_cartera_backtest_v3.csv
+            resultados_cartera_backtest_v3.csv
+            historicos_backtest_current/
