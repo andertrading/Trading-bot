@@ -706,7 +706,7 @@ def build_telegram_messages(scan_result):
         if (
             isinstance(item, dict)
             and item.get("action") == "BUY CANDIDATE"
-            and item.get("validation_status") == "BLOCKED"
+            and item.get("validation_status") in {"BLOCKED", "APPROVED"}
         )
     ]
 
@@ -964,7 +964,7 @@ def send_telegram_notifications(scan_result):
             for item in scan_result.get("results", [])
             if (
                 item.get("action") == "BUY CANDIDATE"
-                and item.get("validation_status") == "BLOCKED"
+                and item.get("validation_status") in {"BLOCKED", "APPROVED"}
             )
         ]
 
