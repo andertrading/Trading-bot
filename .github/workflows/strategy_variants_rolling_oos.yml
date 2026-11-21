@@ -3,7 +3,7 @@ name: Research Strategy Variants and Walk Forward
 on:
   push:
     branches:
-      - research/strategy-variants-walkforward-20261121
+      - research/rolling-oos-validation-20261121
 
 permissions:
   contents: read
