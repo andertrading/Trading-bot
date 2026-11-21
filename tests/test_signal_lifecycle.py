@@ -227,7 +227,8 @@ class SignalLifecycleTests(unittest.TestCase):
         signal = build_signal_record(candidate(), NOW, 30)
         end = datetime.fromisoformat(signal["monitoring_expires_at"])
         updated, event = advance_signal(signal, end)
-        self.assertIsNone(event)
+        self.assertEqual(event, "SIGNAL_EXPIRED")
+        self.assertEqual(updated["status"], "EXPIRED")
         self.assertEqual(updated["monitor_status"], "ENDED")
 
     def test_stop_level_invalidates_without_claiming_position_closed(self):
