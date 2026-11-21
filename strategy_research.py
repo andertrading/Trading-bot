@@ -127,10 +127,21 @@ def trend_continuation(data, asset, timeframe, index=-1):
     )
 
 
+def mtf_daily_trend_pullback(data, asset, timeframe, index=-1):
+    """M15 pullback only when the last completed daily trend is bullish."""
+    if timeframe != "15m":
+        return {"action": "NO TRADE"}
+    row = data.iloc[index]
+    if row.get("DAILY_TREND_UP") is not True and row.get("DAILY_TREND_UP") != 1:
+        return {"action": "NO TRADE"}
+    return trend_pullback_reclaim(data, asset, timeframe, index)
+
+
 STRATEGIES = {
     "baseline": baseline,
     "trend_pullback_reclaim": trend_pullback_reclaim,
     "trend_continuation": trend_continuation,
+    "mtf_daily_trend_pullback": mtf_daily_trend_pullback,
 }
 
 
@@ -191,6 +202,57 @@ def main():
     print("Assets:", ", ".join(asset for asset, _ in assets))
     print("Timeframes:", ", ".join(timeframes))
     print("Snapshot directory:", bt.SNAPSHOT_DIR)
+
+    # Add a completed-daily-trend filter to M15 rows. A daily candle only
+    # becomes available from the following UTC date, preventing lookahead.
+    original_download_history = bt.download_history
+    daily_cache = {}
+
+    def download_history_with_daily_trend(ticker, interval, asset=None):
+        data = original_download_history(ticker, interval, asset=asset)
+        if data is None or interval != "15m" or asset is None:
+            return data
+
+        if asset not in daily_cache:
+            daily = original_download_history(ticker, "1d", asset=asset)
+            if daily is None or daily.empty:
+                daily_cache[asset] = None
+            else:
+                daily_indicators = bt.add_indicators(daily.copy())
+                available = pd.DataFrame({
+                    "available_from": (
+                        daily_indicators.index.normalize()
+                        + pd.Timedelta(days=1)
+                    ),
+                    "daily_trend_up": (
+                        daily_indicators["EMA50"]
+                        > daily_indicators["EMA200"]
+                    ).fillna(False).to_numpy(),
+                }).sort_values("available_from")
+                daily_cache[asset] = available
+
+        available = daily_cache[asset]
+        if available is None or available.empty:
+            data["DAILY_TREND_UP"] = False
+            return data
+
+        intraday_dates = pd.DataFrame({
+            "row_number": range(len(data)),
+            "session_date": data.index.normalize(),
+        }).sort_values("session_date")
+        mapped = pd.merge_asof(
+            intraday_dates,
+            available,
+            left_on="session_date",
+            right_on="available_from",
+            direction="backward",
+        ).sort_values("row_number")
+        data["DAILY_TREND_UP"] = (
+            mapped["daily_trend_up"].fillna(False).to_numpy()
+        )
+        return data
+
+    bt.download_history = download_history_with_daily_trend
 
     for strategy_name, evaluator in STRATEGIES.items():
         print(f"\n=== STRATEGY: {strategy_name} ===")
