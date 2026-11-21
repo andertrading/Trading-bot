@@ -342,11 +342,40 @@ class TestPortfolioBacktest(unittest.TestCase):
 
         position = result["trades"][0]
         committed_cash = (
-            position["notional_usd"] + position["entry_cost_usd"]
+            position["notional_usd"]
+            + position["entry_cost_usd"]
+            + position["reserved_exit_cost_usd"]
         )
         self.assertLessEqual(committed_cash, 100.0 + 1e-8)
         self.assertLess(position["notional_usd"], 100.0)
-        self.assertAlmostEqual(result["summary"]["ending_equity_usd"], 81.81818182, places=7)
+        self.assertAlmostEqual(result["summary"]["ending_equity_usd"], 83.33333333, places=7)
+
+    def test_exit_fee_reserve_prevents_fixed_commission_overdraw(self):
+        trade = self.make_trade(
+            asset="AAPL",
+            entry=100.0,
+            stop=90.0,
+            score=80,
+            result_R=-1.0,
+        )
+        trade["exit"] = 1.0
+
+        result = simulate_portfolio(
+            [trade],
+            capital_usd=2.0,
+            execution_costs={
+                "venue": "ETORO_REAL",
+                "stock_fee_per_side_usd": 1.0,
+                "spread_bps": 0,
+            },
+        )
+
+        self.assertEqual(result["summary"]["trades_accepted"], 0)
+        self.assertAlmostEqual(result["summary"]["ending_equity_usd"], 2.0)
+        self.assertEqual(
+            result["rejections"][0]["reason"],
+            "limite_de_riesgo_o_capital_disponible",
+        )
 
     def test_invalid_capital_fails_closed(self):
         with self.assertRaises(ValueError):
