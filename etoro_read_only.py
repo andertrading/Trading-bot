@@ -389,6 +389,55 @@ def normalize_realtime_quotes(
     return quotes
 
 
+def resolve_unique_instrument_by_symbol(
+    response: EtoroResponse,
+    symbol: str,
+) -> Mapping[str, Any]:
+    """Resolve one exact symbol from eToro's v2 cursor-paginated response."""
+    if response.status_code != 200:
+        raise EtoroAPIError("La búsqueda v2 no devolvió HTTP 200")
+    if not isinstance(symbol, str) or not symbol.strip():
+        raise EtoroAPIError("El símbolo solicitado está vacío")
+    if not isinstance(response.data, Mapping):
+        raise EtoroAPIError("La respuesta de búsqueda v2 no es un objeto JSON")
+    results = response.data.get("results")
+    pagination = response.data.get("pagination")
+    if not isinstance(results, list):
+        raise EtoroAPIError("Falta la lista results en la búsqueda v2")
+    if not isinstance(pagination, Mapping) or not isinstance(pagination.get("hasNext"), bool):
+        raise EtoroAPIError("Falta el estado de paginación en la búsqueda v2")
+    if pagination["hasNext"]:
+        raise EtoroAPIError("La búsqueda v2 requiere páginas adicionales")
+    target = symbol.strip().casefold()
+    matches = []
+    for item in results:
+        if not isinstance(item, Mapping):
+            raise EtoroAPIError("La búsqueda v2 contiene un instrumento inválido")
+        item_symbol = item.get("symbol")
+        if isinstance(item_symbol, str) and item_symbol.strip().casefold() == target:
+            matches.append(item)
+    if len(matches) != 1:
+        raise EtoroAPIError(
+            f"Se esperaba un único símbolo exacto para '{symbol}', encontrados: {len(matches)}"
+        )
+    item = matches[0]
+    instrument_id = item.get("instrumentId")
+    if isinstance(instrument_id, bool) or not isinstance(instrument_id, int) or instrument_id <= 0:
+        raise EtoroAPIError("El instrumento v2 no tiene un instrumentId válido")
+    display_name = item.get("displayName")
+    instrument_type = item.get("type")
+    if not isinstance(display_name, str) or not display_name.strip():
+        raise EtoroAPIError("El instrumento v2 no tiene displayName")
+    if not isinstance(instrument_type, str) or not instrument_type.strip():
+        raise EtoroAPIError("El instrumento v2 no tiene type")
+    return {
+        "instrumentId": instrument_id,
+        "displayname": display_name,
+        "internalSymbolFull": item["symbol"],
+        "instrumentType": instrument_type,
+    }
+
+
 def resolve_unique_instrument(
     response: EtoroResponse,
     identifier: str,
@@ -888,6 +937,7 @@ class EtoroReadOnlyClient:
             ("GET", "/api/v2/trading/info/instrument-breakdown"),
             ("GET", "/api/v2/market-data/rates"),
             ("GET", "/api/v1/market-data/search"),
+            ("GET", "/api/v2/market-data/instruments"),
             ("POST", "/api/v2/trading/info/costs"),
             ("POST", "/api/v2/trading/info/eligibility"),
         }
@@ -988,6 +1038,23 @@ class EtoroReadOnlyClient:
             return EtoroResponse(data=data, status_code=status, headers=dict(response.headers))
 
         raise EtoroAPIError("No se pudo completar la petición a eToro")
+
+    def search_instrument_by_symbol(self, symbol: str, page_size: int = 100) -> EtoroResponse:
+        """Search by exact trading symbol using eToro's cursor-based v2 endpoint."""
+        if (
+            not isinstance(symbol, str)
+            or not symbol.strip()
+            or len(symbol.strip()) > 32
+            or not re.fullmatch(r"[A-Za-z0-9._-]+", symbol.strip())
+        ):
+            raise ValueError("symbol debe ser un ticker válido")
+        if isinstance(page_size, bool) or not isinstance(page_size, int) or not 1 <= page_size <= 100:
+            raise ValueError("page_size debe estar entre 1 y 100")
+        return self._request(
+            "GET",
+            "/api/v2/market-data/instruments",
+            params={"symbols": symbol.strip(), "pageSize": page_size},
+        )
 
     def search_instruments(
         self,
