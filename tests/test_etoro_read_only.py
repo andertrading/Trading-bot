@@ -116,6 +116,7 @@ class EtoroReadOnlyClientTests(unittest.TestCase):
         self.assertEqual(self.session.request.call_count, 2)
 
         self.session.reset_mock()
+        self.session.request.side_effect = None
         self.session.request.return_value = FakeResponse(status_code=403)
         with self.assertRaises(EtoroAPIError):
             self.client.get_account_pnl()
