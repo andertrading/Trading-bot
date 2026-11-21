@@ -1,9 +1,9 @@
 """Portfolio-level, long-only backtest allocator.
 
 This module combines independently simulated trade outcomes in chronological
-order. It is deliberately a conservative *risk/cash allocation layer*, not
-a tick-level portfolio execution engine. Costs remain excluded from P&L because
-the current cost model has unpriced components.
+order. It is a conservative risk/cash allocation layer, not a tick-level
+execution engine. Optional broker-cost scenarios debit entry and exit costs
+from equity and therefore affect subsequent position sizing.
 """
 import math
 
@@ -345,8 +345,6 @@ def simulate_portfolio(
         if closed_at_timestamp or timestamp_pnl:
             equity += timestamp_pnl
             gross_total_pnl += sum(p["realized_pnl_usd"] for p in closed_at_timestamp)
-            total_entry_cost += 0.0
-            total_exit_cost += sum(p.get("exit_cost_usd", 0.0) for p in closed_at_timestamp)
             equity_peak = max(equity_peak, equity)
             current_drawdown = equity_peak - equity
             max_drawdown = max(max_drawdown, current_drawdown)
