@@ -144,6 +144,26 @@ class ReadOnlyAuditTests(unittest.TestCase):
         self.assertEqual(report["account_snapshot_status"], "MISSING_CLIENT_PORTFOLIO")
         self.assertNotIn("private payload", str(report))
 
+    def test_account_diagnostic_codes_classify_http_and_position_schema_failures(self):
+        class FailingClient(FakeAuditClient):
+            def __init__(self, error):
+                super().__init__()
+                self.error = error
+
+            def get_account_snapshot(self, account_currency):
+                raise self.error
+
+        http_report = run_audit(
+            FailingClient(EtoroAPIError("eToro API respondió HTTP 403")),
+            self.assets, "USD", self.now,
+        )
+        position_report = run_audit(
+            FailingClient(EtoroAPIError("Posición 0 incompleta: faltan cid")),
+            self.assets, "USD", self.now,
+        )
+        self.assertEqual(http_report["account_snapshot_status"], "ETORO_HTTP_403")
+        self.assertEqual(position_report["account_snapshot_status"], "INVALID_POSITION_SCHEMA")
+
     def test_expected_asset_types_are_read_from_each_asset_not_last_loop_value(self):
         client = FakeAuditClient()
         report = run_audit(client, ASSETS, "USD", self.now)
