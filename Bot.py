@@ -664,10 +664,8 @@ def build_telegram_messages(scan_result):
             else "N/D"
         )
         risk_text = (
-            f"{potential_risk:.2f}%"
+            f"{abs(potential_risk):.2f}%"
             if potential_risk is not None and potential_risk <= 0
-            else f"{abs(potential_risk):.2f}%"
-            if potential_risk is not None
             else "N/D"
         )
 
