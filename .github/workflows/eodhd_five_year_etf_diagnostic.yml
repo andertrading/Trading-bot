@@ -1,0 +1,68 @@
+name: One-off EODHD Five Year ETF History Diagnostic
+
+on:
+  push:
+    branches:
+      - oneoff/eodhd-five-year-etf-diagnostic-20261121
+
+permissions:
+  contents: read
+
+jobs:
+  diagnostic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Check five-year EODHD daily coverage
+        env:
+          EODHD_API_KEY: ${{ secrets.EODHD_API_KEY }}
+        run: |
+          python - <<'PY'
+          import os
+          import requests
+          from datetime import date, timedelta
+
+          token = os.environ.get("EODHD_API_KEY", "")
+          if not token:
+              raise SystemExit("EODHD_API_KEY secret is missing")
+
+          end = date.today()
+          start = end - timedelta(days=1825)
+          for symbol in ("CSPX.LSE", "CNDX.LSE"):
+              try:
+                  response = requests.get(
+                      f"https://eodhd.com/api/eod/{symbol}",
+                      params={
+                          "api_token": token,
+                          "from": start.isoformat(),
+                          "to": end.isoformat(),
+                          "period": "d",
+                          "fmt": "json",
+                      },
+                      timeout=25,
+                  )
+                  print(symbol, "HTTP", response.status_code)
+                  if response.status_code != 200:
+                      print(symbol, "ERROR_BODY", response.text[:300].replace(token, "[REDACTED]"))
+                      continue
+                  payload = response.json()
+                  if not isinstance(payload, list):
+                      print(symbol, "INVALID_RESPONSE", type(payload).__name__)
+                      continue
+                  dates = [row.get("date") for row in payload if isinstance(row, dict) and row.get("date")]
+                  print(
+                      symbol,
+                      "ROWS", len(payload),
+                      "FIRST", min(dates) if dates else "N/A",
+                      "LAST", max(dates) if dates else "N/A",
+                  )
+                  if payload:
+                      print(symbol, "FIELDS", ",".join(sorted(payload[0].keys())))
+              except Exception as exc:
+                  print(symbol, "REQUEST_ERROR", type(exc).__name__, str(exc)[:200])
+          PY
