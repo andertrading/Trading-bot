@@ -181,6 +181,51 @@ class TestEtoroTransactionCosts(unittest.TestCase):
             result["unpriced_costs"],
         )
 
+    def test_hard_to_borrow_short_stock_with_missing_units_is_unpriced(self):
+        with patch.dict(
+            costs.ETORO_CFD_STOCK_SHORT_BORROW_ANNUAL_RATE_PCT,
+            {"AAPL": 0.11},
+        ):
+            result = costs.estimate_etoro_trade_costs(
+                "AAPL",
+                100.0,
+                90.0,
+                1.0,
+                execution_type="CFD",
+                market_spread_bps=0,
+                overnight_charge_units=None,
+                leverage=1.0,
+                side="SELL",
+            )
+        self.assertIsNone(result["overnight_cost"])
+        self.assertIn(
+            "cfd_overnight_charge_units_missing",
+            result["unpriced_costs"],
+        )
+
+    def test_crypto_cfd_with_missing_units_is_unpriced_without_exception(self):
+        with patch.dict(
+            costs.ETORO_CFD_CRYPTO_OVERNIGHT_USD_PER_UNIT_DAY,
+            {"BTC": 0.05},
+        ):
+            result = costs.estimate_etoro_trade_costs(
+                "BTC",
+                100.0,
+                110.0,
+                1.0,
+                execution_type="CFD",
+                market_spread_bps=0,
+                overnight_charge_units=None,
+                leverage=1.0,
+                side="BUY",
+                country_code="ES",
+            )
+        self.assertIsNone(result["overnight_cost"])
+        self.assertIn(
+            "cfd_overnight_charge_units_missing",
+            result["unpriced_costs"],
+        )
+
     def test_short_stock_cfd_uses_annual_borrow_rate_on_opening_notional(self):
         with patch.dict(
             costs.ETORO_CFD_STOCK_SHORT_BORROW_ANNUAL_RATE_PCT,
