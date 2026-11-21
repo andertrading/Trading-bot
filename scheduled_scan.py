@@ -134,6 +134,7 @@ def run_scheduled_scan(timeframe: str) -> dict:
     store = UpstashSignalStateStore(state_url, state_token)
 
     now = datetime.now(timezone.utc)
+    store.prune(now=now, retention_days=90, max_terminal_records=10000)
     scan_result = Bot.run_scan(timeframes=[timeframe])
     results = scan_result.get("results", [])
     by_asset = {
