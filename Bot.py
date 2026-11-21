@@ -50,6 +50,7 @@ from data_engine import (
 from strategies import evaluate_signal
 from risk_manager import risk_pct_for_score
 from portfolio import get_portfolio_status
+from transaction_costs import estimate_etoro_trade_costs
 
 
 faulthandler.enable(all_threads=True)
@@ -613,6 +614,66 @@ def _percentage_between(start, end):
         return None
 
 
+def _format_cost_readiness(candidate):
+    """Report missing cost inputs without presenting a false net return."""
+    entry = get_candidate_entry(candidate)
+    target = candidate.get("target")
+    try:
+        entry_value = float(entry)
+        target_value = float(target)
+        if not all(math.isfinite(value) and value > 0 for value in (entry_value, target_value)):
+            raise ValueError("invalid reference prices")
+    except (TypeError, ValueError, OverflowError):
+        return [
+            "Estado: INCOMPLETO — rentabilidad neta no calculable.",
+            "• Faltan niveles de entrada u objetivo válidos para auditar costes.",
+        ]
+
+    estimate = estimate_etoro_trade_costs(
+        candidate.get("asset"), entry_value, target_value, 1.0, side="BUY"
+    )
+    if not isinstance(estimate, dict) or not estimate.get("valid"):
+        return [
+            "Estado: INCOMPLETO — rentabilidad neta no calculable.",
+            "• El modelo no puede validar los costes de este instrumento.",
+        ]
+
+    labels = {
+        "execution_type_unknown": "Tipo REAL/CFD no identificado.",
+        "execution_type_not_confirmed_in_etoro_ticket": "Tipo REAL/CFD pendiente de confirmar en el ticket.",
+        "account_specific_fee_tier_not_confirmed": "Comisiones personales y nivel Club pendientes de confirmar.",
+        "account_currency_not_confirmed": "Divisa de cuenta pendiente de confirmar.",
+        "historical_ohlc_to_etoro_execution_price_basis_unverified": "Precios OHLC sin correspondencia verificada con precios ejecutables.",
+        "live_market_bid_ask_spread_missing": "Spread bid/ask real no disponible.",
+        "invalid_market_spread_bps": "Dato de spread no válido.",
+        "fx_conversion_rate_or_fee_missing": "Conversión de divisa sin tarifa o tipo de cambio confirmado.",
+        "cfd_overnight_charge_units_missing": "Unidades de financiación nocturna CFD no disponibles.",
+        "cfd_benchmark_rate_missing": "Referencia de financiación CFD no disponible.",
+        "cfd_crypto_overnight_fee_missing": "Tarifa nocturna de CFD cripto no disponible.",
+        "cfd_short_borrow_rate_missing": "Coste de préstamo para venta en corto no disponible.",
+        "cfd_short_borrow_rate_threshold_ambiguous": "Clasificación de financiación del corto no resuelta.",
+        "invalid_overnight_charge_units": "Unidades de financiación nocturna no válidas.",
+        "invalid_cfd_annual_rate": "Tasa anual CFD no válida.",
+    }
+    missing = estimate.get("unpriced_costs", [])
+    lines = []
+    for reason in missing:
+        label = labels.get(reason, f"Componente sin valorar: {reason}.")
+        if label not in lines:
+            lines.append(label)
+
+    status = (
+        "Parámetros del modelo completos para una unidad de referencia."
+        if estimate.get("complete") and not missing
+        else "INCOMPLETO — rentabilidad neta no calculable."
+    )
+    return [
+        f"Estado: {status}",
+        *[f"• {line}" for line in lines],
+        "• No se calcula beneficio neto hasta confirmar tamaño, ejecución y costes efectivos.",
+    ]
+
+
 def build_telegram_messages(scan_result):
     """
     Construye un resumen y un informe por candidata técnica.
@@ -849,6 +910,9 @@ def build_telegram_messages(scan_result):
             f"Movimiento adverso hasta stop: <b>{risk_text}</b>\n"
             f"Ratio riesgo/beneficio teórico: <b>{rr}</b>\n"
             "<i>Porcentajes sobre niveles OHLC; antes de costes y slippage.</i>\n\n"
+            "💸 <b>COMPROBACIÓN DE COSTES</b>\n"
+            + "\n".join(escape_html(line) for line in _format_cost_readiness(candidate))
+            + "\n\n"
             "🧮 <b>RIESGO DE REFERENCIA</b>\n"
             f"Tier provisional: <b>{risk}</b>\n"
             f"Pérdida teórica al SL sobre {INITIAL_CAPITAL_USD:.0f} USD: "
