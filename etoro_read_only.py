@@ -93,12 +93,18 @@ def calculate_available_cash(account_payload: Mapping[str, Any]) -> Decimal:
         except (TypeError, ValueError):
             raise EtoroAPIError(f"mirrorId inválido en orden {index}") from None
         if is_manual:
-            deductions += _decimal(order.get("amount"), f"ordersForOpen[{index}].amount")
+            amount = _decimal(order.get("amount"), f"ordersForOpen[{index}].amount")
+            if amount < 0:
+                raise EtoroAPIError(f"Importe negativo en orden pendiente {index}")
+            deductions += amount
 
     for index, order in enumerate(orders):
         if not isinstance(order, Mapping):
             raise EtoroAPIError(f"Orden activa inválida: {index}")
-        deductions += _decimal(order.get("amount"), f"orders[{index}].amount")
+        amount = _decimal(order.get("amount"), f"orders[{index}].amount")
+        if amount < 0:
+            raise EtoroAPIError(f"Importe negativo en orden activa {index}")
+        deductions += amount
 
     available = credit - deductions
     if available < 0:
