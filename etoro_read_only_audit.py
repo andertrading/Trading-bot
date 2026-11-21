@@ -20,19 +20,30 @@ from etoro_read_only import (
 from etoro_position_risk import calculate_account_stop_risk_from_client
 
 
-def _asset_candidates(symbol: str, asset: Mapping[str, Any]) -> list[tuple[str, str]]:
-    candidates: list[tuple[str, str]] = []
-    for value in (symbol, asset.get("yahoo")):
-        if isinstance(value, str) and value.strip():
-            candidate = ("internalSymbolFull", value.strip())
-            if candidate not in candidates:
-                candidates.append(candidate)
-    name = asset.get("name")
-    if isinstance(name, str) and name.strip():
-        candidate = ("displayname", name.strip())
-        if candidate not in candidates:
-            candidates.append(candidate)
-    return candidates
+def _resolution_error_status(exc: Exception) -> str:
+    message = str(exc)
+    if "HTTP " in message:
+        suffix = message.split("HTTP ", 1)[1][:3]
+        if suffix.isdigit():
+            return f"HTTP_{suffix}"
+    known = (
+        ("Falta la lista results", "SEARCH_RESULTS_MISSING"),
+        ("Falta el estado de paginación", "SEARCH_PAGINATION_MISSING"),
+        ("requiere páginas adicionales", "SEARCH_PAGINATION_INCOMPLETE"),
+        ("Se esperaba un único símbolo exacto", "EXACT_SYMBOL_MATCH_COUNT"),
+        ("instrumentId válido", "INVALID_INSTRUMENT_ID"),
+        ("no tiene displayName", "MISSING_DISPLAY_NAME"),
+        ("no tiene type", "MISSING_INSTRUMENT_TYPE"),
+        ("contiene un instrumento inválido", "INVALID_SEARCH_ITEM"),
+        ("no es un objeto JSON", "INVALID_SEARCH_RESPONSE"),
+        ("no devolvió HTTP 200", "SEARCH_HTTP_ERROR"),
+    )
+    for marker, code in known:
+        if marker in message:
+            return code
+    if type(exc).__name__ == "EtoroAPIError":
+        return "ETORO_SEARCH_VALIDATION_ERROR"
+    return type(exc).__name__.upper()
 
 
 def _resolve_asset(
@@ -40,26 +51,36 @@ def _resolve_asset(
     symbol: str,
     asset: Mapping[str, Any],
 ) -> tuple[Mapping[str, Any] | None, str]:
-    """Try every exact identifier; one rejected filter must not stop discovery."""
-    failure_codes: list[str] = []
-    for field, value in _asset_candidates(symbol, asset):
-        try:
-            response = client.search_instruments({field: value}, page_size=1000)
-        except Exception as exc:
-            # Keep diagnostics useful without exposing response bodies or credentials.
-            message = str(exc)
-            if "HTTP " in message:
-                suffix = message.split("HTTP ", 1)[1][:3]
-                failure_codes.append(f"HTTP_{suffix}" if suffix.isdigit() else "API_ERROR")
-            else:
-                failure_codes.append(type(exc).__name__.upper())
-            continue
-        try:
-            return resolve_unique_instrument(response, value), "RESOLVED"
-        except Exception as exc:
-            failure_codes.append(type(exc).__name__.upper())
-            continue
-    return None, (failure_codes[-1] if failure_codes else "NO_EXACT_CANDIDATE")
+    """Resolve a ticker through eToro's exact-symbol v2 search endpoint."""
+    try:
+        response = client.search_instrument_by_symbol(symbol, page_size=100)
+        item = resolve_unique_instrument_by_symbol(response, symbol)
+    except Exception as exc:
+        return None, _resolution_error_status(exc)
+
+    expected_type = asset.get("type")
+    actual_type = _fee_class(item.get("instrumentType"))
+    if (
+        not isinstance(expected_type, str)
+        or actual_type is None
+        or actual_type != expected_type.strip().upper()
+    ):
+        return None, "ASSET_TYPE_MISMATCH"
+    return item, "RESOLVED"
+
+
+def _account_snapshot_missing_fields(exc: Exception) -> list[str]:
+    message = str(exc)
+    marker = "incompleta: faltan "
+    if marker not in message:
+        return []
+    raw_fields = message.split(marker, 1)[1].split(";", 1)[0]
+    allowed = {
+        "positionId", "instrumentId", "cid", "mirrorId", "isBuy",
+        "openRate", "stopLossRate", "amount", "leverage", "units",
+        "settlementTypeId", "isNoStopLoss",
+    }
+    return [field.strip() for field in raw_fields.split(",") if field.strip() in allowed]
 
 
 def _account_snapshot_status(exc: Exception) -> str:
@@ -91,6 +112,7 @@ def _account_snapshot_status(exc: Exception) -> str:
         ("Importe negativo", "NEGATIVE_ORDER_AMOUNT"),
         ("El efectivo disponible calculado es negativo", "NEGATIVE_AVAILABLE_CASH"),
         ("Posición inválida", "INVALID_POSITION"),
+        ("incompleta: faltan", "POSITION_MISSING_FIELDS"),
         ("Posición " , "INVALID_POSITION_SCHEMA"),
         ("positionId inválido", "INVALID_POSITION_ID"),
         ("instrumentId inválido", "INVALID_INSTRUMENT_ID"),
@@ -137,6 +159,7 @@ def run_audit(
     """Run account schema, exact instrument and realtime quote checks."""
     snapshot = None
     account_snapshot_status = "NOT_VALIDATED"
+    account_snapshot_missing_fields: list[str] = []
     try:
         snapshot = client.get_account_snapshot(account_currency)
         account_valid = True
@@ -144,6 +167,7 @@ def run_audit(
     except Exception as exc:
         account_valid = False
         account_snapshot_status = _account_snapshot_status(exc)
+        account_snapshot_missing_fields = _account_snapshot_missing_fields(exc)
 
     enabled_assets = {
         symbol: asset
@@ -244,6 +268,7 @@ def run_audit(
         "audit_scope": "read-only diagnostics; not authorization to trade",
         "account_snapshot_schema_valid": account_valid,
         "account_snapshot_status": account_snapshot_status,
+        "account_snapshot_missing_fields": account_snapshot_missing_fields,
         "instrument_resolution": instrument_report,
         "instrument_eligibility_validated": eligibility_valid,
         "complete_realtime_quotes_validated": quotes_valid,
