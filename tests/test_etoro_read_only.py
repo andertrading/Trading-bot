@@ -278,12 +278,12 @@ class InstrumentDiscoveryTests(unittest.TestCase):
         self.assertEqual(resolved["instrumentId"], 123)
 
     def test_fuzzy_duplicate_or_nontradable_matches_are_rejected(self):
-        response = EtoroResponse({"items": [self.item, dict(self.item, instrumentId=124)]}, 200, {})
+        response = EtoroResponse({"items": [self.item, dict(self.item, instrumentId=124)], "totalItems": 2}, 200, {})
         with self.assertRaises(EtoroAPIError):
             resolve_unique_instrument(response, "TSLA")
 
         response = EtoroResponse(
-            {"items": [dict(self.item, isCurrentlyTradable=False)]},
+            {"items": [dict(self.item, isCurrentlyTradable=False)], "totalItems": 1},
             200,
             {},
         )
@@ -291,7 +291,7 @@ class InstrumentDiscoveryTests(unittest.TestCase):
             resolve_unique_instrument(response, "TSLA")
 
     def test_missing_exact_match_is_not_guessed(self):
-        response = EtoroResponse({"items": [self.item]}, 200, {})
+        response = EtoroResponse({"items": [self.item], "totalItems": 1}, 200, {})
         with self.assertRaises(EtoroAPIError):
             resolve_unique_instrument(response, "Tesla Inc")
 
