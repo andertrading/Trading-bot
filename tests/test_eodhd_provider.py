@@ -179,6 +179,17 @@ class TestEODHDDispatch(unittest.TestCase):
         eodhd.assert_called_once()
         yahoo.assert_not_called()
 
+    def test_failed_eodhd_daily_does_not_fall_back_to_yahoo(self):
+        with patch.object(engine, "ASSETS", {
+            "CNDX": {"enabled": True, "currency": "USD", "yahoo": "CNDX.L"}
+        }), patch.object(engine, "_get_cached_data", return_value=None), patch.object(
+            engine, "download_eodhd_daily", return_value=None
+        ) as eodhd, patch.object(engine, "_download_yahoo") as yahoo:
+            result = engine.download_data("CNDX", "1d")
+        self.assertIsNone(result)
+        eodhd.assert_called_once()
+        yahoo.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()
