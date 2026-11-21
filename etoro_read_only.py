@@ -93,17 +93,125 @@ def calculate_available_cash(account_payload: Mapping[str, Any]) -> Decimal:
         except (TypeError, ValueError):
             raise EtoroAPIError(f"mirrorId inválido en orden {index}") from None
         if is_manual:
-            deductions += _decimal(order.get("amount"), f"ordersForOpen[{index}].amount")
+            amount = _decimal(order.get("amount"), f"ordersForOpen[{index}].amount")
+            if amount < 0:
+                raise EtoroAPIError(f"Importe negativo en orden pendiente {index}")
+            deductions += amount
 
     for index, order in enumerate(orders):
         if not isinstance(order, Mapping):
             raise EtoroAPIError(f"Orden activa inválida: {index}")
-        deductions += _decimal(order.get("amount"), f"orders[{index}].amount")
+        amount = _decimal(order.get("amount"), f"orders[{index}].amount")
+        if amount < 0:
+            raise EtoroAPIError(f"Importe negativo en orden activa {index}")
+        deductions += amount
 
     available = credit - deductions
     if available < 0:
         raise EtoroAPIError("El efectivo disponible calculado es negativo")
     return available
+
+
+@dataclass(frozen=True)
+class EtoroAccountSnapshot:
+    """Validated account facts; position risk is intentionally not inferred."""
+
+    account_currency: str
+    available_cash: Decimal
+    unrealized_pnl: Decimal
+    positions: tuple[Mapping[str, Any], ...]
+    has_unbounded_stop_risk: bool
+
+
+def normalize_account_snapshot(payload: Mapping[str, Any]) -> EtoroAccountSnapshot:
+    """Validate the minimum real-account schema required for a trusted snapshot.
+
+    This confirms USD account context and preserves positions, but does not
+    calculate position risk, infer multipliers, or treat missing stops as zero.
+    """
+    if not isinstance(payload, Mapping):
+        raise EtoroAPIError("La respuesta de cuenta no es un objeto JSON")
+
+    currency_id = payload.get("accountCurrencyId")
+    if isinstance(currency_id, bool) or not isinstance(currency_id, int) or currency_id != 1:
+        raise EtoroAPIError("La divisa de cuenta no está confirmada como USD (ID 1)")
+
+    portfolio = payload.get("clientPortfolio")
+    if not isinstance(portfolio, Mapping):
+        raise EtoroAPIError("Falta clientPortfolio en la respuesta de eToro")
+    positions = portfolio.get("positions")
+    if not isinstance(positions, list):
+        raise EtoroAPIError("Falta la lista explícita de posiciones")
+
+    unrealized_pnl = _decimal(payload.get("unrealizedPnL"), "unrealizedPnL")
+    available_cash = calculate_available_cash(payload)
+
+    required_fields = {
+        "positionID",
+        "instrumentID",
+        "isBuy",
+        "openRate",
+        "stopLossRate",
+        "amount",
+        "leverage",
+        "units",
+        "settlementTypeID",
+        "isNoStopLoss",
+    }
+    normalized_positions: list[Mapping[str, Any]] = []
+    unbounded_stop_risk = False
+
+    for index, position in enumerate(positions):
+        if not isinstance(position, Mapping):
+            raise EtoroAPIError(f"Posición inválida: {index}")
+        missing = sorted(required_fields.difference(position))
+        if missing:
+            raise EtoroAPIError(
+                f"Posición {index} incompleta: faltan {', '.join(missing)}"
+            )
+
+        for id_field in ("positionID", "instrumentID"):
+            value = position[id_field]
+            if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+                raise EtoroAPIError(f"{id_field} inválido en posición {index}")
+
+        if not isinstance(position["isBuy"], bool):
+            raise EtoroAPIError(f"isBuy inválido en posición {index}")
+        if not isinstance(position["isNoStopLoss"], bool):
+            raise EtoroAPIError(f"isNoStopLoss inválido en posición {index}")
+
+        settlement_type = position["settlementTypeID"]
+        if (
+            isinstance(settlement_type, bool)
+            or not isinstance(settlement_type, int)
+            or settlement_type not in {0, 1, 2, 3, 4}
+        ):
+            raise EtoroAPIError(f"Tipo de liquidación no reconocido en posición {index}")
+
+        for numeric_field in ("openRate", "amount", "leverage", "units"):
+            number = _decimal(position[numeric_field], f"positions[{index}].{numeric_field}")
+            if number <= 0:
+                raise EtoroAPIError(
+                    f"{numeric_field} debe ser positivo en posición {index}"
+                )
+
+        stop_value = position["stopLossRate"]
+        if position["isNoStopLoss"]:
+            unbounded_stop_risk = True
+        else:
+            stop = _decimal(stop_value, f"positions[{index}].stopLossRate")
+            if stop <= 0:
+                raise EtoroAPIError(f"Stop loss inválido en posición {index}")
+
+        normalized_positions.append(dict(position))
+
+    return EtoroAccountSnapshot(
+        account_currency="USD",
+        available_cash=available_cash,
+        unrealized_pnl=unrealized_pnl,
+        positions=tuple(normalized_positions),
+        has_unbounded_stop_risk=unbounded_stop_risk,
+    )
 
 
 class EtoroReadOnlyClient:

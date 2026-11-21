@@ -1,4 +1,5 @@
 import unittest
+from decimal import Decimal
 from unittest.mock import Mock, patch
 
 import requests
@@ -8,6 +9,7 @@ from etoro_read_only import (
     EtoroConfigurationError,
     EtoroReadOnlyClient,
     calculate_available_cash,
+    normalize_account_snapshot,
 )
 
 
@@ -202,6 +204,88 @@ class AvailableCashTests(unittest.TestCase):
                 "ordersForOpen": [{"amount": 8, "mirrorId": 0}],
                 "orders": [{"amount": 5}],
             })
+
+    def test_negative_order_amount_cannot_inflate_available_cash(self):
+        with self.assertRaises(EtoroAPIError):
+            calculate_available_cash({
+                "credit": 100,
+                "ordersForOpen": [],
+                "orders": [{"amount": -50}],
+            })
+
+
+class AccountSnapshotTests(unittest.TestCase):
+    def setUp(self):
+        self.payload = {
+            "accountCurrencyId": 1,
+            "unrealizedPnL": "12.50",
+            "credit": "1000",
+            "ordersForOpen": [{"amount": "100", "mirrorId": 0}],
+            "orders": [],
+            "clientPortfolio": {
+                "positions": [{
+                    "positionID": 10,
+                    "instrumentID": 20,
+                    "isBuy": True,
+                    "openRate": "100",
+                    "stopLossRate": "95",
+                    "amount": "200",
+                    "leverage": "1",
+                    "units": "2",
+                    "settlementTypeID": 1,
+                    "isNoStopLoss": False,
+                }]
+            },
+        }
+
+    def test_valid_snapshot_confirms_usd_and_cash_without_inventing_risk(self):
+        snapshot = normalize_account_snapshot(self.payload)
+        self.assertEqual(snapshot.account_currency, "USD")
+        self.assertEqual(snapshot.available_cash, 900)
+        self.assertEqual(snapshot.unrealized_pnl, Decimal("12.50"))
+        self.assertEqual(len(snapshot.positions), 1)
+        self.assertFalse(snapshot.has_unbounded_stop_risk)
+
+    def test_explicit_empty_positions_is_not_confused_with_missing_positions(self):
+        self.payload["clientPortfolio"]["positions"] = []
+        snapshot = normalize_account_snapshot(self.payload)
+        self.assertEqual(snapshot.positions, ())
+        self.assertFalse(snapshot.has_unbounded_stop_risk)
+
+    def test_missing_positions_does_not_become_an_empty_portfolio(self):
+        del self.payload["clientPortfolio"]["positions"]
+        with self.assertRaises(EtoroAPIError):
+            normalize_account_snapshot(self.payload)
+
+    def test_non_usd_or_ambiguous_currency_fails_closed(self):
+        self.payload["accountCurrencyId"] = 2
+        with self.assertRaises(EtoroAPIError):
+            normalize_account_snapshot(self.payload)
+        self.payload["accountCurrencyId"] = "1"
+        with self.assertRaises(EtoroAPIError):
+            normalize_account_snapshot(self.payload)
+
+    def test_no_stop_position_is_preserved_and_flagged_as_unbounded(self):
+        self.payload["clientPortfolio"]["positions"][0]["isNoStopLoss"] = True
+        self.payload["clientPortfolio"]["positions"][0]["stopLossRate"] = None
+        snapshot = normalize_account_snapshot(self.payload)
+        self.assertTrue(snapshot.has_unbounded_stop_risk)
+        self.assertIsNone(snapshot.positions[0]["stopLossRate"])
+
+    def test_missing_stop_for_position_claiming_to_have_one_is_rejected(self):
+        self.payload["clientPortfolio"]["positions"][0]["stopLossRate"] = None
+        with self.assertRaises(EtoroAPIError):
+            normalize_account_snapshot(self.payload)
+
+    def test_unsupported_settlement_type_is_rejected(self):
+        self.payload["clientPortfolio"]["positions"][0]["settlementTypeID"] = 99
+        with self.assertRaises(EtoroAPIError):
+            normalize_account_snapshot(self.payload)
+
+    def test_invalid_position_direction_is_rejected(self):
+        self.payload["clientPortfolio"]["positions"][0]["isBuy"] = 1
+        with self.assertRaises(EtoroAPIError):
+            normalize_account_snapshot(self.payload)
 
 
 if __name__ == "__main__":
