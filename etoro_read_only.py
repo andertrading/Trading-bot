@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 import os
+import re
 import time
 from typing import Any, Mapping
 from uuid import uuid4
@@ -147,13 +148,21 @@ class EtoroReadOnlyClient:
             ("GET", "/api/v2/market-data/rates"),
             ("POST", "/api/v2/trading/info/costs"),
         }
+        candle_pattern = (
+            r"^/api/v1/market-data/instruments/[1-9][0-9]*/history/"
+            r"candles/(asc|desc)/(1m|5m|10m|15m|30m|1h|4h|1d|1w)/"
+            r"([1-9][0-9]{0,2}|1000)$"
+        )
         is_candle_path = (
-            method == "GET"
-            and path.startswith("/api/v1/market-data/instruments/")
-            and "/history/candles/" in path
+            method == "GET" and re.fullmatch(candle_pattern, path) is not None
         )
         if (method, path) not in allowed and not is_candle_path:
             raise EtoroAPIError("Endpoint no permitido por el cliente de solo lectura")
+        if path == "/api/v2/trading/info/costs":
+            if method != "POST" or not isinstance(json_body, Mapping) or json_body.get("action") != "open":
+                raise EtoroAPIError("Solo se permite la estimación hipotética de apertura")
+        elif json_body is not None:
+            raise EtoroAPIError("No se permiten cuerpos de escritura en endpoints GET")
 
         headers = {
             "x-api-key": self.app_key,
