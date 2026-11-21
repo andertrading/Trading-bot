@@ -7,10 +7,114 @@ from strategy_research import (
     _out_of_sample_trades,
     _snapshot_coverage,
     _broker_cost_sensitivity_rows,
+    _history_calendar_coverage,
+    _synchronized_oos_trades,
+    _portfolio_allocated_cost_trades,
 )
 
 
 class TestCommonCalendarOutOfSampleSplit(unittest.TestCase):
+
+
+
+    def test_synchronized_oos_trades_excludes_trade_exit_after_window(self):
+        trades = [
+            {"timeframe": "15m", "entry_time": "2025-01-20T00:00:00Z",
+             "exit_time": "2025-01-25T00:00:00Z"},
+            {"timeframe": "15m", "entry_time": "2025-01-20T00:00:00Z",
+             "exit_time": "2025-02-02T00:00:00Z"},
+        ]
+        selected = _synchronized_oos_trades(
+            trades, "15m", "2025-01-01T00:00:00Z", "2025-01-31T00:00:00Z"
+        )
+        self.assertEqual(len(selected), 1)
+        self.assertEqual(selected[0]["exit_time"], "2025-01-25T00:00:00Z")
+
+    def test_portfolio_allocated_cost_trades_use_actual_scaled_quantity(self):
+        source = [{
+            "asset": "BTC", "timeframe": "15m",
+            "entry_time": "2025-01-20T00:00:00Z",
+            "exit_time": "2025-01-21T00:00:00Z",
+            "entry": 100000.0, "exit": 101000.0,
+            "hypothetical_quantity": 0.01,
+            "hypothetical_risk_budget_usd": 10.0,
+            "hypothetical_gross_pnl_usd": 10.0,
+        }]
+        accepted = [{
+            "asset": "BTC", "timeframe": "15m",
+            "entry_time": "2025-01-20T00:00:00+00:00",
+            "exit_time": "2025-01-21T00:00:00+00:00",
+            "quantity": 0.002, "allocated_risk_usd": 2.0,
+            "realized_pnl_usd": 2.0, "notional_usd": 200.0,
+            "allocation_factor": 0.2,
+        }]
+        scaled = _portfolio_allocated_cost_trades(source, accepted)
+        self.assertEqual(len(scaled), 1)
+        self.assertAlmostEqual(scaled[0]["hypothetical_quantity"], 0.002)
+        self.assertAlmostEqual(scaled[0]["hypothetical_risk_budget_usd"], 2.0)
+        self.assertAlmostEqual(scaled[0]["hypothetical_gross_pnl_usd"], 2.0)
+        self.assertAlmostEqual(scaled[0]["portfolio_allocated_notional_usd"], 200.0)
+        cost_rows = _broker_cost_sensitivity_rows(
+            scaled,
+            assets_config={"BTC": {"type": "CRYPTO", "currency": "USD"}},
+            spread_bps_values=(0,),
+        )
+        etoro = next(
+            row for row in cost_rows
+            if row["venue"] == "ETORO_REAL"
+            and row["fee_mode"] == "published_fee_scenario"
+        )
+        self.assertAlmostEqual(etoro["commission_scenario_usd"], 4.02)
+
+    def test_synchronized_oos_trades_uses_shared_timeframe_midpoint_and_bounds(self):
+        trades = [
+            {"timeframe": "15m", "entry_time": "2025-01-05T00:00:00Z",
+             "exit_time": "2025-01-06T00:00:00Z", "result_R": 1.0},
+            {"timeframe": "15m", "entry_time": "2025-01-20T00:00:00Z",
+             "exit_time": "2025-01-21T00:00:00Z", "result_R": 2.0},
+            {"timeframe": "1d", "entry_time": "2025-01-20T00:00:00Z",
+             "exit_time": "2025-01-22T00:00:00Z", "result_R": 3.0},
+            {"timeframe": "15m", "entry_time": "2025-02-01T00:00:00Z",
+             "exit_time": "2025-02-02T00:00:00Z", "result_R": 4.0},
+        ]
+        selected = _synchronized_oos_trades(
+            trades, "15m", "2025-01-01T00:00:00Z", "2025-01-31T00:00:00Z"
+        )
+        self.assertEqual(len(selected), 1)
+        self.assertEqual(selected[0]["result_R"], 2.0)
+
+    def test_history_calendar_coverage_detects_non_overlapping_series(self):
+        assets = [("BTC", "BTC"), ("CSPX", "CSPX")]
+        _, summary = _history_calendar_coverage(
+            {
+                ("BTC", "15m"): ("2025-01-01T00:00:00Z", "2025-12-31T00:00:00Z"),
+                ("CSPX", "15m"): ("2026-01-01T00:00:00Z", "2026-10-01T00:00:00Z"),
+                ("BTC", "1d"): ("2025-01-01T00:00:00Z", "2025-12-31T00:00:00Z"),
+                ("CSPX", "1d"): ("2025-01-01T00:00:00Z", "2025-12-31T00:00:00Z"),
+            },
+            assets, ("15m", "1d"),
+        )
+        self.assertFalse(summary["by_timeframe"]["15m"]["common_window_exists"])
+        self.assertTrue(summary["by_timeframe"]["1d"]["common_window_exists"])
+        self.assertEqual(summary["all_timeframes"]["status"], "NO_COMMON_CALENDAR_WINDOW")
+
+    def test_history_calendar_coverage_reports_shared_window_and_missing_pair(self):
+        rows, summary = _history_calendar_coverage(
+            {
+                ("BTC", "15m"): ("2025-01-01T00:00:00Z", "2025-12-31T00:00:00Z"),
+                ("CSPX", "15m"): ("2025-03-01T00:00:00Z", "2025-10-01T00:00:00Z"),
+            },
+            [("BTC", "BTC"), ("CSPX", "CSPX"), ("SOL", "SOL")],
+            ("15m",),
+        )
+        result = summary["all_timeframes"]
+        self.assertEqual(result["status"], "PARTIAL_UNIVERSE")
+        self.assertEqual(result["common_start_utc"], "2025-03-01T00:00:00+00:00")
+        self.assertEqual(result["common_end_utc"], "2025-10-01T00:00:00+00:00")
+        self.assertEqual(result["missing_history_bounds"], [
+            {"asset": "SOL", "timeframe": "15m"}
+        ])
+        self.assertEqual(len(rows), 3)
 
     def test_snapshot_coverage_explicitly_reports_missing_universe_pair(self):
         assets = [(name, name) for name in ("BTC", "SOL")]

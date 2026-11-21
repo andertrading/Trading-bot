@@ -6,6 +6,7 @@ on:
       - research/fixed-common-calendar-oos-20261121
       - research/explicit-universe-coverage-20261121
       - research/broker-cost-sensitivity-20261121
+      - research/history-calendar-audit-20261121
 
 permissions:
   contents: read
@@ -52,6 +53,119 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+      - name: Probe current market-data provider timestamps
+        continue-on-error: true
+        env:
+          TWELVE_DATA_API_KEY: ${{ secrets.TWELVE_DATA_API_KEY }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import time
+          from datetime import datetime, timezone
+          from urllib.parse import urlencode
+          from urllib.request import Request, urlopen
+
+          key = os.environ.get("TWELVE_DATA_API_KEY")
+          if not key:
+              raise SystemExit("TWELVE_DATA_API_KEY secret is missing")
+          now = datetime.now(timezone.utc)
+          results = []
+
+          def get_json(url, params):
+              request = Request(
+                  url + "?" + urlencode(params),
+                  headers={"User-Agent": "TradingBot-Research-Freshness/1.0"},
+              )
+              with urlopen(request, timeout=30) as response:
+                  return json.loads(response.read().decode("utf-8"))
+
+          def record(label, provider, stamp, threshold_hours):
+              latest = datetime.fromisoformat(str(stamp).replace("Z", "+00:00"))
+              if latest.tzinfo is None:
+                  latest = latest.replace(tzinfo=timezone.utc)
+              latest = latest.astimezone(timezone.utc)
+              age = (now - latest).total_seconds() / 3600
+              fresh = age <= threshold_hours
+              results.append({
+                  "series": label, "provider": provider,
+                  "latest_timestamp_utc": latest.isoformat(),
+                  "age_hours": round(age, 2),
+                  "threshold_hours": threshold_hours, "fresh": fresh,
+              })
+              print(
+                  f"{label}: {latest.isoformat()} age={age:.2f}h "
+                  f"threshold={threshold_hours}h status={'FRESH' if fresh else 'STALE'}"
+              )
+
+          for i, (label, symbol, interval, threshold) in enumerate([
+              ("AAPL 15m", "AAPL", "15min", 72),
+              ("AAPL 1d", "AAPL", "1day", 96),
+              ("BTC 15m", "BTC/USD", "15min", 0.75),
+              ("BTC 1d", "BTC/USD", "1day", 48),
+          ]):
+              try:
+                  payload = get_json(
+                      "https://api.twelvedata.com/time_series",
+                      {
+                          "symbol": symbol, "interval": interval,
+                          "outputsize": 2, "timezone": "UTC", "apikey": key,
+                      },
+                  )
+                  values = payload.get("values") or []
+                  if not values or not values[0].get("datetime"):
+                      raise ValueError(
+                          f"no provider timestamp; code={payload.get('code')} "
+                          f"message={payload.get('message')}"
+                      )
+                  record(label, "Twelve Data", values[0]["datetime"], threshold)
+              except Exception as exc:
+                  results.append({
+                      "series": label, "provider": "Twelve Data",
+                      "fresh": False, "error": f"{type(exc).__name__}: {exc}",
+                  })
+                  print(f"{label}: PROVIDER ERROR {type(exc).__name__}: {exc}")
+              if i < 3:
+                  time.sleep(9)
+
+          for label, symbol, interval, threshold, days in [
+              ("CSPX 15m", "CSPX.L", "15m", 72, 55),
+              ("CSPX 1d", "CSPX.L", "1d", 96, 400),
+          ]:
+              try:
+                  payload = get_json(
+                      f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}",
+                      {
+                          "period1": int(now.timestamp() - days * 86400),
+                          "period2": int(now.timestamp()),
+                          "interval": interval, "events": "history",
+                          "includeAdjustedClose": "true",
+                      },
+                  )
+                  chart = payload.get("chart") or {}
+                  series = chart.get("result") or []
+                  timestamps = series[0].get("timestamp") if series else None
+                  if chart.get("error") or not timestamps:
+                      raise ValueError("Yahoo returned no usable timestamps")
+                  latest = datetime.fromtimestamp(timestamps[-1], timezone.utc)
+                  record(label, "Yahoo Finance", latest.isoformat(), threshold)
+              except Exception as exc:
+                  results.append({
+                      "series": label, "provider": "Yahoo Finance",
+                      "fresh": False, "error": f"{type(exc).__name__}: {exc}",
+                  })
+                  print(f"{label}: PROVIDER ERROR {type(exc).__name__}: {exc}")
+
+          report = {
+              "generated_at_utc": now.isoformat(),
+              "status": "FRESH" if all(row["fresh"] for row in results) else "STALE",
+              "results": results,
+          }
+          with open("provider_freshness.json", "w", encoding="utf-8") as output:
+              json.dump(report, output, indent=2)
+          print("Provider freshness summary:", report["status"])
+          PY
+
 
       - name: Merge immutable snapshots and compile research harness
         run: |
@@ -144,3 +258,7 @@ jobs:
             strategy_research_status.json
             snapshot_coverage.json
             strategy_research_broker_cost_scenarios.csv
+            strategy_research_history_calendar_coverage.csv
+            strategy_research_synchronized_broker_cost_scenarios.csv
+            strategy_research_synchronized_calendar.csv
+            provider_freshness.json

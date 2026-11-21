@@ -202,6 +202,187 @@ def _snapshot_coverage(assets, timeframes, manifest):
     }
 
 
+
+def _history_calendar_coverage(history_bounds, assets, timeframes):
+    """Audit whether every expected series shares a real calendar window.
+
+    This compares actual first/last timestamps captured from immutable replay
+    snapshots. It does not claim continuous candle coverage inside the bounds.
+    """
+    expected = {
+        (str(asset).upper(), str(timeframe).lower())
+        for asset, _ in assets
+        for timeframe in timeframes
+    }
+    rows = []
+    normalized = {}
+
+    for asset, timeframe in sorted(expected):
+        bounds = history_bounds.get((asset, timeframe))
+        if bounds is None:
+            rows.append({
+                "asset": asset, "timeframe": timeframe,
+                "history_status": "MISSING_HISTORY_BOUNDS",
+                "history_start_utc": None, "history_end_utc": None,
+                "history_duration_days": None,
+            })
+            continue
+        try:
+            start = _utc_timestamp(bounds[0])
+            end = _utc_timestamp(bounds[1])
+        except (TypeError, ValueError, OverflowError, IndexError):
+            start = end = None
+        if start is None or end is None or end <= start:
+            rows.append({
+                "asset": asset, "timeframe": timeframe,
+                "history_status": "INVALID_HISTORY_BOUNDS",
+                "history_start_utc": start.isoformat() if start is not None else None,
+                "history_end_utc": end.isoformat() if end is not None else None,
+                "history_duration_days": None,
+            })
+            continue
+        normalized[(asset, timeframe)] = (start, end)
+        rows.append({
+            "asset": asset, "timeframe": timeframe,
+            "history_status": "AVAILABLE",
+            "history_start_utc": start.isoformat(),
+            "history_end_utc": end.isoformat(),
+            "history_duration_days": round((end - start).total_seconds() / 86400, 4),
+        })
+
+    def intersection(keys):
+        available = [normalized[key] for key in keys if key in normalized]
+        if not available:
+            return {
+                "available_series": 0, "common_window_exists": False,
+                "common_start_utc": None, "common_end_utc": None,
+                "common_duration_days": 0.0,
+            }
+        common_start = max(start for start, _ in available)
+        common_end = min(end for _, end in available)
+        exists = common_end > common_start
+        return {
+            "available_series": len(available),
+            "common_window_exists": exists,
+            "common_start_utc": common_start.isoformat(),
+            "common_end_utc": common_end.isoformat(),
+            "common_duration_days": (
+                round((common_end - common_start).total_seconds() / 86400, 4)
+                if exists else 0.0
+            ),
+        }
+
+    by_timeframe = {}
+    for timeframe in sorted({key[1] for key in expected}):
+        keys = [key for key in sorted(expected) if key[1] == timeframe]
+        result = intersection(keys)
+        result["expected_series"] = len(keys)
+        result["missing_history_bounds"] = [
+            asset for asset, tf in keys if (asset, tf) not in normalized
+        ]
+        result["status"] = (
+            "NO_COMMON_CALENDAR_WINDOW"
+            if not result["common_window_exists"]
+            else "PARTIAL_UNIVERSE"
+            if len([key for key in keys if key in normalized]) != len(keys)
+            else "COMPARABLE_BOUNDS_ONLY"
+        )
+        by_timeframe[timeframe] = result
+
+    all_result = intersection(sorted(expected))
+    all_result["expected_series"] = len(expected)
+    all_result["missing_history_bounds"] = [
+        {"asset": asset, "timeframe": timeframe}
+        for asset, timeframe in sorted(expected)
+        if (asset, timeframe) not in normalized
+    ]
+    all_result["status"] = (
+        "NO_COMMON_CALENDAR_WINDOW"
+        if not all_result["common_window_exists"]
+        else "PARTIAL_UNIVERSE"
+        if len(normalized) != len(expected)
+        else "COMPARABLE_BOUNDS_ONLY"
+    )
+    return rows, {
+        "all_timeframes": all_result,
+        "by_timeframe": by_timeframe,
+        "interpretation": (
+            "Intersection uses first/last timestamps only; internal candle gaps "
+            "must still be validated separately. A common calendar window is "
+            "not, by itself, proof of synchronized executable prices."
+        ),
+    }
+
+
+
+def _synchronized_oos_trades(trades, timeframe, history_start, history_end):
+    """Select only trades in the second half of one shared timeframe window."""
+    bounds = _chronological_period_bounds(history_start, history_end)
+    if bounds is None:
+        return []
+    _, oos_start, window_end, _ = bounds
+    selected = []
+    for trade in trades or []:
+        if str(trade.get("timeframe", "")).lower() != str(timeframe).lower():
+            continue
+        try:
+            entry_time = _utc_timestamp(trade["entry_time"])
+            exit_time = _utc_timestamp(trade["exit_time"])
+        except (KeyError, TypeError, ValueError, OverflowError):
+            continue
+        # Do not include outcomes that resolve after the shared calendar window.
+        if oos_start < entry_time and entry_time <= exit_time <= window_end:
+            selected.append(dict(trade))
+    return selected
+
+
+def _portfolio_allocated_cost_trades(trades, accepted_positions):
+    """Rebase fee inputs to the exact quantity/risk actually allocated by portfolio simulation."""
+    def key(row):
+        return (
+            str(row.get("asset", "")).upper(),
+            str(row.get("timeframe", "")).lower(),
+            _utc_timestamp(row["entry_time"]),
+            _utc_timestamp(row["exit_time"]),
+        )
+
+    candidates = {}
+    for trade in trades or []:
+        try:
+            candidates.setdefault(key(trade), []).append(dict(trade))
+        except (KeyError, TypeError, ValueError, OverflowError):
+            continue
+
+    allocated = []
+    for position in accepted_positions or []:
+        try:
+            position_key = key(position)
+            matches = candidates.get(position_key) or []
+            if not matches:
+                continue
+            trade = matches.pop(0)
+            quantity = float(position["quantity"])
+            risk_budget = float(position["allocated_risk_usd"])
+            gross_pnl = float(position["realized_pnl_usd"])
+            if min(quantity, risk_budget) <= 0 or not all(
+                math.isfinite(value) for value in (quantity, risk_budget, gross_pnl)
+            ):
+                continue
+            trade["hypothetical_quantity"] = quantity
+            trade["hypothetical_risk_budget_usd"] = risk_budget
+            trade["hypothetical_gross_pnl_usd"] = gross_pnl
+            trade["portfolio_allocated_notional_usd"] = float(
+                position["notional_usd"]
+            )
+            trade["portfolio_allocation_factor"] = float(
+                position["allocation_factor"]
+            )
+            allocated.append(trade)
+        except (KeyError, TypeError, ValueError, OverflowError):
+            continue
+    return allocated
+
+
 def _metrics_row(strategy_name, asset, timeframe, period, trades):
     metrics = bt.calculate_metrics(trades)
     return {
@@ -566,6 +747,93 @@ def main():
     ]
     if failed_pairs:
         coverage_summary["status"] = "PARTIAL"
+    calendar_rows, calendar_summary = _history_calendar_coverage(
+        history_bounds, assets, timeframes
+    )
+    coverage_summary["history_calendar_coverage"] = calendar_summary
+    pd.DataFrame(calendar_rows).to_csv(
+        "strategy_research_history_calendar_coverage.csv", index=False
+    )
+
+    synchronized_rows = []
+    synchronized_cost_rows = []
+    for timeframe in timeframes:
+        timeframe_window = calendar_summary["by_timeframe"][str(timeframe).lower()]
+        if not timeframe_window["common_window_exists"]:
+            for strategy_name in STRATEGIES:
+                synchronized_rows.append({
+                    "strategy": strategy_name,
+                    "timeframe": timeframe,
+                    "status": "NO_COMMON_CALENDAR_WINDOW",
+                    "common_start_utc": timeframe_window["common_start_utc"],
+                    "common_end_utc": timeframe_window["common_end_utc"],
+                    "oos_start_utc": None,
+                    "oos_end_utc": None,
+                    "universe_available_series": timeframe_window["available_series"],
+                    "universe_expected_series": timeframe_window["expected_series"],
+                    "costs_included": False,
+                })
+            continue
+
+        common_start = timeframe_window["common_start_utc"]
+        common_end = timeframe_window["common_end_utc"]
+        split_bounds = _chronological_period_bounds(common_start, common_end)
+        _, oos_start, _, _ = split_bounds
+        timeframe_universe_status = timeframe_window["status"]
+
+        for strategy_name in STRATEGIES:
+            source_trades = [
+                trade for trade in all_trades
+                if trade.get("strategy") == strategy_name
+            ]
+            selected = _synchronized_oos_trades(
+                source_trades, timeframe, common_start, common_end
+            )
+            metrics = bt.calculate_metrics(selected)
+            portfolio = bt.simulate_portfolio(
+                selected, capital_usd=bt.INITIAL_CAPITAL_USD
+            )
+            synchronized_rows.append({
+                "strategy": strategy_name,
+                "timeframe": timeframe,
+                "status": timeframe_universe_status,
+                "common_start_utc": common_start,
+                "common_end_utc": common_end,
+                "oos_start_utc": oos_start.isoformat(),
+                "oos_end_utc": common_end,
+                "universe_available_series": timeframe_window["available_series"],
+                "universe_expected_series": timeframe_window["expected_series"],
+                "trades": metrics["trades"],
+                "wins": metrics["wins"],
+                "losses": metrics["losses"],
+                "trade_win_rate_pct": metrics["win_rate_pct"],
+                "total_R": metrics["total_R"],
+                "average_R": metrics["average_R"],
+                "profit_factor_R": metrics["profit_factor_R"],
+                "max_drawdown_R": metrics["max_drawdown_R"],
+                "average_duration_bars": metrics["average_duration_bars"],
+                **portfolio["summary"],
+                "costs_included": False,
+                "interpretation": (
+                    "Synchronized calendar OOS within this timeframe only; "
+                    "gross portfolio simulation. Broker costs are in the "
+                    "separate sensitivity report."
+                ),
+            })
+            allocated_cost_trades = _portfolio_allocated_cost_trades(
+                selected, portfolio.get("trades", [])
+            )
+            synchronized_cost_rows.extend(
+                _broker_cost_sensitivity_rows(allocated_cost_trades)
+            )
+
+    pd.DataFrame(synchronized_rows).to_csv(
+        "strategy_research_synchronized_calendar.csv", index=False
+    )
+    pd.DataFrame(synchronized_cost_rows).to_csv(
+        "strategy_research_synchronized_broker_cost_scenarios.csv",
+        index=False,
+    )
     for portfolio_row in oos_portfolio_rows:
         portfolio_row["universe_coverage_status"] = coverage_summary["status"]
     pd.DataFrame(coverage_rows).to_csv(
