@@ -410,6 +410,221 @@ def resolve_unique_instrument(
     return dict(item)
 
 
+WHAT_IF_ALLOWED_FIELDS = frozenset({
+    "action",
+    "transaction",
+    "symbol",
+    "instrumentId",
+    "settlementType",
+    "orderType",
+    "triggerRate",
+    "leverage",
+    "amount",
+    "orderCurrency",
+    "units",
+    "contracts",
+    "stopLossRate",
+    "takeProfitRate",
+    "stopLossType",
+    "additionalMargin",
+    "limitRate",
+})
+WHAT_IF_SETTLEMENT_TYPES = {"cfd", "real", "realFutures", "marginTrade"}
+WHAT_IF_ORDER_TYPES = {"mkt", "mit", "limitIOC"}
+WHAT_IF_COST_TYPES = {
+    "markup",
+    "marketSpread",
+    "transactionFee",
+    "overnightFee",
+    "overWeekendFee",
+    "sdrt",
+}
+
+
+@dataclass(frozen=True)
+class EtoroCostEstimate:
+    instrument_id: int
+    symbol: str | None
+    costs: Mapping[str, Decimal]
+    last_updated: datetime
+
+
+def validate_what_if_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """Validate the documented hypothetical-open schema before sending POST."""
+    if not isinstance(payload, Mapping) or not payload:
+        raise ValueError("El payload de costes hipotéticos debe ser un objeto no vacío")
+    unknown = [key for key in payload if key not in WHAT_IF_ALLOWED_FIELDS]
+    if unknown:
+        raise ValueError(f"Campos no permitidos en costes hipotéticos: {unknown!r}")
+    if payload.get("action") != "open":
+        raise ValueError("Solo se permite action='open'")
+    transaction = payload.get("transaction")
+    if not isinstance(transaction, str) or transaction not in {"buy", "sellShort"}:
+        raise ValueError("transaction debe ser buy o sellShort")
+
+    has_id = "instrumentId" in payload
+    has_symbol = "symbol" in payload
+    if has_id == has_symbol:
+        raise ValueError("Debe indicarse exactamente uno de instrumentId o symbol")
+    if has_id:
+        value = payload["instrumentId"]
+        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+            raise ValueError("instrumentId debe ser un entero positivo")
+    elif not isinstance(payload["symbol"], str) or not payload["symbol"].strip():
+        raise ValueError("symbol debe ser un texto no vacío")
+
+    settlement = payload.get("settlementType")
+    if not isinstance(settlement, str) or settlement not in WHAT_IF_SETTLEMENT_TYPES:
+        raise ValueError("settlementType no está confirmado o no está permitido")
+    order_type = payload.get("orderType")
+    if not isinstance(order_type, str) or order_type not in WHAT_IF_ORDER_TYPES:
+        raise ValueError("orderType no está confirmado o no está permitido")
+
+    leverage = payload.get("leverage")
+    if isinstance(leverage, bool) or not isinstance(leverage, int) or leverage < 1:
+        raise ValueError("leverage debe ser un entero igual o superior a 1")
+    if payload.get("orderCurrency") != "usd":
+        raise ValueError("Solo se admite orderCurrency='usd'")
+
+    size_fields = [field for field in ("amount", "units", "contracts") if field in payload]
+    if len(size_fields) != 1:
+        raise ValueError("Debe indicarse exactamente uno de amount, units o contracts")
+    size_field = size_fields[0]
+    size = _decimal(payload[size_field], size_field)
+    if size <= 0:
+        raise ValueError(f"{size_field} debe ser positivo")
+    if settlement == "realFutures" and size_field != "contracts":
+        raise ValueError("realFutures requiere contracts")
+    if size_field == "contracts":
+        if settlement != "realFutures" or size != size.to_integral_value():
+            raise ValueError("contracts solo admite enteros para realFutures")
+
+    if "additionalMargin" in payload:
+        if settlement != "realFutures" or _decimal(payload["additionalMargin"], "additionalMargin") <= 0:
+            raise ValueError("additionalMargin solo se admite positivo para realFutures")
+
+    if "stopLossRate" in payload:
+        if _decimal(payload["stopLossRate"], "stopLossRate") <= 0:
+            raise ValueError("stopLossRate debe ser positivo")
+    requires_stop = leverage > 1 or payload["transaction"] == "sellShort" or settlement == "realFutures"
+    if requires_stop and "stopLossRate" not in payload:
+        raise ValueError("Esta combinación requiere stopLossRate")
+
+    if "takeProfitRate" in payload and _decimal(payload["takeProfitRate"], "takeProfitRate") <= 0:
+        raise ValueError("takeProfitRate debe ser positivo")
+    stop_loss_type = payload.get("stopLossType")
+    if stop_loss_type is not None and (
+        not isinstance(stop_loss_type, str) or stop_loss_type not in {"fixed", "trailing"}
+    ):
+        raise ValueError("stopLossType no permitido")
+    if stop_loss_type == "trailing" and "stopLossRate" not in payload:
+        raise ValueError("El stop trailing requiere stopLossRate")
+
+    if order_type == "mit":
+        if settlement == "realFutures":
+            raise ValueError("mit no está permitido para realFutures")
+        if "triggerRate" not in payload or _decimal(payload["triggerRate"], "triggerRate") <= 0:
+            raise ValueError("mit requiere triggerRate positivo")
+    elif "triggerRate" in payload:
+        raise ValueError("triggerRate solo se permite con orderType='mit'")
+
+    if order_type == "limitIOC":
+        if "limitRate" not in payload or _decimal(payload["limitRate"], "limitRate") <= 0:
+            raise ValueError("limitIOC requiere limitRate positivo")
+    elif "limitRate" in payload:
+        raise ValueError("limitRate solo se permite con orderType='limitIOC'")
+
+    return dict(payload)
+
+
+def normalize_cost_estimate(
+    response: EtoroResponse,
+    *,
+    now_utc: datetime,
+    expected_instrument_id: int | None = None,
+    expected_symbol: str | None = None,
+    max_age_seconds: int = 300,
+) -> EtoroCostEstimate:
+    """Validate a fresh USD cost response and its instrument identity."""
+    if response.status_code != 200 or not isinstance(response.data, Mapping):
+        raise EtoroAPIError("La estimación de costes no es una respuesta HTTP 200 válida")
+    if (expected_instrument_id is None) == (expected_symbol is None):
+        raise EtoroAPIError("Debe indicarse exactamente un instrumento esperado")
+    if expected_instrument_id is not None and (
+        isinstance(expected_instrument_id, bool)
+        or not isinstance(expected_instrument_id, int)
+        or expected_instrument_id <= 0
+    ):
+        raise EtoroAPIError("expected_instrument_id inválido")
+    if expected_symbol is not None and (
+        not isinstance(expected_symbol, str) or not expected_symbol.strip()
+    ):
+        raise EtoroAPIError("expected_symbol inválido")
+    if (
+        not isinstance(now_utc, datetime)
+        or now_utc.tzinfo is None
+        or now_utc.utcoffset() != timedelta(0)
+    ):
+        raise EtoroAPIError("now_utc debe incluir zona horaria UTC")
+    if isinstance(max_age_seconds, bool) or not isinstance(max_age_seconds, int) or max_age_seconds <= 0:
+        raise EtoroAPIError("max_age_seconds debe ser un entero positivo")
+
+    instrument_id = response.data.get("instrumentId")
+    if isinstance(instrument_id, bool) or not isinstance(instrument_id, int) or instrument_id <= 0:
+        raise EtoroAPIError("La respuesta de costes no contiene instrumentId válido")
+    if expected_instrument_id is not None and instrument_id != expected_instrument_id:
+        raise EtoroAPIError("La respuesta de costes corresponde a otro instrumento")
+
+    symbol = response.data.get("symbol")
+    if symbol is not None and not isinstance(symbol, str):
+        raise EtoroAPIError("symbol inválido en respuesta de costes")
+    if expected_symbol is not None and (
+        not isinstance(expected_symbol, str)
+        or not isinstance(symbol, str)
+        or symbol.casefold() != expected_symbol.casefold()
+    ):
+        raise EtoroAPIError("La respuesta de costes corresponde a otro símbolo")
+
+    raw_costs = response.data.get("costs")
+    if not isinstance(raw_costs, list) or not raw_costs:
+        raise EtoroAPIError("La respuesta no contiene componentes de coste")
+    costs: dict[str, Decimal] = {}
+    for index, item in enumerate(raw_costs):
+        if not isinstance(item, Mapping):
+            raise EtoroAPIError(f"Componente de coste inválido: {index}")
+        cost_type = item.get("costType")
+        if not isinstance(cost_type, str) or cost_type not in WHAT_IF_COST_TYPES or cost_type in costs:
+            raise EtoroAPIError(f"Tipo de coste desconocido o duplicado: {cost_type}")
+        if item.get("currency") != "USD":
+            raise EtoroAPIError(f"Divisa de coste no confirmada para {cost_type}")
+        value = _decimal(item.get("value"), f"costs[{index}].value")
+        if value < 0:
+            raise EtoroAPIError(f"Importe de coste negativo para {cost_type}")
+        costs[cost_type] = value
+
+    updated_value = response.data.get("lastUpdated")
+    if not isinstance(updated_value, str):
+        raise EtoroAPIError("Falta lastUpdated en la respuesta de costes")
+    try:
+        updated = datetime.fromisoformat(
+            updated_value[:-1] + "+00:00" if updated_value.endswith("Z") else updated_value
+        )
+    except ValueError:
+        raise EtoroAPIError("lastUpdated inválido") from None
+    if updated.tzinfo is None or updated.utcoffset() != timedelta(0):
+        raise EtoroAPIError("lastUpdated no está expresado en UTC")
+    age_seconds = (now_utc - updated).total_seconds()
+    if age_seconds < -5 or age_seconds > max_age_seconds:
+        raise EtoroAPIError("La estimación de costes está obsoleta o tiene fecha futura")
+
+    return EtoroCostEstimate(
+        instrument_id=instrument_id,
+        symbol=symbol,
+        costs=costs,
+        last_updated=updated,
+    )
+
+
 class EtoroReadOnlyClient:
     """Small eToro client with a deliberately restricted endpoint surface."""
 
@@ -627,12 +842,29 @@ class EtoroReadOnlyClient:
         return self._request("GET", path)
 
     def get_what_if_costs(self, payload: Mapping[str, Any]) -> EtoroResponse:
-        if not isinstance(payload, Mapping) or not payload:
-            raise ValueError("El payload de costes hipotéticos debe ser un objeto no vacío")
-        if payload.get("action") != "open":
-            raise ValueError("Solo se permite action='open' en la consulta hipotética")
+        validated = validate_what_if_payload(payload)
         return self._request(
             "POST",
             "/api/v2/trading/info/costs",
-            json_body=dict(payload),
+            json_body=validated,
+        )
+
+    def get_validated_what_if_costs(
+        self,
+        payload: Mapping[str, Any],
+        now_utc: datetime,
+        max_age_seconds: int = 300,
+    ) -> EtoroCostEstimate:
+        validated = validate_what_if_payload(payload)
+        response = self._request(
+            "POST",
+            "/api/v2/trading/info/costs",
+            json_body=validated,
+        )
+        return normalize_cost_estimate(
+            response,
+            now_utc=now_utc,
+            expected_instrument_id=validated.get("instrumentId"),
+            expected_symbol=validated.get("symbol"),
+            max_age_seconds=max_age_seconds,
         )
