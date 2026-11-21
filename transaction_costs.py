@@ -144,6 +144,8 @@ def estimate_etoro_trade_costs(
             "CFD: spread porcentual de apertura/cierre publicado, sujeto a cambios"
         )
 
+    if market_spread_bps is None:
+        market_spread_bps = ETORO_MARKET_SPREAD_BPS.get(asset)
     if not ETORO_EXECUTION_PRICE_BASIS_CONFIRMED:
         result["unpriced_costs"].append("historical_ohlc_to_etoro_execution_price_basis_unverified")
     if market_spread_bps is None:
