@@ -430,6 +430,7 @@ class ScheduledScanTests(unittest.TestCase):
     def test_long_report_is_sent_in_full_and_photo_uses_short_caption(
         self, build_messages, generate_chart, send_photo, send_text
     ):
+        """Ensure photo captions never replace or truncate the full text report."""
         result = scheduled_scan._send_signal_report(
             self.scan,
             self.scan["results"][0],
