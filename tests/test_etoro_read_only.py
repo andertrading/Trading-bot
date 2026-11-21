@@ -13,6 +13,7 @@ from etoro_read_only import (
     calculate_available_cash,
     normalize_realtime_quotes,
     normalize_account_snapshot,
+    resolve_unique_instrument,
 )
 
 
@@ -222,6 +223,75 @@ class AvailableCashTests(unittest.TestCase):
                 "ordersForOpen": [],
                 "orders": [{"amount": -50}],
             })
+
+
+class InstrumentDiscoveryTests(unittest.TestCase):
+    def setUp(self):
+        self.item = {
+            "instrumentId": 123,
+            "displayname": "Tesla",
+            "internalSymbolFull": "TSLA",
+            "instrumentType": "Stock",
+            "isCurrentlyTradable": True,
+            "isActiveInPlatform": True,
+            "isBuyEnabled": True,
+            "isDelisted": False,
+        }
+
+    def test_search_instruments_uses_official_endpoint_and_required_fields(self):
+        session = Mock()
+        session.request.return_value = FakeResponse(data={"items": [self.item]})
+        client = EtoroReadOnlyClient("app-key", "user-key", session=session)
+        result = client.search_instruments(
+            {"internalSymbolFull": "TSLA", "isCurrentlyTradable": True}
+        )
+        self.assertEqual(result.data["items"][0]["instrumentId"], 123)
+        args, kwargs = session.request.call_args
+        self.assertEqual(args[0], "GET")
+        self.assertTrue(args[1].endswith("/api/v1/market-data/search"))
+        self.assertIn("instrumentId", kwargs["params"]["fields"])
+        self.assertEqual(kwargs["params"]["internalSymbolFull"], "TSLA")
+        self.assertEqual(kwargs["params"]["isCurrentlyTradable"], "true")
+
+    def test_invalid_search_filters_fields_and_pagination_are_rejected(self):
+        session = Mock()
+        client = EtoroReadOnlyClient("app-key", "user-key", session=session)
+        with self.assertRaises(ValueError):
+            client.search_instruments({"untrustedFilter": "x"})
+        with self.assertRaises(ValueError):
+            client.search_instruments({}, fields=["instrumentId", "notAField"])
+        with self.assertRaises(ValueError):
+            client.search_instruments({}, page_size=1001)
+        with self.assertRaises(ValueError):
+            client.search_instruments({}, page_number=0)
+        session.request.assert_not_called()
+
+    def test_exact_unique_active_instrument_is_resolved(self):
+        response = EtoroResponse(
+            {"items": [self.item]},
+            200,
+            {},
+        )
+        resolved = resolve_unique_instrument(response, "tsla")
+        self.assertEqual(resolved["instrumentId"], 123)
+
+    def test_fuzzy_duplicate_or_nontradable_matches_are_rejected(self):
+        response = EtoroResponse({"items": [self.item, dict(self.item, instrumentId=124)]}, 200, {})
+        with self.assertRaises(EtoroAPIError):
+            resolve_unique_instrument(response, "TSLA")
+
+        response = EtoroResponse(
+            {"items": [dict(self.item, isCurrentlyTradable=False)]},
+            200,
+            {},
+        )
+        with self.assertRaises(EtoroAPIError):
+            resolve_unique_instrument(response, "TSLA")
+
+    def test_missing_exact_match_is_not_guessed(self):
+        response = EtoroResponse({"items": [self.item]}, 200, {})
+        with self.assertRaises(EtoroAPIError):
+            resolve_unique_instrument(response, "Tesla Inc")
 
 
 class RealtimeQuoteValidationTests(unittest.TestCase):
