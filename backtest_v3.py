@@ -38,6 +38,7 @@ PERIODS = {
 }
 
 MIN_BARS = 220
+BACKTEST_DAILY_LOOKBACK_DAYS = 730
 
 MIN_EXECUTION_RR = 2.0
 RR_TOLERANCE = 1e-6
@@ -226,7 +227,9 @@ def _snapshot_metadata(
         "ticker": ticker,
         "timeframe": interval,
         "provider": provider,
-        "period_requested": "provider_maximum_available",
+        "period_requested": (
+            "2y" if interval == "1d" else "provider_maximum_available"
+        ),
         "interval_requested": interval,
         "auto_adjust": None,
         "adjustment_policy": data.attrs.get(
@@ -1023,6 +1026,12 @@ def download_history(ticker, interval, asset=None):
         if data.index.hasnans: raise ValueError("timestamps inválidos")
         if not data.index.is_monotonic_increasing: raise ValueError("timestamps desordenados")
         if data.index.has_duplicates: raise ValueError("timestamps duplicados")
+        if interval == "1d":
+            daily_cutoff = (
+                data.index[-1]
+                - pd.Timedelta(days=BACKTEST_DAILY_LOOKBACK_DAYS)
+            )
+            data = data.loc[data.index >= daily_cutoff].copy()
         for column in columns:
             data[column] = pd.to_numeric(data[column], errors="coerce")
         for column in required:
