@@ -80,15 +80,18 @@ class ScheduledScanTests(unittest.TestCase):
         send_message.assert_not_called()
 
     def test_same_candle_does_not_create_duplicate_signal(self):
-        with patch.object(scheduled_scan, "UpstashSignalStateStore", MemoryStore), patch.object(
+        store = MemoryStore("url", "token")
+        with patch.object(
+            scheduled_scan, "UpstashSignalStateStore", return_value=store
+        ), patch.object(
             scheduled_scan.Bot, "run_scan", return_value=self.scan
         ), patch.object(scheduled_scan, "SIGNAL_ALERTS_ENABLED", False):
             first = scheduled_scan.run_scheduled_scan("15m")
             second = scheduled_scan.run_scheduled_scan("15m")
 
         self.assertEqual(first["signals_created"], 1)
-        # A fresh store instance is created per run; this test verifies stable IDs
-        # through the lifecycle primitive directly in the signal unit tests.
+        self.assertEqual(second["signals_created"], 0)
+        self.assertEqual(len(store.state["signals"]), 1)
 
     def test_existing_signal_expires_even_when_market_data_is_stale(self):
         with patch.object(scheduled_scan, "UpstashSignalStateStore", MemoryStore):
