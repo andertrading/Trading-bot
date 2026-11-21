@@ -48,6 +48,7 @@ class EtoroReadOnlyClientTests(unittest.TestCase):
         self.assertEqual(kwargs["headers"]["x-user-key"], "user-secret-test")
         self.assertTrue(kwargs["headers"]["x-request-id"])
         self.assertEqual(kwargs["timeout"], 10)
+        self.assertFalse(kwargs["allow_redirects"])
 
     def test_partial_rates_are_exposed_not_misrepresented_as_complete(self):
         self.session.request.return_value = FakeResponse(
