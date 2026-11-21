@@ -157,6 +157,11 @@ def _us_holidays(year):
             _observed_us_holiday(date(year, 6, 19))
         )
 
+    # Cierre extraordinario por el funeral de Estado del presidente
+    # Jimmy Carter (9 de enero de 2025).
+    if year == 2025:
+        holidays.add(date(2025, 1, 9))
+
     return holidays
 
 
@@ -944,9 +949,19 @@ def _has_daily_gaps(df, asset):
 
         return False
 
+    # El motor utiliza como máximo dos años para los indicadores
+    # operativos. Limitar la comprobación evita aplicar el calendario
+    # simplificado a cierres extraordinarios históricos muy antiguos.
+    recent_cutoff = session_dates[-1] - timedelta(days=730)
+    recent_dates = [
+        session_date
+        for session_date in session_dates
+        if session_date >= recent_cutoff
+    ]
+
     for previous_date, current_date in zip(
-        session_dates,
-        session_dates[1:],
+        recent_dates,
+        recent_dates[1:],
     ):
         missing_date = previous_date + timedelta(days=1)
 
