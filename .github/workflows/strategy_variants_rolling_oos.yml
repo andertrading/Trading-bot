@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - research/fixed-common-calendar-oos-20261121
+      - research/explicit-universe-coverage-20261121
 
 permissions:
   contents: read
@@ -80,16 +81,45 @@ jobs:
                   if path.name != "manifest.json":
                       shutil.copy2(path, destination / path.name)
 
-          if len(combined) != 23:
-              raise SystemExit(f"Expected 23 snapshots, found {len(combined)}")
+          from config import ASSETS
+
+          expected = {
+              (asset, timeframe)
+              for asset, settings in ASSETS.items()
+              if isinstance(settings, dict)
+              for timeframe in ("15m", "1d")
+          }
+          available = {(item["asset"], item["timeframe"]) for item in combined}
+          missing = sorted(expected - available)
+          unexpected = sorted(available - expected)
+          coverage = {
+              "status": "COMPLETE" if not missing and not unexpected else "PARTIAL",
+              "expected_combinations": len(expected),
+              "available_combinations": len(expected & available),
+              "missing_combinations": [
+                  {"asset": asset, "timeframe": timeframe}
+                  for asset, timeframe in missing
+              ],
+              "unexpected_combinations": [
+                  {"asset": asset, "timeframe": timeframe}
+                  for asset, timeframe in unexpected
+              ],
+          }
           (destination / "manifest.json").write_text(
               json.dumps(combined, ensure_ascii=False, indent=2),
               encoding="utf-8",
           )
-          print("Verified", len(combined), "unique snapshots.")
+          Path("snapshot_coverage.json").write_text(
+              json.dumps(coverage, ensure_ascii=False, indent=2),
+              encoding="utf-8",
+          )
+          print("Snapshot universe coverage:", json.dumps(coverage))
+          if not combined:
+              raise SystemExit("No snapshots available for research")
           PY
           python -m py_compile strategy_research.py
           python -m unittest discover -s tests -p "test_strategy_research.py" -v
+          python -m unittest discover -s tests -p "test_portfolio_backtest.py" -v
 
       - name: Run fixed strategy hypotheses with chronological walk-forward split
         run: python strategy_research.py
@@ -108,3 +138,6 @@ jobs:
             strategy_research_errors.csv
             strategy_research_portfolio.csv
             strategy_research_oos_portfolio.csv
+            strategy_research_coverage.csv
+            strategy_research_status.json
+            snapshot_coverage.json

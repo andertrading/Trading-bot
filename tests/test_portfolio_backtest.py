@@ -117,6 +117,10 @@ class TestPortfolioBacktest(unittest.TestCase):
         self.assertAlmostEqual(result["trades"][0]["realized_pnl_usd"], 10.0)
         self.assertAlmostEqual(result["summary"]["ending_equity_usd"], 1010.0)
         self.assertFalse(result["summary"]["costs_included"])
+        self.assertEqual(result["summary"]["pnl_basis"], "GROSS_EX_COSTS")
+        self.assertAlmostEqual(result["summary"]["gross_pnl_usd"], 10.0)
+        self.assertAlmostEqual(result["summary"]["gross_return_pct"], 1.0)
+        self.assertNotIn("net_pnl_usd", result["summary"])
 
     def test_simultaneous_exits_are_aggregated_for_drawdown(self):
         winning = self.make_trade(
