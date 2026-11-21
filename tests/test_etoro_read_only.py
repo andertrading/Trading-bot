@@ -10,10 +10,13 @@ from etoro_read_only import (
     EtoroConfigurationError,
     EtoroReadOnlyClient,
     EtoroResponse,
+    EtoroCostEstimate,
     calculate_available_cash,
     normalize_realtime_quotes,
     normalize_account_snapshot,
     resolve_unique_instrument,
+    normalize_cost_estimate,
+    validate_what_if_payload,
 )
 
 
@@ -97,9 +100,19 @@ class EtoroReadOnlyClientTests(unittest.TestCase):
             self.client.get_candles(123, "desc", "15m", 1001)
         self.session.request.assert_not_called()
 
-    def test_what_if_endpoint_only_accepts_open_action(self):
+    def test_what_if_endpoint_only_accepts_validated_open_action(self):
+        payload = {
+            "action": "open",
+            "transaction": "buy",
+            "instrumentId": 1,
+            "settlementType": "real",
+            "orderType": "mkt",
+            "leverage": 1,
+            "amount": 1000,
+            "orderCurrency": "usd",
+        }
         self.session.request.return_value = FakeResponse(data={"costs": []})
-        self.client.get_what_if_costs({"action": "open", "instrumentId": 1})
+        self.client.get_what_if_costs(payload)
         args, kwargs = self.session.request.call_args
         self.assertEqual(args[0], "POST")
         self.assertTrue(args[1].endswith("/api/v2/trading/info/costs"))
@@ -107,6 +120,81 @@ class EtoroReadOnlyClientTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.client.get_what_if_costs({"action": "close"})
         self.assertEqual(self.session.request.call_count, 1)
+
+    def test_what_if_payload_rejects_ambiguous_size_and_trade_fields(self):
+        base = {
+            "action": "open",
+            "transaction": "buy",
+            "instrumentId": 1,
+            "settlementType": "real",
+            "orderType": "mkt",
+            "leverage": 1,
+            "amount": 1000,
+            "orderCurrency": "usd",
+        }
+        invalid = [
+            dict(base, symbol="AAPL"),
+            dict(base, units=2),
+            dict(base, unknown="field"),
+            dict(base, orderCurrency="eur"),
+            dict(base, transaction="sell"),
+            dict(base, settlementType="unsupported"),
+        ]
+        for payload in invalid:
+            with self.subTest(payload=payload), self.assertRaises(ValueError):
+                validate_what_if_payload(payload)
+
+    def test_what_if_payload_requires_stop_for_leverage_and_short_positions(self):
+        base = {
+            "action": "open",
+            "transaction": "buy",
+            "instrumentId": 1,
+            "settlementType": "cfd",
+            "orderType": "mkt",
+            "leverage": 2,
+            "amount": 100,
+            "orderCurrency": "usd",
+        }
+        with self.assertRaises(ValueError):
+            validate_what_if_payload(base)
+        short = dict(base, transaction="sellShort", leverage=1, stopLossRate=95)
+        self.assertEqual(validate_what_if_payload(short)["transaction"], "sellShort")
+
+    def test_what_if_payload_enforces_order_type_specific_prices(self):
+        base = {
+            "action": "open",
+            "transaction": "buy",
+            "instrumentId": 1,
+            "settlementType": "real",
+            "orderType": "mkt",
+            "leverage": 1,
+            "amount": 100,
+            "orderCurrency": "usd",
+        }
+        with self.assertRaises(ValueError):
+            validate_what_if_payload(dict(base, orderType="mit"))
+        mit = dict(base, orderType="mit", triggerRate=100)
+        self.assertEqual(validate_what_if_payload(mit)["orderType"], "mit")
+        with self.assertRaises(ValueError):
+            validate_what_if_payload(dict(base, orderType="limitIOC"))
+        limit = dict(base, orderType="limitIOC", limitRate=100)
+        self.assertEqual(validate_what_if_payload(limit)["orderType"], "limitIOC")
+
+    def test_real_futures_requires_integer_contracts_and_stop(self):
+        base = {
+            "action": "open",
+            "transaction": "buy",
+            "instrumentId": 1,
+            "settlementType": "realFutures",
+            "orderType": "mkt",
+            "leverage": 1,
+            "contracts": 2,
+            "orderCurrency": "usd",
+            "stopLossRate": 95,
+        }
+        self.assertEqual(validate_what_if_payload(base)["contracts"], 2)
+        with self.assertRaises(ValueError):
+            validate_what_if_payload(dict(base, contracts=2.5))
 
     def test_rate_limit_retries_are_bounded_and_honor_retry_after(self):
         self.session.request.side_effect = [
@@ -413,6 +501,84 @@ class RealtimeQuoteValidationTests(unittest.TestCase):
         quotes = client.get_realtime_quotes([101, 202], self.now)
         self.assertEqual(set(quotes), {101, 202})
         self.assertEqual(session.request.call_count, 1)
+
+
+class CostEstimateValidationTests(unittest.TestCase):
+    def setUp(self):
+        self.now = datetime(2026, 11, 21, 12, 0, 0, tzinfo=timezone.utc)
+        self.data = {
+            "instrumentId": 123,
+            "symbol": "AAPL",
+            "costs": [
+                {"costType": "markup", "value": 0.15, "currency": "USD"},
+                {"costType": "marketSpread", "value": 0.03, "currency": "USD"},
+                {"costType": "transactionFee", "value": 1, "currency": "USD"},
+                {"costType": "overnightFee", "value": 0.25, "currency": "USD"},
+                {"costType": "overWeekendFee", "value": 0.75, "currency": "USD"},
+                {"costType": "sdrt", "value": 0.5, "currency": "USD"},
+            ],
+            "lastUpdated": "2026-11-21T11:59:30Z",
+        }
+
+    def test_complete_fresh_usd_cost_estimate_is_normalized(self):
+        estimate = normalize_cost_estimate(
+            EtoroResponse(self.data, 200, {}),
+            now_utc=self.now,
+            expected_instrument_id=123,
+        )
+        self.assertIsInstance(estimate, EtoroCostEstimate)
+        self.assertEqual(estimate.costs["marketSpread"], Decimal("0.03"))
+        self.assertEqual(estimate.symbol, "AAPL")
+
+    def test_cost_estimate_rejects_wrong_instrument_and_stale_timestamp(self):
+        response = EtoroResponse(self.data, 200, {})
+        with self.assertRaises(EtoroAPIError):
+            normalize_cost_estimate(response, now_utc=self.now, expected_instrument_id=999)
+        stale = dict(self.data, lastUpdated="2026-11-21T11:50:00Z")
+        with self.assertRaises(EtoroAPIError):
+            normalize_cost_estimate(
+                EtoroResponse(stale, 200, {}),
+                now_utc=self.now,
+                expected_instrument_id=123,
+            )
+
+    def test_cost_estimate_rejects_unknown_duplicate_negative_or_non_usd_costs(self):
+        variants = [
+            dict(self.data, costs=[{"costType": "unknown", "value": 1, "currency": "USD"}]),
+            dict(self.data, costs=[
+                {"costType": "markup", "value": 1, "currency": "USD"},
+                {"costType": "markup", "value": 2, "currency": "USD"},
+            ]),
+            dict(self.data, costs=[{"costType": "markup", "value": -1, "currency": "USD"}]),
+            dict(self.data, costs=[{"costType": "markup", "value": 1, "currency": "EUR"}]),
+            dict(self.data, costs=[]),
+        ]
+        for data in variants:
+            with self.subTest(data=data), self.assertRaises(EtoroAPIError):
+                normalize_cost_estimate(
+                    EtoroResponse(data, 200, {}),
+                    now_utc=self.now,
+                    expected_instrument_id=123,
+                )
+
+    def test_client_validated_cost_method_uses_estimate_and_checks_identity(self):
+        self.session = Mock()
+        self.session.request.return_value = FakeResponse(data=self.data)
+        client = EtoroReadOnlyClient("app-key", "user-key", session=self.session)
+        estimate = client.get_validated_what_if_costs(
+            {
+                "action": "open",
+                "transaction": "buy",
+                "instrumentId": 123,
+                "settlementType": "real",
+                "orderType": "mkt",
+                "leverage": 1,
+                "amount": 100,
+                "orderCurrency": "usd",
+            },
+            self.now,
+        )
+        self.assertEqual(estimate.instrument_id, 123)
 
 
 class AccountSnapshotTests(unittest.TestCase):
