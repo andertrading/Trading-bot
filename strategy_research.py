@@ -603,6 +603,25 @@ def main():
 
 
 
+
+XTB_OMI_SYMBOLS = {
+    "AAPL": "AAPL.US",
+    "MSFT": "MSFT.US",
+    "NVDA": "NVDA.US",
+    "TSLA": "TSLA.US",
+    "TTWO": "TTWO.US",
+    "CSPX": "CSPX.UK",
+    "CNDX": "CNDX.UK",
+}
+
+BITVAVO_EUR_PAIRS = {
+    "BTC": "BTC/EUR",
+    "ETH": "ETH/EUR",
+    "SOL": "SOL/EUR",
+    "XLM": "XLM/EUR",
+    "XRP": "XRP/EUR",
+}
+
 def _broker_cost_sensitivity_rows(
     oos_trades,
     assets_config=None,
@@ -665,6 +684,7 @@ def _broker_cost_sensitivity_rows(
     # turnover for each research strategy across all stock/ETF executions.
     monthly_turnover = {}
     strategy_currency_ok = {}
+    strategy_instrument_ok = {}
     for trade in prepared:
         if trade["_asset_type"] not in {"STOCK", "ETF"}:
             continue
@@ -673,6 +693,10 @@ def _broker_cost_sensitivity_rows(
         strategy_currency_ok[strategy] = (
             strategy_currency_ok.get(strategy, True)
             and trade["_currency"] == "USD"
+        )
+        strategy_instrument_ok[strategy] = (
+            strategy_instrument_ok.get(strategy, True)
+            and trade["_asset"] in XTB_OMI_SYMBOLS
         )
         bucket = monthly_turnover[strategy]
         bucket[trade["_entry_month"]] = (
@@ -693,6 +717,7 @@ def _broker_cost_sensitivity_rows(
             max_monthly_turnover.get(strategy, 0.0)
             <= float(xtb_monthly_turnover_limit_usd)
             and strategy_currency_ok.get(strategy, False)
+            and strategy_instrument_ok.get(strategy, False)
         )
         for strategy in monthly_turnover
     }
@@ -735,7 +760,7 @@ def _broker_cost_sensitivity_rows(
                 )
             elif venue == "XTB_OMI":
                 eligibility_note = (
-                    "CONDITIONAL: eligible instrument listing and USD account; "
+                    "CONDITIONAL: XTB OMI symbol mapping verified, USD account, "
                     "external account turnover not included"
                 )
             elif venue == "BITVAVO_SPOT":
@@ -794,6 +819,13 @@ def _broker_cost_sensitivity_rows(
                     "strategy": strategy,
                     "asset": asset,
                     "timeframe": timeframe,
+                    "broker_symbol": (
+                        XTB_OMI_SYMBOLS.get(asset)
+                        if venue == "XTB_OMI"
+                        else BITVAVO_EUR_PAIRS.get(asset)
+                        if venue == "BITVAVO_SPOT"
+                        else asset
+                    ),
                     "venue": venue,
                     "fee_mode": fee_mode,
                     "spread_bps_scenario": float(spread_bps),
