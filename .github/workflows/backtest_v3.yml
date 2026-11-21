@@ -43,6 +43,8 @@ jobs:
     env:
       BACKTEST_DATA_MODE: download
       BACKTEST_SNAPSHOT_DIR: historicos_backtest_v3
+      TWELVE_DATA_API_KEY: ${{ secrets.TWELVE_DATA_API_KEY }}
+      EODHD_API_KEY: ${{ secrets.EODHD_API_KEY }}
 
     steps:
       - name: Descargar repositorio
