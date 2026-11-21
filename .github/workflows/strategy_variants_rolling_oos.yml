@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - research/fixed-common-calendar-oos-20261121
+      - research/explicit-universe-coverage-20261121
 
 permissions:
   contents: read
