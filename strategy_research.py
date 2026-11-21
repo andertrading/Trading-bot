@@ -578,7 +578,7 @@ def main():
     for row in portfolio_rows:
         print(
             row["strategy"],
-            "PnL_USD=", round(row.get("net_pnl_usd", 0.0), 2),
+            "GROSS_PNL_USD=", round(row.get("gross_pnl_usd", 0.0), 2),
             "max_DD_USD=", round(row.get("max_drawdown_usd", 0.0), 2),
             "accepted=", row.get("trades_accepted", 0),
         )
