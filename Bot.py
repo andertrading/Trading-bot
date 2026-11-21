@@ -269,12 +269,19 @@ def send_telegram_photo(image_bytes, caption):
     if not image_bytes:
         return False
 
+    if not isinstance(caption, str) or len(caption) > 1024:
+        logger.error(
+            "TELEGRAM PHOTO CAPTION REJECTED | length=%s | limit=1024",
+            len(caption) if isinstance(caption, str) else "invalid",
+        )
+        return False
+
     try:
         response = requests.post(
             f"{TELEGRAM_API_URL}/sendPhoto",
             data={
                 "chat_id": TELEGRAM_CHAT_ID,
-                "caption": caption[:1024],
+                "caption": caption,
                 "parse_mode": "HTML",
             },
             files={
