@@ -51,12 +51,37 @@ def _resolve_asset(
     symbol: str,
     asset: Mapping[str, Any],
 ) -> tuple[Mapping[str, Any] | None, str]:
-    """Resolve a ticker through eToro's exact-symbol v2 search endpoint."""
-    try:
-        response = client.search_instrument_by_symbol(symbol, page_size=100)
-        item = resolve_unique_instrument_by_symbol(response, symbol)
-    except Exception as exc:
-        return None, _resolution_error_status(exc)
+    """Resolve an exact eToro symbol, including configured exchange suffixes."""
+    candidates = [symbol]
+    configured_market_symbol = asset.get("yahoo")
+    # eToro lists some London ETFs with the exchange suffix (e.g. CSPX.L).
+    # Reuse the explicitly configured market symbol only when it is the same
+    # base ticker plus a suffix; never fuzzy-match or guess an instrument ID.
+    if (
+        isinstance(configured_market_symbol, str)
+        and configured_market_symbol.startswith(symbol + ".")
+        and configured_market_symbol not in candidates
+    ):
+        candidates.append(configured_market_symbol)
+
+    item = None
+    last_status = "UNRESOLVED"
+    for candidate_index, candidate in enumerate(candidates):
+        try:
+            response = client.search_instrument_by_symbol(candidate, page_size=100)
+            item = resolve_unique_instrument_by_symbol(response, candidate)
+            break
+        except Exception as exc:
+            last_status = _resolution_error_status(exc)
+            can_try_suffix = (
+                candidate_index + 1 < len(candidates)
+                and last_status in {"HTTP_404", "EXACT_SYMBOL_MATCH_COUNT"}
+            )
+            if not can_try_suffix:
+                return None, last_status
+
+    if item is None:
+        return None, last_status
 
     expected_type = asset.get("type")
     actual_type = _fee_class(item.get("instrumentType"))

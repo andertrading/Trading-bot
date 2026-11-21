@@ -197,6 +197,47 @@ class ReadOnlyAuditTests(unittest.TestCase):
         self.assertFalse(report["overall_pass"])
         self.assertNotIn("private eligibility detail", str(report))
 
+    def test_etf_resolution_retries_with_configured_exchange_suffix(self):
+        class SuffixedEtfClient(FakeAuditClient):
+            def search_instrument_by_symbol(self, symbol, page_size=100):
+                self.search_calls.append(symbol)
+                if symbol == "CSPX":
+                    raise EtoroAPIError("eToro devolvió HTTP 404")
+                if symbol == "CSPX.L":
+                    return EtoroResponse({
+                        "results": [{
+                            "instrumentId": 8020,
+                            "displayName": "iShares Core S&P 500 UCITS ETF",
+                            "symbol": "CSPX.L",
+                            "type": "ETF",
+                        }],
+                        "pagination": {
+                            "hasNext": False,
+                            "nextPageToken": None,
+                            "pageSize": page_size,
+                        },
+                    }, 200, {})
+                return EtoroResponse({
+                    "results": [],
+                    "pagination": {"hasNext": False, "nextPageToken": None, "pageSize": page_size},
+                }, 200, {})
+
+        assets = {
+            "CSPX": {
+                "name": "iShares Core S&P 500",
+                "yahoo": "CSPX.L",
+                "type": "ETF",
+                "enabled": True,
+            }
+        }
+        client = SuffixedEtfClient()
+        report = run_audit(client, assets, "USD", self.now)
+        resolved = report["instrument_resolution"][0]
+        self.assertTrue(resolved["candidate_found"])
+        self.assertEqual(resolved["instrument_id"], 8020)
+        self.assertEqual(resolved["resolution_status"], "RESOLVED")
+        self.assertEqual(client.search_calls, ["CSPX", "CSPX.L"])
+
 
 if __name__ == "__main__":
     unittest.main()

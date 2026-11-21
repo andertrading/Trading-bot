@@ -919,6 +919,32 @@ class AccountSnapshotTests(unittest.TestCase):
         with self.assertRaises(EtoroAPIError):
             normalize_account_snapshot(self.payload, "USD")
 
+    def test_documented_legacy_position_field_casing_is_normalized(self):
+        position = self.payload["clientPortfolio"]["positions"][0]
+        aliases = {
+            "positionId": "positionID",
+            "instrumentId": "instrumentID",
+            "cid": "CID",
+            "mirrorId": "mirrorID",
+            "settlementTypeId": "settlementTypeID",
+        }
+        for canonical, legacy in aliases.items():
+            position[legacy] = position.pop(canonical)
+
+        snapshot = normalize_account_snapshot(self.payload, "USD")
+        normalized = snapshot.positions[0]
+        self.assertEqual(normalized["positionId"], 10)
+        self.assertEqual(normalized["instrumentId"], 20)
+        self.assertEqual(normalized["cid"], 123)
+        self.assertEqual(normalized["mirrorId"], 0)
+        self.assertEqual(normalized["settlementTypeId"], 1)
+
+    def test_conflicting_canonical_and_legacy_position_ids_are_rejected(self):
+        position = self.payload["clientPortfolio"]["positions"][0]
+        position["positionID"] = 999
+        with self.assertRaisesRegex(EtoroAPIError, "duplicados incompatibles"):
+            normalize_account_snapshot(self.payload, "USD")
+
 
 if __name__ == "__main__":
     unittest.main()
