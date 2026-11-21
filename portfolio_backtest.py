@@ -315,6 +315,9 @@ def simulate_portfolio(
                 for item, requested_risk, _ in requests
             )
 
+        def risk_side_cost(item, quantity, price):
+            return side_cost(item, quantity, price) if costs_included else 0.0
+
         def risk_constraints_satisfied(factor):
             # The new trade's full stop loss includes entry fee, gross
             # distance-to-stop loss and exit-side cost at the stop. Compare
@@ -322,13 +325,13 @@ def simulate_portfolio(
             # entry fee is deducted from equity and only remaining stop risk
             # (gross loss plus stop-side exit cost) stays reserved.
             batch_total_stop_risk = sum(
-                side_cost(
+                risk_side_cost(
                     item,
                     requested_risk * factor / item["risk_per_unit"],
                     item["entry"],
                 )
                 + requested_risk * factor
-                + side_cost(
+                + risk_side_cost(
                     item,
                     requested_risk * factor / item["risk_per_unit"],
                     item["stop"],
@@ -341,13 +344,13 @@ def simulate_portfolio(
             ):
                 return False
             return all(
-                side_cost(
+                risk_side_cost(
                     item,
                     requested_risk * factor / item["risk_per_unit"],
                     item["entry"],
                 )
                 + requested_risk * factor
-                + side_cost(
+                + risk_side_cost(
                     item,
                     requested_risk * factor / item["risk_per_unit"],
                     item["stop"],
