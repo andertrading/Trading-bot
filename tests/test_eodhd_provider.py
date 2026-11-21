@@ -1,6 +1,5 @@
-import logging
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
 import pandas as pd
 import requests
@@ -119,14 +118,6 @@ class TestEODHDProvider(unittest.TestCase):
     def test_rejects_short_history(self):
         result, _ = self.download(payload=valid_payload(219))
         self.assertIsNone(result)
-
-    def test_rejects_daily_gaps(self):
-        result, _ = self.download(
-            payload=valid_payload(),
-            **{},
-        )
-        # The explicit gap callback is exercised separately below.
-        self.assertIsNotNone(result)
 
     def test_daily_gap_callback_rejects_history(self):
         response = FakeResponse(valid_payload())
