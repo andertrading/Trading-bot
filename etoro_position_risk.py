@@ -86,6 +86,9 @@ def normalize_instrument_breakdown(
     if snapshot_age < -5 or snapshot_age > max_age_seconds:
         raise EtoroAPIError("El desglose de posiciones está obsoleto o tiene fecha futura")
 
+    mirrors = data.get("mirrors")
+    if not isinstance(mirrors, list) or mirrors:
+        raise EtoroAPIError("El desglose contiene mirrors o no confirma su ausencia")
     instruments = data.get("instruments")
     if not isinstance(instruments, list):
         raise EtoroAPIError("Falta la lista de instrumentos del desglose")
@@ -98,6 +101,11 @@ def normalize_instrument_breakdown(
         instrument_id = instrument.get("instrumentId")
         if isinstance(instrument_id, bool) or not isinstance(instrument_id, int) or instrument_id <= 0:
             raise EtoroAPIError("instrumentId inválido en desglose")
+        orders = instrument.get("orders")
+        if not isinstance(orders, list) or orders:
+            raise EtoroAPIError(
+                f"El instrumento {instrument_id} contiene órdenes o no confirma que estén vacías"
+            )
         positions = instrument.get("positions")
         if not isinstance(positions, list):
             raise EtoroAPIError(f"Falta positions para instrumento {instrument_id}")
