@@ -1554,6 +1554,174 @@ def twelvedata_history_windows(asset, end=None, lookback_days=700):
     return windows
 
 
+def _download_coinbase_crypto_history(
+    asset, lookback_days=700, end=None
+):
+    """Download a complete USD-quoted 15m crypto history for research replay."""
+    if asset not in CRYPTO_ASSETS:
+        raise ValueError("Coinbase historical fallback is limited to crypto assets")
+    if (
+        isinstance(lookback_days, bool)
+        or not isinstance(lookback_days, int)
+        or lookback_days <= 0
+    ):
+        raise ValueError("lookback_days must be a positive integer")
+
+    if end is None:
+        end_utc = pd.Timestamp(datetime.now(timezone.utc))
+    else:
+        end_utc = pd.Timestamp(end)
+    if end_utc.tzinfo is None:
+        raise ValueError("end must be timezone-aware")
+    end_utc = end_utc.tz_convert("UTC")
+    # End at the most recent fully closed 15m candle, not the live candle.
+    end_utc = end_utc.floor("15min") - pd.Timedelta(minutes=15)
+    start_utc = end_utc - pd.Timedelta(days=lookback_days)
+
+    product_id = f"{asset}-USD"
+    base_url = "https://api.exchange.coinbase.com"
+    headers = {
+        "Accept": "application/json",
+        "User-Agent": "TradingBot-Historical-Research/1.0",
+    }
+
+    try:
+        product_response = requests.get(
+            f"{base_url}/products/{product_id}",
+            headers=headers,
+            timeout=20,
+        )
+        product_response.raise_for_status()
+        product = product_response.json()
+        if (
+            str(product.get("base_currency", "")).upper() != asset
+            or str(product.get("quote_currency", "")).upper() != "USD"
+        ):
+            logger.error(
+                "COINBASE PAR NO VERIFICADO | %s | %s",
+                asset,
+                product_id,
+            )
+            return None
+
+        # Coinbase caps a response at 300 candles. Use 299 inclusive
+        # timestamps per request and overlap one boundary for safe stitching.
+        chunk_duration = pd.Timedelta(minutes=15 * 298)
+        frames = []
+        cursor = start_utc
+        request_count = 0
+
+        while cursor <= end_utc:
+            chunk_end = min(cursor + chunk_duration, end_utc)
+            response = requests.get(
+                f"{base_url}/products/{product_id}/candles",
+                params={
+                    "granularity": 900,
+                    "start": cursor.isoformat().replace("+00:00", "Z"),
+                    "end": chunk_end.isoformat().replace("+00:00", "Z"),
+                },
+                headers=headers,
+                timeout=30,
+            )
+            if response.status_code == 429:
+                retry_after = response.headers.get("Retry-After", "2")
+                try:
+                    delay = min(max(float(retry_after), 1.0), 30.0)
+                except (TypeError, ValueError):
+                    delay = 2.0
+                logger.warning(
+                    "Coinbase HTTP 429 | %s | espera %.1f segundos",
+                    asset,
+                    delay,
+                )
+                time.sleep(delay)
+                response = requests.get(
+                    f"{base_url}/products/{product_id}/candles",
+                    params={
+                        "granularity": 900,
+                        "start": cursor.isoformat().replace("+00:00", "Z"),
+                        "end": chunk_end.isoformat().replace("+00:00", "Z"),
+                    },
+                    headers=headers,
+                    timeout=30,
+                )
+            response.raise_for_status()
+            values = response.json()
+            if not isinstance(values, list) or not values:
+                logger.error(
+                    "COINBASE HISTÓRICO VACÍO | %s | %s -> %s",
+                    asset,
+                    cursor.isoformat(),
+                    chunk_end.isoformat(),
+                )
+                return None
+
+            frame = pd.DataFrame(
+                values,
+                columns=[
+                    "timestamp", "Low", "High", "Open", "Close", "Volume"
+                ],
+            )
+            frame["timestamp"] = pd.to_datetime(
+                frame["timestamp"], unit="s", utc=True, errors="coerce"
+            )
+            frame = frame.set_index("timestamp").sort_index()
+            frame = frame.loc[
+                (frame.index >= cursor) & (frame.index <= chunk_end)
+            ]
+            frame = _normalise_dataframe(frame)
+            if frame is None or frame.empty:
+                return None
+            frames.append(frame)
+            request_count += 1
+            cursor = chunk_end + pd.Timedelta(minutes=15)
+            time.sleep(0.15)
+
+        combined = pd.concat(frames).sort_index()
+        combined = combined.loc[~combined.index.duplicated(keep="last")]
+        combined = _normalise_dataframe(combined)
+        if combined is None:
+            return None
+
+        expected = pd.date_range(start_utc, end_utc, freq="15min")
+        if not combined.index.equals(expected):
+            logger.error(
+                "COINBASE HISTÓRICO INCOMPLETO | %s | esperadas=%s | recibidas=%s",
+                asset,
+                len(expected),
+                len(combined),
+            )
+            _has_intraday_gaps(combined, asset)
+            return None
+
+        if _has_intraday_gaps(combined, asset):
+            logger.error(
+                "COINBASE HISTÓRICO RECHAZADO POR HUECOS | %s",
+                asset,
+            )
+            return None
+
+        combined.attrs["price_adjustment_policy"] = "raw_unadjusted_intraday"
+        combined.attrs["price_adjustment_verified"] = True
+        combined.attrs["provider"] = "coinbase_exchange"
+        combined.attrs["price_source_detail"] = (
+            "Coinbase Exchange public SOL-USD spot candles; 15m UTC; "
+            f"{request_count} paginated requests; exact continuous coverage"
+        )
+        logger.info(
+            "COINBASE EXTENDED HISTORY OK | %s | %s velas | %s -> %s | requests=%s",
+            asset,
+            len(combined),
+            combined.index[0].isoformat(),
+            combined.index[-1].isoformat(),
+            request_count,
+        )
+        return combined
+    except (requests.RequestException, ValueError, TypeError, KeyError) as exc:
+        logger.exception("COINBASE EXTENDED HISTORY FAILED | %s | %s", asset, exc)
+        return None
+
+
 def _download_coinbase_crypto_gap(asset, start, end):
     """Fetch a missing historical USD-quoted crypto interval without synthesis."""
     if asset not in CRYPTO_ASSETS:
