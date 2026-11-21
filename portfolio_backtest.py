@@ -407,7 +407,12 @@ def simulate_portfolio(
             position = open_positions.pop(item["source_index"], None)
             if position is None:
                 continue
-            pnl = position["allocated_risk_usd"] * position["result_R"]
+            # Use the actual simulated execution prices and allocated
+            # quantity. result_R is rounded in the research CSV and can
+            # otherwise accumulate small portfolio-level P&L discrepancies.
+            pnl = (
+                position["exit_price"] - position["entry"]
+            ) * position["quantity"]
             if not costs_included:
                 exit_cost = 0.0
             elif position["asset_type"] == "STOCK":
