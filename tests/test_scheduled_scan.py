@@ -414,8 +414,38 @@ class ScheduledScanTests(unittest.TestCase):
             {"expires_at": "2026-11-21T12:30:00+00:00", "signal_id": "photo-fallback"},
         )
         self.assertTrue(result)
-        send_photo.assert_called_once_with(b"chart", "signal text")
+        send_photo.assert_called_once()
+        self.assertIn("Gráfico técnico", send_photo.call_args.args[1])
+        self.assertIn("informe completo se ha enviado", send_photo.call_args.args[1])
+        self.assertNotEqual(send_photo.call_args.args[1], "signal text")
         send_text.assert_called_once_with("signal text")
+
+    @patch.object(scheduled_scan.Bot, "send_telegram_message", return_value=True)
+    @patch.object(scheduled_scan.Bot, "send_telegram_photo", return_value=True)
+    @patch.object(scheduled_scan.Bot, "generate_candidate_chart", return_value=b"chart")
+    @patch.object(
+        scheduled_scan.Bot, "build_telegram_messages",
+        return_value=["summary", "X" * 1800],
+    )
+    def test_long_report_is_sent_in_full_and_photo_uses_short_caption(
+        self, build_messages, generate_chart, send_photo, send_text
+    ):
+        result = scheduled_scan._send_signal_report(
+            self.scan,
+            self.scan["results"][0],
+            {
+                "expires_at": "2026-11-21T12:30:00+00:00",
+                "signal_id": "long-report",
+            },
+        )
+
+        self.assertTrue(result)
+        send_text.assert_called_once_with("X" * 1800)
+        send_photo.assert_called_once()
+        caption = send_photo.call_args.args[1]
+        self.assertLessEqual(len(caption), 1024)
+        self.assertIn("informe completo se ha enviado", caption)
+        self.assertNotEqual(caption, "X" * 1800)
 
     def test_invalid_timeframe_is_rejected_before_network_access(self):
         with self.assertRaises(ValueError):
