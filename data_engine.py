@@ -1096,7 +1096,14 @@ def _has_daily_gaps(df, asset):
     # operativos. Comprobar huecos solo dentro de esa ventana evita
     # rechazar históricos por discontinuidades anteriores al periodo
     # que realmente puede utilizar el sistema.
-    recent_cutoff = session_dates[-1] - timedelta(days=730)
+    extended_daily_backtest = os.getenv(
+        "BACKTEST_EXTENDED_DAILY_HISTORY", "false"
+    ).strip().lower() in {"1", "true", "yes", "on"}
+    recent_cutoff = (
+        session_dates[0]
+        if extended_daily_backtest
+        else session_dates[-1] - timedelta(days=730)
+    )
 
     if asset in CRYPTO_ASSETS:
         recent_timestamps = timestamps[
@@ -1384,6 +1391,9 @@ def _download_twelvedata(
 
         df = _normalise_dataframe(df)
 
+        if df is not None and repair_metadata is not None:
+            df.attrs.update(repair_metadata)
+
         if df is None:
             logger.error(
                 "HISTÓRICO RECHAZADO | Twelve Data | %s",
@@ -1585,6 +1595,257 @@ def _yahoo_repair_enabled(interval):
             "BACKTEST_EXTENDED_DAILY_HISTORY", "false"
         ).strip().lower() in {"1", "true", "yes", "on"}
     )
+
+
+YAHOO_EXTENDED_DAILY_REPAIR_TICKERS = {
+    # Same USD accumulating share classes / ISINs, alternate SIX listings.
+    "CSPX": "CSSPX.SW",
+    "CNDX": "CSNDX.SW",
+}
+MAX_ALTERNATE_OHLC_REPAIRS_FRACTION = 0.01
+MAX_ALTERNATE_OHLC_REPAIRS_MINIMUM = 10
+MAX_ALTERNATE_CLOSE_DEVIATION_PCT = 0.5
+
+
+def _invalid_ohlc_mask(dataframe):
+    required = ["Open", "High", "Low", "Close"]
+    if dataframe is None or dataframe.empty or any(
+        column not in dataframe.columns for column in required
+    ):
+        return pd.Series(True, index=getattr(dataframe, "index", None))
+    values = dataframe[required].apply(pd.to_numeric, errors="coerce")
+    finite = np.isfinite(values.to_numpy(dtype=float)).all(axis=1)
+    positive = (values > 0).all(axis=1)
+    coherent = (
+        (values["High"] >= values["Low"])
+        & (values["High"] >= values["Open"])
+        & (values["High"] >= values["Close"])
+        & (values["Low"] <= values["Open"])
+        & (values["Low"] <= values["Close"])
+    )
+    return pd.Series(~(finite & positive & coherent), index=dataframe.index)
+
+
+def _download_yahoo_alternate_daily(
+    asset, start, end, expected_currency
+):
+    """Fetch the same USD ETF share class from its SIX listing for repairs."""
+    ticker = YAHOO_EXTENDED_DAILY_REPAIR_TICKERS.get(asset)
+    if not ticker:
+        logger.error("No hay cotización alternativa verificada para %s", asset)
+        return None
+
+    params = {
+        "period1": int(start.timestamp()),
+        "period2": int(end.timestamp()),
+        "interval": "1d",
+        "events": "history",
+        "includeAdjustedClose": "true",
+    }
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 Chrome/120.0 Safari/537.36"
+        )
+    }
+    try:
+        response = requests.get(
+            f"{YAHOO_CHART_URL}/{ticker}",
+            params=params,
+            headers=headers,
+            timeout=25,
+        )
+        if response.status_code == 429:
+            logger.error("Yahoo limitó la reparación alternativa de %s", asset)
+            return None
+        response.raise_for_status()
+        payload = response.json()
+        chart = payload.get("chart", {})
+        if chart.get("error"):
+            logger.error("Yahoo rechazó la cotización alternativa de %s", asset)
+            return None
+        results = chart.get("result") or []
+        if not results:
+            logger.error("Yahoo no devolvió cotización alternativa para %s", asset)
+            return None
+        result = results[0]
+        meta = result.get("meta", {})
+        currency = str(meta.get("currency") or "").upper()
+        exchange = str(
+            meta.get("fullExchangeName") or meta.get("exchangeName") or ""
+        )
+        timezone_name = meta.get("exchangeTimezoneName")
+        if currency != str(expected_currency or "").upper():
+            logger.error(
+                "Moneda incompatible en reparación alternativa | %s | %s",
+                asset,
+                currency or "sin verificar",
+            )
+            return None
+        if not timezone_name or "swiss" not in exchange.lower():
+            logger.error(
+                "Mercado alternativo no verificable para %s | exchange=%s",
+                asset,
+                exchange or "sin verificar",
+            )
+            return None
+
+        timestamps = result.get("timestamp") or []
+        quotes = result.get("indicators", {}).get("quote") or []
+        if not timestamps or not quotes:
+            logger.error("Cotización alternativa vacía para %s", asset)
+            return None
+        quote = quotes[0]
+        index = pd.to_datetime(timestamps, unit="s", utc=True, errors="coerce")
+        if index.isna().any():
+            logger.error("Fechas alternativas inválidas para %s", asset)
+            return None
+
+        local_index = pd.DatetimeIndex(index).tz_convert(ZoneInfo(timezone_name))
+        session_dates = [value.date().isoformat() for value in local_index]
+        normalized_index = pd.DatetimeIndex(
+            pd.to_datetime(session_dates, utc=True)
+        )
+        dataframe = pd.DataFrame(
+            {
+                "Open": quote.get("open", []),
+                "High": quote.get("high", []),
+                "Low": quote.get("low", []),
+                "Close": quote.get("close", []),
+                "Volume": quote.get("volume", []),
+            },
+            index=normalized_index,
+        )
+        dataframe = dataframe[~dataframe.index.duplicated(keep="last")].sort_index()
+        if dataframe.empty or _invalid_ohlc_mask(dataframe).any():
+            logger.error("OHLC alternativo incoherente para %s", asset)
+            return None
+        logger.info(
+            "YAHOO ALTERNATE OK | %s | %s | %s velas | currency=%s",
+            asset,
+            ticker,
+            len(dataframe),
+            currency,
+        )
+        return dataframe, ticker
+    except requests.RequestException as exc:
+        status_code = (
+            exc.response.status_code
+            if getattr(exc, "response", None) is not None
+            else "sin respuesta HTTP"
+        )
+        logger.error(
+            "Error de descarga de reparación alternativa | %s | status=%s",
+            asset,
+            status_code,
+        )
+        return None
+    except Exception:
+        logger.exception("Error procesando reparación alternativa para %s", asset)
+        return None
+
+
+def _patch_incoherent_daily_ohlc_from_alternate(
+    dataframe, alternate_dataframe, asset, alternate_ticker
+):
+    """Patch only defective LSE bars from the same-date, same-ISIN USD SIX listing."""
+    if dataframe is None or dataframe.empty:
+        return None, None
+
+    invalid = _invalid_ohlc_mask(dataframe)
+    invalid_index = list(dataframe.index[invalid])
+    if not invalid_index:
+        return dataframe.copy(), {
+            "price_source_detail": "Yahoo LSE primary; no alternate OHLC repairs required",
+            "ohlc_repair_count": 0,
+            "ohlc_repair_source_ticker": None,
+            "ohlc_repair_max_close_deviation_pct": None,
+        }
+
+    maximum_repairs = max(
+        MAX_ALTERNATE_OHLC_REPAIRS_MINIMUM,
+        int(np.ceil(len(dataframe) * MAX_ALTERNATE_OHLC_REPAIRS_FRACTION)),
+    )
+    if len(invalid_index) > maximum_repairs:
+        logger.error(
+            "Demasiadas velas defectuosas para reparación alternativa | %s | %s/%s",
+            asset,
+            len(invalid_index),
+            maximum_repairs,
+        )
+        return None, None
+
+    if (
+        alternate_dataframe is None
+        or alternate_dataframe.empty
+        or alternate_dataframe.index.has_duplicates
+    ):
+        logger.error("Histórico alternativo no válido para reparar %s", asset)
+        return None, None
+
+    patched = dataframe.copy()
+    maximum_deviation = 0.0
+    for timestamp in invalid_index:
+        if timestamp not in alternate_dataframe.index:
+            logger.error(
+                "La cotización alternativa no contiene la fecha defectuosa | %s | %s",
+                asset,
+                timestamp,
+            )
+            return None, None
+        primary_close = pd.to_numeric(
+            pd.Series([patched.at[timestamp, "Close"]]), errors="coerce"
+        ).iloc[0]
+        alternate_row = alternate_dataframe.loc[timestamp]
+        if isinstance(alternate_row, pd.DataFrame):
+            logger.error("Fecha alternativa duplicada al reparar %s", asset)
+            return None, None
+        if _invalid_ohlc_mask(alternate_dataframe.loc[[timestamp]]).iloc[0]:
+            logger.error("Vela alternativa defectuosa | %s | %s", asset, timestamp)
+            return None, None
+        alternate_close = float(alternate_row["Close"])
+        if (
+            not np.isfinite(primary_close)
+            or float(primary_close) <= 0
+            or not np.isfinite(alternate_close)
+            or alternate_close <= 0
+        ):
+            logger.error("No se puede verificar el precio de reparación | %s", asset)
+            return None, None
+        deviation = abs(float(primary_close) / alternate_close - 1.0) * 100.0
+        if deviation > MAX_ALTERNATE_CLOSE_DEVIATION_PCT:
+            logger.error(
+                "Divergencia entre listings superior al límite | %s | %s | %.4f%%",
+                asset,
+                timestamp,
+                deviation,
+            )
+            return None, None
+        maximum_deviation = max(maximum_deviation, deviation)
+        for column in ("Open", "High", "Low", "Close"):
+            patched.at[timestamp, column] = float(alternate_row[column])
+
+    if _invalid_ohlc_mask(patched).any():
+        logger.error("Persisten velas OHLC defectuosas tras reparar %s", asset)
+        return None, None
+
+    metadata = {
+        "price_source_detail": (
+            "Yahoo LSE primary; defective OHLC bars patched from the same-date "
+            "SIX USD listing of the same ISIN"
+        ),
+        "ohlc_repair_count": len(invalid_index),
+        "ohlc_repair_source_ticker": alternate_ticker,
+        "ohlc_repair_max_close_deviation_pct": round(maximum_deviation, 6),
+    }
+    logger.warning(
+        "YAHOO ALTERNATE OHLC REPAIR | %s | repaired=%s | source=%s | max_close_deviation=%.4f%%",
+        asset,
+        len(invalid_index),
+        alternate_ticker,
+        maximum_deviation,
+    )
+    return patched, metadata
 
 
 def _download_yahoo_repaired_daily(ticker, start, end):
@@ -1808,25 +2069,54 @@ def _download_yahoo(asset, config, interval):
             )
             return None
 
+        df = pd.DataFrame(
+            {
+                "Open": quote.get("open", []),
+                "High": quote.get("high", []),
+                "Low": quote.get("low", []),
+                "Close": quote.get("close", []),
+                "Volume": quote.get("volume", []),
+            },
+            index=index,
+        )
+        repair_metadata = None
         if _yahoo_repair_enabled(interval):
-            df = _download_yahoo_repaired_daily(
-                ticker,
-                start,
-                now,
-            )
-            if df is None:
+            primary_timezone = meta.get("exchangeTimezoneName")
+            if not primary_timezone:
+                logger.error("Zona horaria de Yahoo no verificable para %s", asset)
                 return None
-        else:
-            df = pd.DataFrame(
-                {
-                    "Open": quote.get("open", []),
-                    "High": quote.get("high", []),
-                    "Low": quote.get("low", []),
-                    "Close": quote.get("close", []),
-                    "Volume": quote.get("volume", []),
-                },
-                index=index,
+            primary_local_index = pd.DatetimeIndex(df.index).tz_convert(
+                ZoneInfo(primary_timezone)
             )
+            primary_dates = [
+                value.date().isoformat() for value in primary_local_index
+            ]
+            df.index = pd.DatetimeIndex(pd.to_datetime(primary_dates, utc=True))
+
+            if _invalid_ohlc_mask(df).any():
+                alternate = _download_yahoo_alternate_daily(
+                    asset,
+                    start,
+                    now,
+                    configured_currency,
+                )
+                if alternate is None:
+                    return None
+                alternate_dataframe, alternate_ticker = alternate
+                df, repair_metadata = _patch_incoherent_daily_ohlc_from_alternate(
+                    df,
+                    alternate_dataframe,
+                    asset,
+                    alternate_ticker,
+                )
+                if df is None:
+                    return None
+            else:
+                _, repair_metadata = _patch_incoherent_daily_ohlc_from_alternate(
+                    df, None, asset, None
+                )
+                if repair_metadata is None:
+                    return None
 
         # Yahoo puede incluir una vela todavía abierta con OHLC nulo.
         # Se excluye por timestamp ANTES de validar precios; las velas
