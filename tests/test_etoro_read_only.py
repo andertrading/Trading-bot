@@ -1,6 +1,6 @@
 import unittest
 from decimal import Decimal
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from unittest.mock import Mock, patch
 
 import requests
