@@ -35,7 +35,7 @@ jobs:
           report = {}
           for symbol in ("CSPX.L", "CNDX.L", "CSSPX.SW", "CSNDX.SW"):
               report[symbol] = {}
-              for repair in (False, True):
+              for repair in (False,):
                   df = yf.Ticker(symbol).history(
                       start="2021-11-21",
                       end="2026-11-21",
@@ -45,7 +45,7 @@ jobs:
                       repair=repair,
                       timeout=30,
                   )
-                  label = "repair_true" if repair else "repair_false"
+                  label = "repair_false"
                   df.to_csv(f"{symbol}_{label}.csv")
                   required = ["Open", "High", "Low", "Close"]
                   values = df[required].apply(pd.to_numeric, errors="coerce")
