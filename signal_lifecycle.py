@@ -268,10 +268,26 @@ def advance_signal(
     # candles may advance the signal lifecycle.
     price_data_is_new = True
     signal_data_timestamp = updated.get("data_timestamp")
-    if latest_data_timestamp is not None and signal_data_timestamp:
-        price_data_is_new = (
-            _as_utc(latest_data_timestamp) > _as_utc(signal_data_timestamp)
+    last_market_timestamp = updated.get("last_market_data_timestamp")
+    if latest_data_timestamp is not None:
+        incoming_timestamp = _as_utc(latest_data_timestamp)
+        reference_timestamps = [
+            _as_utc(value)
+            for value in (signal_data_timestamp, last_market_timestamp)
+            if value
+        ]
+        # Ignore duplicate or out-of-order candles. Without this guard, a
+        # delayed provider response can invalidate a live entry using an old
+        # stop/target touch that predates the most recently processed candle.
+        price_data_is_new = not reference_timestamps or (
+            incoming_timestamp > max(reference_timestamps)
         )
+        if price_data_is_new and (
+            latest_price is not None
+            or latest_high is not None
+            or latest_low is not None
+        ):
+            updated["last_market_data_timestamp"] = incoming_timestamp.isoformat()
 
     # Use the completed candle's high/low so intrabar stop/target touches
     # are not missed merely because the candle later closed back inside.
@@ -342,7 +358,7 @@ def advance_signal(
         if expired_now:
             updated["status"] = "EXPIRED"
             event = "SIGNAL_EXPIRED"
-        elif not conditions_valid:
+        elif price_data_is_new and not conditions_valid:
             updated["status"] = "INVALIDATED"
             event = "SIGNAL_INVALIDATED"
         elif price_data_is_new and latest_price is not None:
