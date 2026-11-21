@@ -567,6 +567,7 @@ def _percentage_between(start, end):
             not math.isfinite(start_value)
             or not math.isfinite(end_value)
             or start_value <= 0
+            or end_value <= 0
         ):
             return None
         return (end_value / start_value - 1.0) * 100.0
