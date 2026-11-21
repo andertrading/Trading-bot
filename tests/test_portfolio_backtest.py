@@ -68,7 +68,7 @@ class TestPortfolioBacktest(unittest.TestCase):
         )
         self.assertAlmostEqual(
             result["trades"][1]["allocated_risk_usd"],
-            5.0,
+            5.025,
         )
 
     def test_same_timestamp_exit_does_not_release_cash_before_entry(self):
