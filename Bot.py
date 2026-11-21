@@ -558,51 +558,56 @@ def generate_candidate_chart(candidate):
         return None
 
 
+def _percentage_between(start, end):
+    """Gross percentage change between two positive price levels."""
+    try:
+        start_value = float(start)
+        end_value = float(end)
+        if (
+            not math.isfinite(start_value)
+            or not math.isfinite(end_value)
+            or start_value <= 0
+        ):
+            return None
+        return (end_value / start_value - 1.0) * 100.0
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
 def build_telegram_messages(scan_result):
     """
-    Construye un resumen visual y un mensaje por candidata.
+    Construye un resumen y un informe por candidata técnica.
+
+    Las cifras de rentabilidad/riesgo son movimientos brutos entre niveles:
+    no incluyen spread, slippage, comisiones ni financiación.
     """
 
     timestamp = scan_result.get(
         "timestamp",
         datetime.now(timezone.utc).isoformat(),
     )
+    analyses = scan_result.get("analyses_completed", 0)
+    technical = scan_result.get("technical_candidates_found", 0)
+    blocked = scan_result.get("candidates_blocked", 0)
+    validated = scan_result.get("validated_candidates", 0)
+    no_trade_count = scan_result.get("no_trade_count", 0)
 
-    analyses = scan_result.get(
-        "analyses_completed",
-        0,
-    )
-
-    technical = scan_result.get(
-        "technical_candidates_found",
-        0,
-    )
-
-    blocked = scan_result.get(
-        "candidates_blocked",
-        0,
-    )
-
-    validated = scan_result.get(
-        "validated_candidates",
-        0,
-    )
-
-    no_trade_count = scan_result.get(
-        "no_trade_count",
-        0,
-    )
-
-    portfolio = scan_result.get(
-        "portfolio_status",
-        {},
-    )
-
+    portfolio = scan_result.get("portfolio_status", {})
     portfolio_status = (
         portfolio.get("status", "UNKNOWN")
         if isinstance(portfolio, dict)
         else "UNKNOWN"
     )
+
+    candidates = [
+        item
+        for item in scan_result.get("results", [])
+        if (
+            isinstance(item, dict)
+            and item.get("action") == "BUY CANDIDATE"
+            and item.get("validation_status") == "BLOCKED"
+        )
+    ]
 
     summary = (
         "📊 <b>TRADING BOT 3.0</b>\n"
@@ -612,112 +617,135 @@ def build_telegram_messages(scan_result):
         "📈 <b>RESULTADOS</b>\n"
         f"• Análisis realizados: <b>{analyses}</b>\n"
         f"• Candidatas técnicas: <b>{technical}</b>\n"
-        f"• Candidatas bloqueadas: <b>{blocked}</b>\n"
-        f"• Candidatas validadas: <b>{validated}</b>\n"
-        f"• Sin operación (NO TRADE): <b>{no_trade_count}</b>\n\n"
-        "💼 <b>CARTERA</b>\n"
-        f"Estado: <b>{escape_html(portfolio_status)}</b>\n\n"
-        "━━━━━━━━━━━━━━━━━━\n"
-        "🛡️ <b>SEGURIDAD</b>\n"
-        "Modo: <b>PAPER ONLY</b>\n"
+        f"• Candidatas pendientes de validación: <b>{blocked}</b>\n"
+        f"• Candidatas validadas para operativa: <b>{validated}</b>\n"
+        f"• Sin oportunidad técnica: <b>{no_trade_count}</b>\n\n"
+        "🛡️ <b>MODO DE FUNCIONAMIENTO</b>\n"
+        "Alertas informativas: <b>SÍ</b>\n"
         "Ejecución automática: <b>DESACTIVADA</b>\n"
-        "Operativa real: <b>NO AUTORIZADA</b>"
+        "Acceso a cuenta eToro: <b>NO REQUERIDO</b>\n"
+        f"Estado de cartera: <b>{escape_html(portfolio_status)}</b> "
+        "(no conectado)"
     )
 
     messages = [summary]
 
-    blocked_candidates = [
-        item
-        for item in scan_result.get("results", [])
-        if (
-            item.get("action") == "BUY CANDIDATE"
-            and item.get("validation_status") == "BLOCKED"
-        )
-    ]
-
-    if not blocked_candidates:
+    if not candidates:
         messages.append(
             "🔎 <b>RESUMEN DE OPORTUNIDADES</b>\n"
             "━━━━━━━━━━━━━━━━━━\n"
-            "No se han detectado candidatas técnicas "
-            "bloqueadas en este análisis."
+            "No se han detectado candidatas técnicas en este análisis."
         )
-
         return messages
 
-    for candidate in blocked_candidates:
-        asset = escape_html(
-            candidate.get("asset", "N/D")
+    for candidate in candidates:
+        asset = escape_html(candidate.get("asset", "N/D"))
+        timeframe = escape_html(candidate.get("timeframe", "N/D"))
+        score = escape_html(candidate.get("score", "N/D"))
+
+        entry_value = get_candidate_entry(candidate)
+        stop_value = candidate.get("stop")
+        target_value = candidate.get("target")
+
+        entry = format_number(entry_value, 4)
+        stop = format_number(stop_value, 4)
+        target = format_number(target_value, 4)
+        rr = format_number(candidate.get("risk_reward"), 2)
+
+        potential_reward = _percentage_between(
+            entry_value, target_value
+        )
+        potential_risk = _percentage_between(
+            entry_value, stop_value
+        )
+        reward_text = (
+            f"+{potential_reward:.2f}%"
+            if potential_reward is not None and potential_reward >= 0
+            else "N/D"
+        )
+        risk_text = (
+            f"{potential_risk:.2f}%"
+            if potential_risk is not None and potential_risk <= 0
+            else f"{abs(potential_risk):.2f}%"
+            if potential_risk is not None
+            else "N/D"
         )
 
-        timeframe = escape_html(
-            candidate.get("timeframe", "N/D")
-        )
+        risk_fraction = candidate.get("provisional_risk_pct")
+        risk = format_risk(risk_fraction)
+        try:
+            risk_amount = float(INITIAL_CAPITAL_USD) * float(risk_fraction)
+            if not math.isfinite(risk_amount) or risk_amount < 0:
+                raise ValueError("invalid risk amount")
+            risk_amount_text = f"{risk_amount:.2f} USD"
+        except (TypeError, ValueError, OverflowError):
+            risk_amount_text = "N/D"
 
-        score = escape_html(
-            candidate.get("score", "N/D")
-        )
+        data_timestamp = candidate.get("data_timestamp")
+        data_age = candidate.get("data_age_minutes")
+        if data_timestamp:
+            data_time_text = escape_html(format_timestamp(data_timestamp))
+        else:
+            data_time_text = "N/D"
+        try:
+            age_value = float(data_age)
+            age_text = f"{age_value:.1f} min" if math.isfinite(age_value) else "N/D"
+        except (TypeError, ValueError, OverflowError):
+            age_text = "N/D"
 
-        entry = format_number(
-            get_candidate_entry(candidate),
-            4,
-        )
-
-        stop = format_number(
-            candidate.get("stop"),
-            4,
-        )
-
-        target = format_number(
-            candidate.get("target"),
-            4,
-        )
-
-        rr = format_number(
-            candidate.get("risk_reward"),
-            2,
-        )
-
-        risk = format_risk(
-            candidate.get("provisional_risk_pct")
-        )
-
-        reasons = candidate.get(
-            "validation_reasons",
-            [],
-        )
-
-        if not isinstance(reasons, list):
-            reasons = [str(reasons)]
-
-        reasons_text = "\n".join(
+        technical_reasons = candidate.get("reasons", [])
+        if not isinstance(technical_reasons, list):
+            technical_reasons = [str(technical_reasons)]
+        technical_text = "\n".join(
             f"• {escape_html(reason)}"
-            for reason in reasons
-        )
+            for reason in technical_reasons
+        ) or "• Sin motivos técnicos detallados."
+        if len(technical_text) > 600:
+            technical_text = technical_text[:600] + "..."
 
-        if len(reasons_text) > 550:
-            reasons_text = reasons_text[:550] + "..."
+        blockers = candidate.get("validation_reasons", [])
+        if not isinstance(blockers, list):
+            blockers = [str(blockers)]
+        blocker_text = "\n".join(
+            f"• {escape_html(reason)}"
+            for reason in blockers
+        ) or "• Validación pendiente."
+        if len(blocker_text) > 600:
+            blocker_text = blocker_text[:600] + "..."
 
         message = (
-            "⚠️ <b>CANDIDATA TÉCNICA DETECTADA</b>\n"
+            "🔎 <b>CANDIDATA TÉCNICA · SOLO INVESTIGACIÓN</b>\n"
             "━━━━━━━━━━━━━━━━━━\n"
-            "🚫 <b>BLOQUEADA — NO OPERAR</b>\n\n"
-            f"📌 <b>{asset}</b>  |  {timeframe}\n"
-            f"⭐ Score: <b>{score}</b>\n\n"
-            "💰 <b>NIVELES TÉCNICOS</b>\n"
-            f"🟢 Entrada: <code>{entry}</code>\n"
-            f"🔴 Stop-loss: <code>{stop}</code>\n"
-            f"🟡 Objetivo: <code>{target}</code>\n"
-            f"⚖️ Ratio riesgo/beneficio: <b>{rr}</b>\n"
-            f"📉 Riesgo provisional: <b>{risk}</b>\n\n"
-            "🔒 <b>MOTIVOS DEL BLOQUEO</b>\n"
-            f"{reasons_text}\n\n"
+            "🚫 <b>NO OPERAR — ESTRATEGIA NO VALIDADA</b>\n\n"
+            f"📌 <b>{asset}</b>  |  {timeframe}  |  Score <b>{score}/100</b>\n"
+            "🟢 Dirección: <b>LONG</b>\n\n"
+            "💰 <b>NIVELES Y MOVIMIENTO POTENCIAL</b>\n"
+            f"Entrada de referencia: <code>{entry}</code>\n"
+            f"Stop técnico: <code>{stop}</code>\n"
+            f"Objetivo técnico: <code>{target}</code>\n"
+            f"Potencial bruto hasta objetivo: <b>{reward_text}</b>\n"
+            f"Movimiento adverso hasta stop: <b>{risk_text}</b>\n"
+            f"Ratio riesgo/beneficio teórico: <b>{rr}</b>\n"
+            "<i>Porcentajes sobre niveles OHLC; antes de costes y slippage.</i>\n\n"
+            "🧮 <b>RIESGO DE REFERENCIA</b>\n"
+            f"Tier provisional: <b>{risk}</b>\n"
+            f"Riesgo teórico sobre {INITIAL_CAPITAL_USD:.0f} USD: "
+            f"<b>{risk_amount_text}</b>\n"
+            "<i>No es tamaño de posición ni riesgo agregado de cartera.</i>\n\n"
+            "📊 <b>JUSTIFICACIÓN TÉCNICA</b>\n"
+            f"{technical_text}\n\n"
+            "🕒 <b>CALIDAD DEL DATO</b>\n"
+            f"Última vela: {data_time_text}\n"
+            f"Antigüedad al analizar: <b>{age_text}</b>\n\n"
+            "🔒 <b>VALIDACIONES PENDIENTES</b>\n"
+            f"{blocker_text}\n\n"
             "━━━━━━━━━━━━━━━━━━\n"
-            "❌ Estado: <b>NO VALIDADA</b>\n"
-            "Este análisis no constituye una orden.\n"
+            "Probabilidad histórica: <b>NO VALIDADA</b>\n"
+            "Ventana de entrada/caducidad: <b>NO CONFIGURADA</b>\n"
+            "Noticias y costes: <b>NO INCORPORADOS AÚN</b>\n"
+            "Este informe es investigación, no asesoramiento ni una orden.\n"
             "<b>NO OPERAR.</b>"
         )
-
         messages.append(message)
 
     return messages
