@@ -104,20 +104,27 @@ jobs:
               ("BTC 15m", "BTC/USD", "15min", 0.75),
               ("BTC 1d", "BTC/USD", "1day", 48),
           ]):
-              payload = get_json(
-                  "https://api.twelvedata.com/time_series",
-                  {
-                      "symbol": symbol, "interval": interval,
-                      "outputsize": 2, "timezone": "UTC", "apikey": key,
-                  },
-              )
-              values = payload.get("values") or []
-              if not values or not values[0].get("datetime"):
-                  raise SystemExit(
-                      f"{label}: no provider timestamp; "
-                      f"code={payload.get('code')} message={payload.get('message')}"
+              try:
+                  payload = get_json(
+                      "https://api.twelvedata.com/time_series",
+                      {
+                          "symbol": symbol, "interval": interval,
+                          "outputsize": 2, "timezone": "UTC", "apikey": key,
+                      },
                   )
-              record(label, "Twelve Data", values[0]["datetime"], threshold)
+                  values = payload.get("values") or []
+                  if not values or not values[0].get("datetime"):
+                      raise ValueError(
+                          f"no provider timestamp; code={payload.get('code')} "
+                          f"message={payload.get('message')}"
+                      )
+                  record(label, "Twelve Data", values[0]["datetime"], threshold)
+              except Exception as exc:
+                  results.append({
+                      "series": label, "provider": "Twelve Data",
+                      "fresh": False, "error": f"{type(exc).__name__}: {exc}",
+                  })
+                  print(f"{label}: PROVIDER ERROR {type(exc).__name__}: {exc}")
               if i < 3:
                   time.sleep(9)
 
@@ -125,22 +132,29 @@ jobs:
               ("CSPX 15m", "CSPX.L", "15m", 72, 55),
               ("CSPX 1d", "CSPX.L", "1d", 96, 400),
           ]:
-              payload = get_json(
-                  f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}",
-                  {
-                      "period1": int(now.timestamp() - days * 86400),
-                      "period2": int(now.timestamp()),
-                      "interval": interval, "events": "history",
-                      "includeAdjustedClose": "true",
-                  },
-              )
-              chart = payload.get("chart") or {}
-              series = chart.get("result") or []
-              timestamps = series[0].get("timestamp") if series else None
-              if chart.get("error") or not timestamps:
-                  raise SystemExit(f"{label}: Yahoo returned no usable timestamps")
-              latest = datetime.fromtimestamp(timestamps[-1], timezone.utc)
-              record(label, "Yahoo Finance", latest.isoformat(), threshold)
+              try:
+                  payload = get_json(
+                      f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}",
+                      {
+                          "period1": int(now.timestamp() - days * 86400),
+                          "period2": int(now.timestamp()),
+                          "interval": interval, "events": "history",
+                          "includeAdjustedClose": "true",
+                      },
+                  )
+                  chart = payload.get("chart") or {}
+                  series = chart.get("result") or []
+                  timestamps = series[0].get("timestamp") if series else None
+                  if chart.get("error") or not timestamps:
+                      raise ValueError("Yahoo returned no usable timestamps")
+                  latest = datetime.fromtimestamp(timestamps[-1], timezone.utc)
+                  record(label, "Yahoo Finance", latest.isoformat(), threshold)
+              except Exception as exc:
+                  results.append({
+                      "series": label, "provider": "Yahoo Finance",
+                      "fresh": False, "error": f"{type(exc).__name__}: {exc}",
+                  })
+                  print(f"{label}: PROVIDER ERROR {type(exc).__name__}: {exc}")
 
           report = {
               "generated_at_utc": now.isoformat(),
