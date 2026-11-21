@@ -2085,6 +2085,27 @@ class TestExtendedHistoryIsBacktestOnly(unittest.TestCase):
         normal.assert_called_once()
         extended.assert_not_called()
 
+
+    def test_extended_backfill_bypasses_normal_five_thousand_bar_cache(self):
+        with (
+            patch.dict(
+                "os.environ",
+                {
+                    "BACKTEST_EXTENDED_INTRADAY_HISTORY": "true",
+                },
+            ),
+            patch.object(engine, "_get_cached_data", return_value=self.frame) as cache,
+            patch.object(
+                engine, "_download_twelvedata_extended", return_value=self.frame
+            ) as extended,
+            patch.object(engine, "_save_cached_data"),
+        ):
+            result = engine.download_data("BTC", "15m")
+
+        self.assertIsNotNone(result)
+        cache.assert_not_called()
+        extended.assert_called_once()
+
     def test_extended_backfill_is_used_only_when_flag_is_true(self):
         with (
             patch.dict(
