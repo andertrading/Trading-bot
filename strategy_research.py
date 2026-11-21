@@ -355,6 +355,7 @@ def main():
     all_summary = []
     all_walk_forward = []
     all_trades = []
+    all_oos_trades = []
     all_errors = []
     portfolio_rows = []
     oos_portfolio_rows = []
@@ -504,11 +505,14 @@ def main():
                         history_start, history_end,
                     )
                 )
-                strategy_oos_trades.extend(
-                    _out_of_sample_trades(
-                        trades, history_start, history_end
-                    )
+                pair_oos_trades = _out_of_sample_trades(
+                    trades, history_start, history_end
                 )
+                strategy_oos_trades.extend(pair_oos_trades)
+                for oos_trade in pair_oos_trades:
+                    item = dict(oos_trade)
+                    item["strategy"] = strategy_name
+                    all_oos_trades.append(item)
                 print(
                     f"{asset} {timeframe}: n={metrics['trades']} "
                     f"avgR={metrics['average_R']:.4f} "
@@ -538,6 +542,11 @@ def main():
             "portfolio_calendar_comparable": False,
             **oos_portfolio["summary"],
         })
+
+    broker_scenario_rows = _broker_cost_sensitivity_rows(all_oos_trades)
+    pd.DataFrame(broker_scenario_rows).to_csv(
+        "strategy_research_broker_cost_scenarios.csv", index=False
+    )
 
     failed_pairs = sorted({
         (str(row["asset"]).upper(), str(row["timeframe"]).lower())
@@ -592,9 +601,6 @@ def main():
             "accepted=", row.get("trades_accepted", 0),
         )
 
-
-if __name__ == "__main__":
-    main()
 
 
 def _broker_cost_sensitivity_rows(
@@ -827,3 +833,7 @@ def _broker_cost_sensitivity_rows(
 
     return rows
 
+
+
+if __name__ == "__main__":
+    main()
