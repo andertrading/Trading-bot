@@ -79,6 +79,9 @@ def simulate_portfolio(
 ):
     """Allocate simultaneous long trades under shared risk and cash limits.
 
+    Optional execution_costs applies entry costs immediately and exit costs
+    at closure, so subsequent position sizing uses net realized equity.
+
     Entry events at a timestamp are allocated before exits at that same
     timestamp. This intentionally does not release capital early when an
     existing trade exits on the same timestamp as a new entry.
@@ -162,7 +165,7 @@ def simulate_portfolio(
                 result_r = float(trade["result_R"])
                 if not all(_finite(v) for v in (entry, stop, score, result_r)):
                     raise ValueError("valor no finito")
-                if entry <= 0 or stop <= 0 or stop >= entry:
+                if entry <= 0 or stop <= 0 or stop >= entry or exit_price <= 0:
                     raise ValueError("niveles long inválidos")
                 if exit_time < entry_time:
                     raise ValueError("salida anterior a entrada")
@@ -395,7 +398,7 @@ def simulate_portfolio(
             "exit_cost_usd": round(position.get("exit_cost_usd", 0.0), 8),
             "net_realized_pnl_usd": round(position.get("net_realized_pnl_usd", 0.0), 8),
             "equity_after_exit_usd": round(position.get("equity_after_exit_usd", equity), 8),
-            "costs_included": False,
+            "costs_included": costs_included,
         })
 
     pnl_values = [
