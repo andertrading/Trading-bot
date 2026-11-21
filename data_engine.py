@@ -1309,6 +1309,13 @@ def _download_yahoo(asset, config, interval):
             )
             return None
 
+        if index.isna().any():
+            logger.error(
+                "Yahoo devolvió timestamps inválidos para %s",
+                ticker,
+            )
+            return None
+
         df = pd.DataFrame(
             {
                 "Open": quote.get("open", []),
@@ -1320,15 +1327,9 @@ def _download_yahoo(asset, config, interval):
             index=index,
         )
 
-        df = _normalise_dataframe(df)
-
-        if df is None:
-            logger.error(
-                "HISTÓRICO RECHAZADO | Yahoo | %s",
-                ticker,
-            )
-            return None
-
+        # Yahoo puede incluir una vela todavía abierta con OHLC nulo.
+        # Se excluye por timestamp ANTES de validar precios; las velas
+        # ya cerradas siguen sometidas a la validación OHLC estricta.
         _log_dataframe_timestamps(
             "Yahoo RAW",
             asset,
@@ -1342,7 +1343,16 @@ def _download_yahoo(asset, config, interval):
             asset,
         )
 
-        if df is None or len(df) < 220:
+        df = _normalise_dataframe(df)
+
+        if df is None:
+            logger.error(
+                "HISTÓRICO RECHAZADO | Yahoo | %s",
+                ticker,
+            )
+            return None
+
+        if len(df) < 220:
             logger.warning(
                 "Histórico insuficiente en Yahoo para %s %s",
                 ticker,

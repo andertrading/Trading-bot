@@ -1442,6 +1442,73 @@ class TestDataCache(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------
+# DESCARGA YAHOO: VELAS INCOMPLETAS
+# ---------------------------------------------------------------------
+
+class TestYahooDownload(unittest.TestCase):
+
+    def test_discards_incomplete_daily_candle_before_ohlc_validation(self):
+        index = pd.bdate_range(
+            end="2026-11-19",
+            periods=221,
+            tz="UTC",
+        )
+        values = {
+            "open": [100.0] * len(index),
+            "high": [102.0] * len(index),
+            "low": [99.0] * len(index),
+            "close": [101.0] * len(index),
+            "volume": [1000] * len(index),
+        }
+
+        # La última vela corresponde al día actual y aún no está cerrada.
+        # Yahoo puede devolver OHLC nulo en esa fila.
+        for field in ("open", "high", "low", "close"):
+            values[field][-1] = None
+
+        payload = {
+            "chart": {
+                "error": None,
+                "result": [{
+                    "meta": {
+                        "currency": "USD",
+                        "fullExchangeName": "London Stock Exchange",
+                        "exchangeTimezoneName": "Europe/London",
+                    },
+                    "timestamp": [int(value.timestamp()) for value in index],
+                    "indicators": {
+                        "quote": [values],
+                    },
+                }],
+            },
+        }
+
+        class FakeResponse:
+            status_code = 200
+
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return payload
+
+        with (
+            patch.object(engine, "datetime", FrozenDateTime),
+            patch.object(engine.requests, "get", return_value=FakeResponse()),
+        ):
+            result = engine._download_yahoo(
+                "CSPX",
+                {"yahoo": "CSPX.L", "currency": "USD"},
+                "1d",
+            )
+
+        self.assertIsNotNone(result)
+        self.assertEqual(len(result), 220)
+        self.assertTrue(np.isfinite(result[["Open", "High", "Low", "Close"]]).all().all())
+        self.assertNotIn(index[-1], result.index)
+
+
+# ---------------------------------------------------------------------
 # DESCARGA PRINCIPAL Y VALIDACIONES BASICAS
 # ---------------------------------------------------------------------
 
