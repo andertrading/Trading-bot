@@ -17,7 +17,7 @@ from uuid import uuid4
 import requests
 
 
-API_BASE_URL = "https://api.etoro.com"
+API_BASE_URL = "https://public-api.etoro.com"
 DEFAULT_TIMEOUT_SECONDS = 10
 MAX_ATTEMPTS = 3
 RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
