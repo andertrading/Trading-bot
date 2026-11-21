@@ -22,7 +22,7 @@ The code uses public eToro fee information as a **baseline estimate**, not as pr
 | Execution type | Asset | Baseline used |
 |---|---|---:|
 | REAL | Stocks | $2 per side (upper end of published $1–$2 range) |
-| REAL | ETFs | $0 platform commission |
+| REAL | ETFs | $0 platform commission; eToro confirms UK SDRT exemption for ETFs |
 | REAL | Crypto | 1% per side (base tier; Club discounts may apply) |
 | CFD | Stocks / ETFs | 0.15% per side |
 | CFD | Crypto | 1% per side |
