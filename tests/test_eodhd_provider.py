@@ -133,6 +133,23 @@ class TestEODHDProvider(unittest.TestCase):
         )
         self.assertEqual(result.attrs["split_events_applied"], 1)
 
+    def test_split_endpoint_http_error_fails_closed(self):
+        with patch.dict("os.environ", {"EODHD_API_KEY": "test-secret"}), patch.object(
+            provider.requests,
+            "get",
+            side_effect=[
+                FakeResponse(valid_payload()),
+                requests.RequestException("split endpoint unavailable"),
+            ],
+        ):
+            result = provider.download_eodhd_daily(
+                "CSPX",
+                "USD",
+                lambda frame, interval, asset: frame,
+                lambda frame, asset: False,
+            )
+        self.assertIsNone(result)
+
     def test_invalid_split_ratio_fails_closed(self):
         result, _ = self.download(
             splits=[{"date": "2026-01-01", "split": "not-a-ratio"}],
