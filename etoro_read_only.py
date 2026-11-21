@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
+from datetime import datetime, timedelta
 import os
 import re
 import time
@@ -240,6 +241,96 @@ def normalize_account_snapshot(
     )
 
 
+@dataclass(frozen=True)
+class EtoroQuote:
+    instrument_id: int
+    bid: Decimal
+    ask: Decimal
+    timestamp: datetime
+    quote_type: str
+
+
+def normalize_realtime_quotes(
+    response: EtoroResponse,
+    expected_instrument_ids: list[int],
+    now_utc: datetime,
+    max_age_seconds: int = 30,
+) -> dict[int, EtoroQuote]:
+    """Return only a complete, fresh, uncrossed set of realtime quotes."""
+    if response.status_code != 200:
+        raise EtoroAPIError("Las cotizaciones no son una respuesta HTTP 200 completa")
+    if not expected_instrument_ids or any(
+        isinstance(value, bool) or not isinstance(value, int) or value <= 0
+        for value in expected_instrument_ids
+    ):
+        raise EtoroAPIError("La lista de instrumentos esperados no es válida")
+    if len(set(expected_instrument_ids)) != len(expected_instrument_ids):
+        raise EtoroAPIError("La lista de instrumentos esperados contiene duplicados")
+    if (
+        not isinstance(now_utc, datetime)
+        or now_utc.tzinfo is None
+        or now_utc.utcoffset() != timedelta(0)
+    ):
+        raise EtoroAPIError("now_utc debe incluir zona horaria UTC")
+    if isinstance(max_age_seconds, bool) or not isinstance(max_age_seconds, int) or max_age_seconds <= 0:
+        raise EtoroAPIError("max_age_seconds debe ser un entero positivo")
+
+    if not isinstance(response.data, Mapping):
+        raise EtoroAPIError("La respuesta de cotizaciones no es un objeto JSON")
+    results = response.data.get("results")
+    if not isinstance(results, list):
+        raise EtoroAPIError("Falta la lista de resultados de cotizaciones")
+
+    expected = set(expected_instrument_ids)
+    quotes: dict[int, EtoroQuote] = {}
+    for index, item in enumerate(results):
+        if not isinstance(item, Mapping):
+            raise EtoroAPIError(f"Cotización inválida: {index}")
+        instrument_id = item.get("instrumentId")
+        if isinstance(instrument_id, bool) or not isinstance(instrument_id, int) or instrument_id <= 0:
+            raise EtoroAPIError(f"instrumentId inválido en cotización {index}")
+        if instrument_id not in expected:
+            raise EtoroAPIError(f"Instrumento inesperado en cotizaciones: {instrument_id}")
+        if instrument_id in quotes:
+            raise EtoroAPIError(f"Cotización duplicada para instrumento {instrument_id}")
+        if item.get("quoteType") != "realtime":
+            raise EtoroAPIError(f"El instrumento {instrument_id} tiene cotización retrasada")
+
+        bid = _decimal(item.get("bid"), f"rates[{index}].bid")
+        ask = _decimal(item.get("ask"), f"rates[{index}].ask")
+        if bid <= 0 or ask <= 0 or ask < bid:
+            raise EtoroAPIError(f"Bid/ask inválido o cruzado para instrumento {instrument_id}")
+
+        date_value = item.get("date")
+        if not isinstance(date_value, str):
+            raise EtoroAPIError(f"Fecha ausente en cotización {instrument_id}")
+        try:
+            quote_time = datetime.fromisoformat(
+                date_value[:-1] + "+00:00" if date_value.endswith("Z") else date_value
+            )
+        except ValueError:
+            raise EtoroAPIError(f"Fecha inválida en cotización {instrument_id}") from None
+        if quote_time.tzinfo is None or quote_time.utcoffset() != timedelta(0):
+            raise EtoroAPIError(f"La fecha de cotización {instrument_id} no está en UTC")
+
+        age_seconds = (now_utc - quote_time).total_seconds()
+        if age_seconds < -5 or age_seconds > max_age_seconds:
+            raise EtoroAPIError(f"Cotización obsoleta o futura para instrumento {instrument_id}")
+
+        quotes[instrument_id] = EtoroQuote(
+            instrument_id=instrument_id,
+            bid=bid,
+            ask=ask,
+            timestamp=quote_time,
+            quote_type="realtime",
+        )
+
+    if set(quotes) != expected:
+        missing = sorted(expected.difference(quotes))
+        raise EtoroAPIError(f"Faltan cotizaciones para instrumentos: {missing}")
+    return quotes
+
+
 class EtoroReadOnlyClient:
     """Small eToro client with a deliberately restricted endpoint surface."""
 
@@ -356,12 +447,30 @@ class EtoroReadOnlyClient:
         response = self.get_account_pnl()
         return normalize_account_snapshot(response.data, account_currency)
 
+    def get_realtime_quotes(
+        self,
+        instrument_ids: list[int],
+        now_utc: datetime,
+        max_age_seconds: int = 30,
+    ) -> dict[int, EtoroQuote]:
+        response = self.get_rates(instrument_ids)
+        return normalize_realtime_quotes(
+            response,
+            instrument_ids,
+            now_utc,
+            max_age_seconds=max_age_seconds,
+        )
+
     def get_rates(self, instrument_ids: list[int]) -> EtoroResponse:
         if not instrument_ids or any(
             isinstance(value, bool) or not isinstance(value, int) or value <= 0
             for value in instrument_ids
         ):
             raise ValueError("instrument_ids debe contener IDs enteros positivos")
+        if len(instrument_ids) > 1000:
+            raise ValueError("eToro admite como máximo 1000 instrumentIds por petición")
+        if len(set(instrument_ids)) != len(instrument_ids):
+            raise ValueError("instrument_ids no puede contener duplicados")
         return self._request(
             "GET",
             "/api/v2/market-data/rates",

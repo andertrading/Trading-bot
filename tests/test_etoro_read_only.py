@@ -1,5 +1,6 @@
 import unittest
 from decimal import Decimal
+from datetime import datetime, timezone
 from unittest.mock import Mock, patch
 
 import requests
@@ -8,7 +9,9 @@ from etoro_read_only import (
     EtoroAPIError,
     EtoroConfigurationError,
     EtoroReadOnlyClient,
+    EtoroResponse,
     calculate_available_cash,
+    normalize_realtime_quotes,
     normalize_account_snapshot,
 )
 
@@ -74,6 +77,10 @@ class EtoroReadOnlyClientTests(unittest.TestCase):
     def test_invalid_instrument_ids_are_rejected_without_request(self):
         with self.assertRaises(ValueError):
             self.client.get_rates([1, 0])
+        with self.assertRaises(ValueError):
+            self.client.get_rates([1, 1])
+        with self.assertRaises(ValueError):
+            self.client.get_rates(list(range(1, 1002)))
         self.session.request.assert_not_called()
 
     def test_candle_request_is_bounded_and_uses_documented_path(self):
@@ -215,6 +222,120 @@ class AvailableCashTests(unittest.TestCase):
                 "ordersForOpen": [],
                 "orders": [{"amount": -50}],
             })
+
+
+class RealtimeQuoteValidationTests(unittest.TestCase):
+    def setUp(self):
+        self.now = datetime(2026, 11, 21, 12, 0, 0, tzinfo=timezone.utc)
+        self.response = EtoroResponse(
+            data={
+                "results": [
+                    {
+                        "instrumentId": 101,
+                        "bid": 99.9,
+                        "ask": 100.1,
+                        "date": "2026-11-21T11:59:45Z",
+                        "quoteType": "realtime",
+                    },
+                    {
+                        "instrumentId": 202,
+                        "bid": 49.9,
+                        "ask": 50.1,
+                        "date": "2026-11-21T11:59:50Z",
+                        "quoteType": "realtime",
+                    },
+                ]
+            },
+            status_code=200,
+            headers={},
+        )
+
+    def test_complete_fresh_realtime_quotes_are_normalized(self):
+        quotes = normalize_realtime_quotes(self.response, [101, 202], self.now)
+        self.assertEqual(set(quotes), {101, 202})
+        self.assertEqual(quotes[101].bid, Decimal("99.9"))
+        self.assertEqual(quotes[101].ask, Decimal("100.1"))
+        self.assertEqual(quotes[101].quote_type, "realtime")
+
+    def test_partial_http_206_is_rejected_even_if_some_quotes_exist(self):
+        partial = EtoroResponse(self.response.data, 206, {})
+        with self.assertRaises(EtoroAPIError):
+            normalize_realtime_quotes(partial, [101, 202], self.now)
+
+    def test_missing_or_unexpected_instrument_is_rejected(self):
+        with self.assertRaises(EtoroAPIError):
+            normalize_realtime_quotes(self.response, [101, 202, 303], self.now)
+        unexpected = EtoroResponse(
+            {"results": [dict(self.response.data["results"][0], instrumentId=999)]},
+            200,
+            {},
+        )
+        with self.assertRaises(EtoroAPIError):
+            normalize_realtime_quotes(unexpected, [101], self.now)
+
+    def test_duplicate_instrument_quote_is_rejected(self):
+        duplicate_data = {
+            "results": [
+                self.response.data["results"][0],
+                self.response.data["results"][0],
+            ]
+        }
+        with self.assertRaises(EtoroAPIError):
+            normalize_realtime_quotes(EtoroResponse(duplicate_data, 200, {}), [101], self.now)
+
+    def test_delayed_quote_is_rejected(self):
+        data = {"results": [dict(self.response.data["results"][0], quoteType="delayed")]}
+        with self.assertRaises(EtoroAPIError):
+            normalize_realtime_quotes(EtoroResponse(data, 200, {}), [101], self.now)
+
+    def test_stale_and_future_quotes_are_rejected(self):
+        stale = {"results": [dict(
+            self.response.data["results"][0],
+            date="2026-11-21T11:59:00Z",
+        )]}
+        with self.assertRaises(EtoroAPIError):
+            normalize_realtime_quotes(EtoroResponse(stale, 200, {}), [101], self.now)
+
+        future = {"results": [dict(
+            self.response.data["results"][0],
+            date="2026-11-21T12:00:10Z",
+        )]}
+        with self.assertRaises(EtoroAPIError):
+            normalize_realtime_quotes(EtoroResponse(future, 200, {}), [101], self.now)
+
+    def test_invalid_or_crossed_prices_are_rejected(self):
+        crossed = {"results": [dict(
+            self.response.data["results"][0],
+            bid=100.2,
+            ask=100.1,
+        )]}
+        with self.assertRaises(EtoroAPIError):
+            normalize_realtime_quotes(EtoroResponse(crossed, 200, {}), [101], self.now)
+
+        zero = {"results": [dict(self.response.data["results"][0], bid=0)]}
+        with self.assertRaises(EtoroAPIError):
+            normalize_realtime_quotes(EtoroResponse(zero, 200, {}), [101], self.now)
+
+    def test_naive_or_non_utc_time_is_rejected(self):
+        with self.assertRaises(EtoroAPIError):
+            normalize_realtime_quotes(self.response, [101], datetime(2026, 11, 21, 12, 0, 0))
+        non_utc = {"results": [dict(
+            self.response.data["results"][0],
+            date="2026-11-21T12:59:45+01:00",
+        )]}
+        with self.assertRaises(EtoroAPIError):
+            normalize_realtime_quotes(EtoroResponse(non_utc, 200, {}), [101], self.now)
+
+    def test_client_get_realtime_quotes_uses_strict_validation(self):
+        session = Mock()
+        session.request.return_value = FakeResponse(
+            data=self.response.data,
+            status_code=200,
+        )
+        client = EtoroReadOnlyClient("app-key", "user-key", session=session)
+        quotes = client.get_realtime_quotes([101, 202], self.now)
+        self.assertEqual(set(quotes), {101, 202})
+        self.assertEqual(session.request.call_count, 1)
 
 
 class AccountSnapshotTests(unittest.TestCase):
