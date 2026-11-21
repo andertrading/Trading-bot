@@ -264,7 +264,7 @@ def _snapshot_metadata(
         "asset": asset,
         "ticker": ticker,
         "timeframe": interval,
-        "provider": provider,
+        "provider": data.attrs.get("provider", provider),
         "period_requested": (
             _daily_period_label()
             if interval == "1d"
