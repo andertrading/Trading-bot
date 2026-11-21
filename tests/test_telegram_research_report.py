@@ -53,6 +53,12 @@ class TestTelegramResearchReport(unittest.TestCase):
         self.assertIn("Spread not confirmed", report)
 
 
+
+    def test_report_displays_stable_signal_id_when_present(self):
+        self.candidate["signal_id"] = "abcdef1234567890"
+        report = Bot.build_telegram_messages(self.scan)[1]
+        self.assertIn("ID: <code>abcdef123456</code>", report)
+
     def test_report_displays_data_provider_and_ohlc_policy(self):
         self.candidate["data_provider"] = "twelvedata"
         self.candidate["price_adjustment_policy"] = "raw_unadjusted_intraday"
