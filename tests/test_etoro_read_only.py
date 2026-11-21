@@ -238,6 +238,24 @@ class AccountSnapshotTests(unittest.TestCase):
             },
         }
 
+
+    def test_client_snapshot_method_fetches_and_validates_in_one_step(self):
+        session = Mock()
+        session.request.return_value = FakeResponse(data=self.payload)
+        client = EtoroReadOnlyClient("app-key", "user-key", session=session)
+        snapshot = client.get_account_snapshot()
+        self.assertEqual(snapshot.account_currency, "USD")
+        self.assertEqual(snapshot.available_cash, 900)
+        session.request.assert_called_once()
+
+    def test_client_snapshot_method_rejects_incomplete_account_response(self):
+        session = Mock()
+        session.request.return_value = FakeResponse(data={"credit": 1000})
+        client = EtoroReadOnlyClient("app-key", "user-key", session=session)
+        with self.assertRaises(EtoroAPIError):
+            client.get_account_snapshot()
+        session.request.assert_called_once()
+
     def test_valid_snapshot_confirms_usd_and_cash_without_inventing_risk(self):
         snapshot = normalize_account_snapshot(self.payload)
         self.assertEqual(snapshot.account_currency, "USD")
