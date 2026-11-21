@@ -45,7 +45,10 @@ class EtoroReadOnlyClientTests(unittest.TestCase):
         self.assertEqual(result.data, {"credit": 100})
         args, kwargs = self.session.request.call_args
         self.assertEqual(args[0], "GET")
-        self.assertTrue(args[1].endswith("/api/v1/trading/info/real/pnl"))
+        self.assertEqual(
+            args[1],
+            "https://public-api.etoro.com/api/v1/trading/info/real/pnl",
+        )
         self.assertEqual(kwargs["headers"]["x-api-key"], "app-secret-test")
         self.assertEqual(kwargs["headers"]["x-user-key"], "user-secret-test")
         self.assertTrue(kwargs["headers"]["x-request-id"])
