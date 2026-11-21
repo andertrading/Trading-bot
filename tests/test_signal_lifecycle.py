@@ -58,6 +58,13 @@ class SignalLifecycleTests(unittest.TestCase):
     def test_build_signal_calculates_potential_and_expiry(self):
         signal = build_signal_record(candidate(), NOW, 30)
         self.assertEqual(signal["status"], "PENDING")
+        self.assertEqual(signal["monitor_status"], "ACTIVE")
+        self.assertEqual(
+            signal["monitoring_expires_at"],
+            (NOW + timedelta(minutes=30) + timedelta(hours=8)).isoformat(),
+        )
+        self.assertEqual(signal["minimum_risk_reward"], 2.0)
+        self.assertEqual(signal["minimum_remaining_risk_fraction"], 0.5)
         self.assertEqual(signal["expires_at"], (NOW + timedelta(minutes=30)).isoformat())
         self.assertEqual(signal["potential_risk_pct"], 1.0)
         self.assertEqual(signal["potential_reward_pct"], 2.0)
@@ -81,6 +88,14 @@ class SignalLifecycleTests(unittest.TestCase):
             build_signal_record(candidate(), NOW)
         with self.assertRaises(ValueError):
             build_signal_record(candidate(), NOW, 30, NOW + timedelta(hours=1))
+
+    def test_build_signal_rejects_invalid_entry_zone_policy(self):
+        with self.assertRaises(ValueError):
+            build_signal_record(candidate(minimum_risk_reward=0), NOW, 30)
+        with self.assertRaises(ValueError):
+            build_signal_record(
+                candidate(minimum_remaining_risk_fraction=1.5), NOW, 30
+            )
 
     def test_build_signal_rejects_non_candidate(self):
         with self.assertRaises(ValueError):
