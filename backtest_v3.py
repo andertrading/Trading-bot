@@ -2360,6 +2360,38 @@ def main():
         index=False,
     )
 
+    cost_columns = [
+        "asset",
+        "timeframe",
+        "entry_time",
+        "exit_time",
+        "cost_model_execution_type",
+        "hypothetical_quantity",
+        "hypothetical_risk_budget_usd",
+        "hypothetical_gross_pnl_usd",
+        "commission_cost_usd",
+        "market_spread_cost_usd",
+        "fx_conversion_cost_usd",
+        "overnight_cost_usd",
+        "known_costs_total_usd",
+        "known_fee_adjusted_pnl_usd",
+        "result_R",
+        "result_R_after_known_fees",
+        "costs_complete",
+        "unpriced_costs",
+        "cost_model_assumptions",
+    ]
+    pd.DataFrame(
+        [
+            {column: trade.get(column) for column in cost_columns}
+            for trade in all_trades
+        ],
+        columns=cost_columns,
+    ).to_csv(
+        "costes_backtest_v3.csv",
+        index=False,
+    )
+
     pd.DataFrame(summaries).to_csv(
         "resultados_backtest_v3.csv",
         index=False,
