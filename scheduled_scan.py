@@ -74,9 +74,9 @@ def _lifecycle_message(signal: dict, event: str) -> str:
             "el bot no puede saber si ejecutaste manualmente."
         ),
         "SIGNAL_ENTRY_ZONE_INVALIDATED": (
-            "⚠️ <b>PRECIO FUERA DE LA ZONA DE ENTRADA</b>\\n"
-            "━━━━━━━━━━━━━━━━━━\\n"
-            f"📌 <b>{asset}</b> | {timeframe}\\n"
+            "⚠️ <b>PRECIO FUERA DE LA ZONA DE ENTRADA</b>\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            f"📌 <b>{asset}</b> | {timeframe}\n"
             f"{signal_id_line}"
             "El precio ya no conserva el riesgo/recompensa mínimo ni la "
             "distancia de seguridad prevista hasta el stop. No abrir una "
@@ -202,6 +202,9 @@ def run_scheduled_scan(timeframe: str) -> dict:
             ),
             latest_high=current.get("last_high") if data_is_valid else None,
             latest_low=current.get("last_low") if data_is_valid else None,
+            latest_data_timestamp=(
+                current.get("data_timestamp") if data_is_valid else None
+            ),
         )
 
         if event:
