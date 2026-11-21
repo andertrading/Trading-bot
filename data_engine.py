@@ -936,16 +936,25 @@ def _has_daily_gaps(df, asset):
         )
         return True
 
+    # El motor utiliza como máximo dos años para los indicadores
+    # operativos. Comprobar huecos solo dentro de esa ventana evita
+    # rechazar históricos por discontinuidades anteriores al periodo
+    # que realmente puede utilizar el sistema.
+    recent_cutoff = session_dates[-1] - timedelta(days=730)
+
     if asset in CRYPTO_ASSETS:
-        differences = timestamps.to_series().diff().dropna()
+        recent_timestamps = timestamps[
+            timestamps.date >= recent_cutoff
+        ]
+        differences = recent_timestamps.to_series().diff().dropna()
 
         invalid_gaps = differences[
             differences != pd.Timedelta(days=1)
         ]
         if not invalid_gaps.empty:
             gap_position = differences.index.get_loc(invalid_gaps.index[0])
-            previous_timestamp = timestamps[gap_position]
-            current_timestamp = timestamps[gap_position + 1]
+            previous_timestamp = recent_timestamps[gap_position]
+            current_timestamp = recent_timestamps[gap_position + 1]
             logger.error(
                 "HUECO DIARIO | %s | mercado cripto | anterior=%s | siguiente=%s | días_transcurridos=%.1f",
                 asset,
@@ -957,10 +966,6 @@ def _has_daily_gaps(df, asset):
 
         return False
 
-    # El motor utiliza como máximo dos años para los indicadores
-    # operativos. Limitar la comprobación evita aplicar el calendario
-    # simplificado a cierres extraordinarios históricos muy antiguos.
-    recent_cutoff = session_dates[-1] - timedelta(days=730)
     recent_dates = [
         session_date
         for session_date in session_dates
