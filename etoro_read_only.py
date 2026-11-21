@@ -141,6 +141,7 @@ class EtoroAccountSnapshot:
 
     account_currency: str
     account_currency_source: str
+    client_id: int | None
     available_cash: Decimal
     unrealized_pnl: Decimal
     positions: tuple[Mapping[str, Any], ...]
@@ -213,6 +214,7 @@ def normalize_account_snapshot(
     required_fields = {
         "positionId",
         "instrumentId",
+        "cid",
         "mirrorId",
         "isBuy",
         "openRate",
@@ -224,6 +226,7 @@ def normalize_account_snapshot(
         "isNoStopLoss",
     }
     normalized_positions: list[Mapping[str, Any]] = []
+    client_ids: set[int] = set()
     unbounded_stop_risk = False
 
     for index, position in enumerate(positions):
@@ -235,10 +238,14 @@ def normalize_account_snapshot(
                 f"Posición {index} incompleta: faltan {', '.join(missing)}"
             )
 
-        for id_field in ("positionId", "instrumentId"):
+        for id_field in ("positionId", "instrumentId", "cid"):
             value = position[id_field]
             if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
                 raise EtoroAPIError(f"{id_field} inválido en posición {index}")
+
+        client_ids.add(position["cid"])
+        if len(client_ids) > 1:
+            raise EtoroAPIError("Las posiciones pertenecen a más de un CID; snapshot bloqueado")
 
         mirror_id = position["mirrorId"]
         if isinstance(mirror_id, bool) or not isinstance(mirror_id, int) or mirror_id < 0:
@@ -280,6 +287,7 @@ def normalize_account_snapshot(
     return EtoroAccountSnapshot(
         account_currency=account_currency,
         account_currency_source="bot_configuration",
+        client_id=next(iter(client_ids)) if client_ids else None,
         available_cash=available_cash,
         unrealized_pnl=unrealized_pnl,
         positions=tuple(normalized_positions),
