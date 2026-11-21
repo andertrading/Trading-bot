@@ -736,7 +736,7 @@ def normalize_instrument_eligibility(
             leverage_values = config.get("leverageValues")
             if not isinstance(settlement, str) or not settlement.strip():
                 raise EtoroAPIError("settlementType ausente en leverage config")
-            if direction not in {"LONG", "SHORT"}:
+            if not isinstance(direction, str) or direction not in {"LONG", "SHORT"}:
                 raise EtoroAPIError("direction inválida en leverage config")
             if not isinstance(leverage_values, list) or not leverage_values:
                 raise EtoroAPIError("leverageValues ausente en leverage config")
@@ -750,6 +750,8 @@ def normalize_instrument_eligibility(
             if config.get("minPositionAmount") is not None:
                 if _decimal(config["minPositionAmount"], "minPositionAmount") <= 0:
                     raise EtoroAPIError("minPositionAmount debe ser positivo")
+            elif allow_open:
+                raise EtoroAPIError("Falta minPositionAmount para un instrumento habilitado")
             for flag in ("allowEditStopLoss", "allowEditTakeProfit", "allowStopLossTakeProfit"):
                 if not isinstance(config.get(flag), bool):
                     raise EtoroAPIError(f"{flag} inválido en leverage config")
