@@ -15,6 +15,7 @@ from zoneinfo import ZoneInfo
 import numpy as np
 import pandas as pd
 import requests
+import yfinance as yf
 
 from config import ASSETS
 from eodhd_provider import download_eodhd_daily
@@ -1577,6 +1578,58 @@ def _download_twelvedata_extended(asset, config, interval):
 # YAHOO FINANCE
 # ---------------------------------------------------------------------
 
+def _yahoo_repair_enabled(interval):
+    return (
+        interval == "1d"
+        and os.getenv(
+            "BACKTEST_EXTENDED_DAILY_HISTORY", "false"
+        ).strip().lower() in {"1", "true", "yes", "on"}
+    )
+
+
+def _download_yahoo_repaired_daily(ticker, start, end):
+    """Download split-adjusted daily OHLC with yfinance's repair pass."""
+    try:
+        dataframe = yf.Ticker(ticker).history(
+            start=start,
+            end=end,
+            interval="1d",
+            auto_adjust=False,
+            actions=True,
+            repair=True,
+            timeout=25,
+        )
+    except Exception:
+        logger.exception("Yahoo repair falló para %s", ticker)
+        return None
+
+    if dataframe is None or dataframe.empty:
+        logger.error("Yahoo repair no devolvió datos para %s", ticker)
+        return None
+
+    index = pd.DatetimeIndex(pd.to_datetime(dataframe.index, errors="coerce"))
+    if index.isna().any():
+        logger.error("Yahoo repair devolvió timestamps inválidos para %s", ticker)
+        return None
+
+    # Normalize the exchange-local daily date to UTC midnight, matching the
+    # daily timestamp convention used by the chart API and other providers.
+    if index.tz is not None:
+        index = index.tz_localize(None)
+    index = index.normalize().tz_localize("UTC")
+
+    dataframe = dataframe.copy()
+    dataframe.index = index
+    dataframe.index.name = "Datetime"
+    required = ["Open", "High", "Low", "Close"]
+    if any(column not in dataframe.columns for column in required):
+        logger.error("Yahoo repair devolvió columnas OHLC incompletas para %s", ticker)
+        return None
+    if "Volume" not in dataframe.columns:
+        dataframe["Volume"] = 0.0
+    return dataframe[["Open", "High", "Low", "Close", "Volume"]]
+
+
 def _drop_invalid_ohlc_rows(dataframe, asset, interval):
     """
     Extended daily backtests may discard Yahoo rows with missing OHLC.
@@ -1755,16 +1808,25 @@ def _download_yahoo(asset, config, interval):
             )
             return None
 
-        df = pd.DataFrame(
-            {
-                "Open": quote.get("open", []),
-                "High": quote.get("high", []),
-                "Low": quote.get("low", []),
-                "Close": quote.get("close", []),
-                "Volume": quote.get("volume", []),
-            },
-            index=index,
-        )
+        if _yahoo_repair_enabled(interval):
+            df = _download_yahoo_repaired_daily(
+                ticker,
+                start,
+                now,
+            )
+            if df is None:
+                return None
+        else:
+            df = pd.DataFrame(
+                {
+                    "Open": quote.get("open", []),
+                    "High": quote.get("high", []),
+                    "Low": quote.get("low", []),
+                    "Close": quote.get("close", []),
+                    "Volume": quote.get("volume", []),
+                },
+                index=index,
+            )
 
         # Yahoo puede incluir una vela todavía abierta con OHLC nulo.
         # Se excluye por timestamp ANTES de validar precios; las velas
