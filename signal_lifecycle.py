@@ -364,7 +364,7 @@ class UpstashSignalStateStore:
             removed = 0
             terminal = []
 
-            for signal_id, signal in signals.items():
+            for signal_id, signal in list(signals.items()):
                 if signal.get("status") not in TERMINAL_STATUSES:
                     continue
                 terminal_at = signal.get("last_checked_at") or signal.get("generated_at")
