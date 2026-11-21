@@ -428,6 +428,7 @@ class ScheduledScanTests(unittest.TestCase):
         return_value=["summary", "X" * 1800],
     )
     def test_long_report_is_sent_in_full_and_photo_uses_short_caption(
+        """The Telegram caption limit must not truncate the full report."""
         self, build_messages, generate_chart, send_photo, send_text
     ):
         result = scheduled_scan._send_signal_report(
