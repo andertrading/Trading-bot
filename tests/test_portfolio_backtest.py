@@ -260,6 +260,43 @@ class TestPortfolioBacktest(unittest.TestCase):
             "limite_de_riesgo_o_capital_disponible",
         )
 
+    def test_crypto_commission_rate_can_be_overridden_per_asset(self):
+        btc = self.make_trade(
+            asset="BTC",
+            entry=100.0,
+            stop=90.0,
+            score=80,
+            result_R=1.0,
+        )
+        xlm = self.make_trade(
+            asset="XLM",
+            entry=100.0,
+            stop=90.0,
+            score=80,
+            result_R=1.0,
+        )
+        btc["exit"] = 110.0
+        xlm["exit"] = 110.0
+
+        result = simulate_portfolio(
+            [btc, xlm],
+            capital_usd=1000.0,
+            execution_costs={
+                "venue": "ETORO_REAL",
+                "spread_bps": 0,
+                "crypto_rate_per_side": 0.01,
+                "crypto_rate_by_asset": {
+                    "BTC": 0.0005,
+                    "XLM": 0.0015,
+                },
+            },
+        )
+
+        self.assertAlmostEqual(result["summary"]["total_entry_cost_usd"], 0.1)
+        self.assertAlmostEqual(result["summary"]["total_exit_cost_usd"], 0.11)
+        self.assertAlmostEqual(result["summary"]["gross_pnl_usd"], 10.0)
+        self.assertAlmostEqual(result["summary"]["net_pnl_usd"], 9.79)
+
     def test_entry_commission_is_reserved_against_available_cash(self):
         trade = self.make_trade(
             asset="BTC",
