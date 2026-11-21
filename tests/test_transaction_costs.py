@@ -86,7 +86,23 @@ class TestEtoroTransactionCosts(unittest.TestCase):
             leverage=2.0,
         )
         self.assertAlmostEqual(result["commission_cost"], 0.315)
-        self.assertIn("cfd_overnight_fee_missing", result["unpriced_costs"])
+        self.assertIn("cfd_benchmark_rate_missing", result["unpriced_costs"])
+
+    def test_leveraged_stock_cfd_overnight_uses_annual_fee_plus_benchmark(self):
+        with patch.object(
+            costs, "ETORO_CFD_STOCK_ETF_BENCHMARK_RATE_PCT", 0.036
+        ):
+            result = costs.estimate_etoro_trade_costs(
+                "AAPL",
+                100.0,
+                110.0,
+                1.0,
+                execution_type="CFD",
+                market_spread_bps=0,
+                overnight_charge_units=2,
+                leverage=2.0,
+            )
+        self.assertAlmostEqual(result["overnight_cost"], 105.0 * 0.10 * 2 / 365)
 
     def test_unleveraged_long_stock_cfd_has_no_overnight_fee(self):
         result = costs.estimate_etoro_trade_costs(
