@@ -39,6 +39,7 @@ class TestTelegramResearchReport(unittest.TestCase):
     def test_legacy_notification_sends_full_text_before_short_chart_caption(
         self, generate_chart, send_photo, send_text
     ):
+        """The older scan path must also avoid Telegram caption truncation."""
         self.candidate["generated_at"] = "2026-11-21T12:00:00+00:00"
         self.candidate["expires_at"] = "2026-11-21T12:30:00+00:00"
         with patch.object(Bot, "TELEGRAM_ENABLED", True):
