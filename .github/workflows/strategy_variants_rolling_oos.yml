@@ -57,10 +57,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-      - name: Recover missing SOL 15m snapshot with smaller Twelve Data windows
-        env:
-          TWELVE_DATA_API_KEY: ${{ secrets.TWELVE_DATA_API_KEY }}
-          BACKTEST_INTRADAY_LOOKBACK_DAYS: "700"
+      - name: Recover missing SOL 15m snapshot from Coinbase USD history
         run: |
           python - <<'PY'
           import json
@@ -68,7 +65,6 @@ jobs:
 
           import backtest_v3
           import data_engine
-          from config import ASSETS
 
           source_dir = Path("sources/base/historicos_backtest_extended")
           manifest_path = source_dir / "manifest.json"
@@ -81,15 +77,12 @@ jobs:
               print("SOL 15m already exists in the source manifest; no replacement.")
               raise SystemExit(0)
 
-          if not __import__("os").environ.get("TWELVE_DATA_API_KEY"):
-              raise SystemExit("TWELVE_DATA_API_KEY is missing; SOL backfill cannot run.")
-
-          frame = data_engine._download_twelvedata_extended(
-              "SOL", ASSETS["SOL"], "15m"
+          frame = data_engine._download_coinbase_crypto_history(
+              "SOL", lookback_days=700
           )
           if frame is None or frame.empty:
               raise SystemExit(
-                  "SOL 15m backfill still has missing/invalid candles; "
+                  "Coinbase SOL-USD 15m history is incomplete or invalid; "
                   "the universe remains explicitly partial."
               )
 
@@ -98,7 +91,11 @@ jobs:
           metadata = backtest_v3._save_snapshot(
               "SOL", "SOL-USD", "15m", frame
           )
-          if not metadata or metadata.get("row_count", 0) < 220:
+          if (
+              not metadata
+              or metadata.get("row_count", 0) < 60000
+              or metadata.get("provider") != "coinbase_exchange"
+          ):
               raise SystemExit("SOL 15m snapshot metadata validation failed.")
           backtest_v3._write_snapshot_manifest()
           print(
@@ -107,6 +104,8 @@ jobs:
               metadata["first_timestamp"],
               "->",
               metadata["last_timestamp"],
+              "| provider=",
+              metadata["provider"],
           )
           PY
 
