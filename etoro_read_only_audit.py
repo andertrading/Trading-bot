@@ -31,6 +31,8 @@ def _resolution_error_status(exc: Exception) -> str:
     # Exact, generic markers emitted by the strict response normalizers.
     # Never include exception text, payload fragments, symbols, or account data.
     known = (
+        # More specific post-search normalizers must precede generic search errors.
+        ("La respuesta de cotizaciones no es un objeto JSON", "QUOTES_RESPONSE_SCHEMA_INVALID"),
         # Instrument search
         ("Falta la lista results", "SEARCH_RESULTS_MISSING"),
         ("Falta el estado de paginación", "SEARCH_PAGINATION_MISSING"),
@@ -44,6 +46,8 @@ def _resolution_error_status(exc: Exception) -> str:
         ("no devolvió HTTP 200", "SEARCH_HTTP_ERROR"),
         # Instrument eligibility
         ("La elegibilidad no es una respuesta HTTP 200 válida", "ELIGIBILITY_RESPONSE_INVALID"),
+        ("La respuesta de elegibilidad no incluye el campo currency", "ELIGIBILITY_CURRENCY_MISSING"),
+        ("La respuesta de elegibilidad no está en USD", "ELIGIBILITY_CURRENCY_MISMATCH"),
         ("Los instrumentIds esperados no son válidos", "ELIGIBILITY_EXPECTED_IDS_INVALID"),
         ("Los instrumentIds esperados contienen duplicados", "ELIGIBILITY_EXPECTED_IDS_DUPLICATED"),
         ("no está en USD", "ELIGIBILITY_CURRENCY_MISMATCH"),
@@ -56,6 +60,15 @@ def _resolution_error_status(exc: Exception) -> str:
         ("no cubre todos los instrumentos", "ELIGIBILITY_INSTRUMENTS_INCOMPLETE"),
         # Realtime quotes
         ("Las cotizaciones no son una respuesta HTTP 200 completa", "QUOTES_RESPONSE_INVALID"),
+        ("instrumentId inválido en cotización", "QUOTES_INSTRUMENT_ID_INVALID"),
+        ("Instrumento inesperado en cotizaciones", "QUOTES_UNEXPECTED_INSTRUMENT"),
+        ("Fecha ausente en cotización", "QUOTES_TIMESTAMP_MISSING"),
+        ("Fecha inválida en cotización", "QUOTES_TIMESTAMP_INVALID"),
+        ("La fecha de cotización", "QUOTES_TIMESTAMP_NOT_UTC"),
+        ("now_utc debe incluir zona horaria UTC", "QUOTES_CLOCK_INVALID"),
+        ("max_age_seconds debe ser un entero positivo", "QUOTES_MAX_AGE_INVALID"),
+        ("Error de conexión con eToro", "ETORO_CONNECTION_ERROR"),
+        ("eToro devolvió una respuesta JSON inválida", "ETORO_INVALID_JSON_RESPONSE"),
         ("lista de instrumentos esperados no es válida", "QUOTES_EXPECTED_IDS_INVALID"),
         ("lista de instrumentos esperados contiene duplicados", "QUOTES_EXPECTED_IDS_DUPLICATED"),
         ("Falta la lista de resultados de cotizaciones", "QUOTES_RESULTS_MISSING"),
@@ -350,6 +363,7 @@ def run_audit(
     )
     return {
         "audit_scope": "read-only diagnostics; not authorization to trade",
+        "position_risk_scope": "eToro real-account risk only; separate from the bot's virtual paper portfolio",
         "account_snapshot_schema_valid": account_valid,
         "account_snapshot_status": account_snapshot_status,
         "account_snapshot_missing_fields": account_snapshot_missing_fields,

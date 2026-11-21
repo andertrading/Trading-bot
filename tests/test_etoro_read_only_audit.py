@@ -78,6 +78,10 @@ class ReadOnlyAuditTests(unittest.TestCase):
         self.assertTrue(report["gross_position_stop_risk_diagnostic_validated"])
         self.assertTrue(report["complete_position_risk_validated"])
         self.assertFalse(report["portfolio_risk_admission_ready"])
+        self.assertEqual(
+            report["position_risk_scope"],
+            "eToro real-account risk only; separate from the bot's virtual paper portfolio",
+        )
         self.assertTrue(report["overall_pass"])
         self.assertEqual(report["instrument_resolution"][0]["instrument_id"], 123)
         self.assertNotIn("available_cash", str(report))
@@ -271,6 +275,14 @@ class ReadOnlyAuditTests(unittest.TestCase):
     def test_validation_errors_have_specific_safe_diagnostic_codes(self):
         cases = (
             (EtoroAPIError("Falta la lista de resultados de cotizaciones"), "QUOTES_RESULTS_MISSING"),
+            (EtoroAPIError("La respuesta de cotizaciones no es un objeto JSON"), "QUOTES_RESPONSE_SCHEMA_INVALID"),
+            (EtoroAPIError("instrumentId inválido en cotización 0"), "QUOTES_INSTRUMENT_ID_INVALID"),
+            (EtoroAPIError("Fecha ausente en cotización 123"), "QUOTES_TIMESTAMP_MISSING"),
+            (EtoroAPIError("La fecha de cotización 123 no está en UTC"), "QUOTES_TIMESTAMP_NOT_UTC"),
+            (EtoroAPIError("Error de conexión con eToro (ConnectionError)"), "ETORO_CONNECTION_ERROR"),
+            (EtoroAPIError("eToro devolvió una respuesta JSON inválida"), "ETORO_INVALID_JSON_RESPONSE"),
+            (EtoroAPIError("La respuesta de elegibilidad no incluye el campo currency"), "ELIGIBILITY_CURRENCY_MISSING"),
+            (EtoroAPIError("La respuesta de elegibilidad no está en USD"), "ELIGIBILITY_CURRENCY_MISMATCH"),
             (EtoroAPIError("El instrumento tiene cotización retrasada"), "QUOTES_NOT_REALTIME"),
             (EtoroAPIError("La respuesta de elegibilidad está incompleta o contiene activos no encontrados"), "ELIGIBILITY_RESULTS_INCOMPLETE"),
             (EtoroAPIError("El desglose no confirma la divisa de cuenta USD"), "RISK_CURRENCY_UNCONFIRMED"),
