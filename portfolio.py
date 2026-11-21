@@ -298,14 +298,31 @@ def can_add_sized_trade(
         }
 
     reported_risk = sizing_result.get("risk_amount_usd")
-    if (
-        not _is_finite_number(reported_risk)
-        or float(reported_risk) <= 0
-        or total_reserved_risk_usd > float(reported_risk) + 1e-8
+    position_risk = sizing_result.get("position_risk_usd")
+    fixed_costs = sizing_result.get("fixed_costs_usd")
+    if any(
+        not _is_finite_number(value)
+        for value in (reported_risk, position_risk, fixed_costs)
     ):
         return {
             "allowed": False,
-            "reason": "El riesgo total reservado no cuadra con el presupuesto calculado.",
+            "reason": "Faltan componentes válidos del riesgo reservado.",
+            "currency": "USD",
+        }
+
+    reported_risk = float(reported_risk)
+    position_risk = float(position_risk)
+    fixed_costs = float(fixed_costs)
+    if (
+        reported_risk <= 0
+        or position_risk < 0
+        or fixed_costs < 0
+        or total_reserved_risk_usd > reported_risk + 1e-8
+        or abs(total_reserved_risk_usd - (position_risk + fixed_costs)) > 1e-8
+    ):
+        return {
+            "allowed": False,
+            "reason": "El riesgo total reservado no cuadra con sus componentes.",
             "currency": "USD",
         }
 
