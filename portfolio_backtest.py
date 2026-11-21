@@ -254,33 +254,72 @@ def simulate_portfolio(
             min(1.0, available_risk / total_requested_risk)
             if total_requested_risk > 0 else 0.0
         )
-        # Entry costs consume cash too. Find the largest proportional
-        # allocation whose notional plus actual entry fees fits available cash.
-        # Fixed stock commissions do not scale down with position quantity.
+        # Entry fees reduce both spendable cash and the equity denominator
+        # used by the hard per-trade and aggregate risk limits.
+        def batch_entry_costs(factor):
+            if factor <= 1e-12 or not costs_included:
+                return 0.0
+            entry_fees = 0.0
+            for item, requested_risk, _ in requests:
+                allocated = requested_risk * factor
+                quantity = allocated / item["risk_per_unit"]
+                entry_notional = item["entry"] * quantity
+                asset_type = str(ASSETS[item["asset"]].get("type", "")).upper()
+                if asset_type == "STOCK":
+                    fee = stock_fee
+                elif asset_type == "ETF":
+                    fee = 0.0
+                else:
+                    fee = entry_notional * crypto_rate
+                fee += entry_notional * spread_bps / 20000.0
+                entry_fees += fee
+            return entry_fees
+
+        def risk_constraints_satisfied(factor):
+            post_entry_equity = max(
+                0.0,
+                equity_for_limits - batch_entry_costs(factor),
+            )
+            allocated_risk_total = total_requested_risk * factor
+            if (
+                open_risk + allocated_risk_total
+                > portfolio_limit_pct * post_entry_equity + 1e-10
+            ):
+                return False
+            return all(
+                requested_risk * factor
+                <= per_trade_limit_pct * post_entry_equity + 1e-10
+                for _, requested_risk, _ in requests
+            )
+
+        # Solve the risk cap after entry costs; a fixed commission makes the
+        # relationship piecewise, so use a bounded monotonic binary search.
+        low, high = 0.0, risk_factor
+        if risk_constraints_satisfied(high):
+            risk_factor = high
+        else:
+            for _ in range(60):
+                middle = (low + high) / 2.0
+                if risk_constraints_satisfied(middle):
+                    low = middle
+                else:
+                    high = middle
+            risk_factor = low
+
+        # Reserve both notional and entry fees. Fixed stock fees do not shrink
+        # with a smaller position, so calculate the cash constraint separately.
         def batch_cash_usage(factor):
             if factor <= 1e-12:
                 return 0.0
-            notional_used = total_requested_notional * factor
-            entry_fees = 0.0
-            if costs_included:
-                for item, requested_risk, _ in requests:
-                    allocated = requested_risk * factor
-                    quantity = allocated / item["risk_per_unit"]
-                    entry_notional = item["entry"] * quantity
-                    asset_type = str(ASSETS[item["asset"]].get("type", "")).upper()
-                    if asset_type == "STOCK":
-                        fee = stock_fee
-                    elif asset_type == "ETF":
-                        fee = 0.0
-                    else:
-                        fee = entry_notional * crypto_rate
-                    fee += entry_notional * spread_bps / 20000.0
-                    entry_fees += fee
-            return notional_used + entry_fees
+            return (
+                total_requested_notional * factor
+                + batch_entry_costs(factor)
+            )
 
-        upper_factor = risk_factor
-        if upper_factor <= 0 or batch_cash_usage(upper_factor) > available_cash:
-            low, high = 0.0, upper_factor
+        low, high = 0.0, risk_factor
+        if batch_cash_usage(high) <= available_cash:
+            cash_factor = high
+        else:
             for _ in range(60):
                 middle = (low + high) / 2.0
                 if batch_cash_usage(middle) <= available_cash:
@@ -288,8 +327,6 @@ def simulate_portfolio(
                 else:
                     high = middle
             cash_factor = low
-        else:
-            cash_factor = upper_factor
         allocation_factor = min(risk_factor, cash_factor)
 
         for item, requested_risk, requested_notional in requests:
