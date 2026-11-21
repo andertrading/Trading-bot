@@ -10,6 +10,7 @@ from strategy_research import (
     _history_calendar_coverage,
     _synchronized_oos_trades,
     _portfolio_allocated_cost_trades,
+    _net_portfolio_cost_scenarios,
 )
 
 
@@ -150,6 +151,36 @@ class TestCommonCalendarOutOfSampleSplit(unittest.TestCase):
                     {"asset": "BTC", "timeframe": "15m"},
                 ],
             )
+
+    def test_net_portfolio_hybrid_uses_verified_bitvavo_pair_fee_tiers(self):
+        scenarios = {
+            name: (model, note)
+            for name, model, note in _net_portfolio_cost_scenarios()
+        }
+
+        self.assertEqual(
+            set(scenarios),
+            {
+                "ETORO_REAL_STANDARD_CRYPTO_FEE",
+                "ETORO_STOCKS_BITVAVO_USDC_MAKER_XLM_EUR_MAKER",
+                "ETORO_STOCKS_BITVAVO_USDC_TAKER_XLM_EUR_TAKER",
+            },
+        )
+        maker, maker_note = scenarios[
+            "ETORO_STOCKS_BITVAVO_USDC_MAKER_XLM_EUR_MAKER"
+        ]
+        taker, taker_note = scenarios[
+            "ETORO_STOCKS_BITVAVO_USDC_TAKER_XLM_EUR_TAKER"
+        ]
+
+        self.assertEqual(maker["crypto_rate_by_asset"]["BTC"], 0.0005)
+        self.assertEqual(maker["crypto_rate_by_asset"]["ETH"], 0.0005)
+        self.assertEqual(maker["crypto_rate_by_asset"]["SOL"], 0.0005)
+        self.assertEqual(maker["crypto_rate_by_asset"]["XRP"], 0.0005)
+        self.assertEqual(maker["crypto_rate_by_asset"]["XLM"], 0.0015)
+        self.assertEqual(taker["crypto_rate_by_asset"]["XLM"], 0.0025)
+        self.assertIn("EUR/USDC conversion", maker_note)
+        self.assertIn("EUR/USDC conversion", taker_note)
 
     def test_broker_cost_sensitivity_models_published_fee_scenarios(self):
         assets = {
