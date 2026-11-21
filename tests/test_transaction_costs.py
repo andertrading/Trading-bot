@@ -63,9 +63,9 @@ class TestEtoroTransactionCosts(unittest.TestCase):
             priced = costs.estimate_etoro_trade_costs(
                 "TEST_EUR",
                 100.0,
-                execution_type="REAL",
                 110.0,
                 1.0,
+                execution_type="REAL",
                 market_spread_bps=0,
                 quote_to_account=1.1,
                 fx_conversion_fee_pct=0.002,
