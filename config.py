@@ -150,8 +150,9 @@ ETORO_EXECUTION_TYPES = {
 ETORO_EXECUTION_TYPES_CONFIRMED = False
 
 # Tarifas publicadas; se aplican como escenario base/conservador.
-# Acciones reales: máximo del rango publicado ($1-$2 por lado).
-ETORO_STOCK_REAL_COMMISSION_USD_PER_SIDE = 2.0
+# Acciones reales: cuenta española y acciones del universo cotizadas en EE. UU.
+# Tarifa publicada: 1 USD por lado; validar siempre el ticket del instrumento.
+ETORO_STOCK_REAL_COMMISSION_USD_PER_SIDE = 1.0
 # Cripto real: tarifa base Bronze/Silver/Gold, sujeta al nivel Club.
 ETORO_CRYPTO_REAL_FEE_PCT_PER_SIDE = 0.01
 # CFD: spread de apertura/cierre por cada lado.
