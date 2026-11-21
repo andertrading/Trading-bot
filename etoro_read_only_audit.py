@@ -68,8 +68,6 @@ def _resolution_error_status(exc: Exception) -> str:
         ("max_age_seconds debe ser un entero positivo", "QUOTES_MAX_AGE_INVALID"),
         ("Error de conexión con eToro", "ETORO_CONNECTION_ERROR"),
         ("eToro devolvió una respuesta JSON inválida", "ETORO_INVALID_JSON_RESPONSE"),
-        ("Campo numérico inválido", "QUOTES_NUMERIC_FIELD_INVALID"),
-        ("Campo numérico no finito", "QUOTES_NUMERIC_FIELD_INVALID"),
         ("lista de instrumentos esperados no es válida", "QUOTES_EXPECTED_IDS_INVALID"),
         ("lista de instrumentos esperados contiene duplicados", "QUOTES_EXPECTED_IDS_DUPLICATED"),
         ("Falta la lista de resultados de cotizaciones", "QUOTES_RESULTS_MISSING"),
