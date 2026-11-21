@@ -57,11 +57,13 @@ class TestEtoroTransactionCosts(unittest.TestCase):
         }
         with patch.object(costs, "ASSETS", modified_assets):
             missing = costs.estimate_etoro_trade_costs(
-                "TEST_EUR", 100.0, 110.0, 1.0, market_spread_bps=0
+                "TEST_EUR", 100.0, 110.0, 1.0,
+                execution_type="REAL", market_spread_bps=0
             )
             priced = costs.estimate_etoro_trade_costs(
                 "TEST_EUR",
                 100.0,
+                execution_type="REAL",
                 110.0,
                 1.0,
                 market_spread_bps=0,
