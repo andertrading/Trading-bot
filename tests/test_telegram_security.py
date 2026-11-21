@@ -56,6 +56,7 @@ class TestTelegramTokenLogging(unittest.TestCase):
         self.assertNotIn(token, "\n".join(captured.output))
 
     def test_bot_rejects_overlong_photo_caption_without_truncating(self):
+        """Oversized captions must be rejected instead of silently shortened."""
         with (
             patch.object(Bot, "TELEGRAM_ENABLED", True),
             patch.object(Bot, "TELEGRAM_API_URL", "https://api.telegram.org/botTEST"),
