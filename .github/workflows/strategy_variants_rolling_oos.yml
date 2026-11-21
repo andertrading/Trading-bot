@@ -297,6 +297,79 @@ jobs:
           python -m unittest discover -s tests -p "test_portfolio_backtest.py" -v
           python -m unittest discover -s tests -p "test_transaction_costs.py" -v
 
+      - name: Audit internal candle gaps across every immutable snapshot
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          import pandas as pd
+          import data_engine
+
+          root = Path("historicos_full_merged")
+          manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
+          results = []
+          failures = []
+
+          for item in manifest:
+              asset = str(item["asset"]).upper()
+              timeframe = str(item["timeframe"]).lower()
+              path = root / f"{asset}__{timeframe}.csv"
+              frame = pd.read_csv(path, parse_dates=["timestamp"])
+              if "timestamp" not in frame.columns or frame.empty:
+                  failures.append({
+                      "asset": asset, "timeframe": timeframe,
+                      "reason": "missing_or_empty_timestamp_data",
+                  })
+                  continue
+              frame = frame.set_index("timestamp")
+              frame.index = pd.DatetimeIndex(
+                  pd.to_datetime(frame.index, utc=True, errors="coerce")
+              )
+              if frame.index.hasnans or frame.index.has_duplicates:
+                  failures.append({
+                      "asset": asset, "timeframe": timeframe,
+                      "reason": "invalid_or_duplicate_timestamps",
+                  })
+                  continue
+
+              has_gaps = (
+                  data_engine._has_intraday_gaps(frame, asset)
+                  if timeframe == "15m"
+                  else data_engine._has_daily_gaps(frame, asset)
+              )
+              row = {
+                  "asset": asset,
+                  "timeframe": timeframe,
+                  "rows": len(frame),
+                  "first_timestamp_utc": frame.index[0].isoformat(),
+                  "last_timestamp_utc": frame.index[-1].isoformat(),
+                  "gap_free": not has_gaps,
+              }
+              results.append(row)
+              if has_gaps:
+                  failures.append({
+                      "asset": asset, "timeframe": timeframe,
+                      "reason": "internal_candle_gap_or_incomplete_session",
+                  })
+
+          report = {
+              "status": "PASS" if not failures and len(results) == 24 else "FAIL",
+              "expected_series": 24,
+              "audited_series": len(results),
+              "gap_free_series": sum(row["gap_free"] for row in results),
+              "results": results,
+              "failures": failures,
+          }
+          Path("snapshot_quality.json").write_text(
+              json.dumps(report, ensure_ascii=False, indent=2),
+              encoding="utf-8",
+          )
+          print(json.dumps(report, ensure_ascii=False))
+          if report["status"] != "PASS":
+              raise SystemExit("Snapshot gap audit failed; do not trust OOS metrics.")
+          PY
+
       - name: Run fixed strategy hypotheses with chronological walk-forward split
         run: python strategy_research.py
 
@@ -326,3 +399,4 @@ jobs:
             strategy_research_core_synchronized_calendar.csv
             strategy_research_core_net_aware_portfolio.csv
             provider_freshness.json
+            snapshot_quality.json
