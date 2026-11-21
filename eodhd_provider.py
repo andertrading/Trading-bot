@@ -16,6 +16,7 @@ import requests
 logger = logging.getLogger(__name__)
 
 EODHD_EOD_URL = "https://eodhd.com/api/eod"
+EODHD_SPLITS_URL = "https://eodhd.com/api/splits"
 EODHD_SYMBOLS = {
     # Verified by ISIN in the EODHD listing diagnostic:
     # CSPX: IE00B5BMR087; CNDX: IE00B53SZB19.
@@ -25,6 +26,7 @@ EODHD_SYMBOLS = {
 CACHE_TTL_SECONDS = 6 * 60 * 60
 MINIMUM_DAILY_BARS = 220
 _cache = {}
+_split_cache = {}
 _cache_lock = threading.Lock()
 
 
@@ -44,6 +46,81 @@ def _save_cache(asset, frame):
     with _cache_lock:
         _cache[asset] = (frame.copy(), time.monotonic())
 
+
+def _download_split_events(asset, symbol, start_date, end_date, api_key):
+    """Fetch and validate split events for split-adjusted daily OHLC."""
+    with _cache_lock:
+        cached = _split_cache.get(asset)
+        if cached and time.monotonic() - cached[1] <= CACHE_TTL_SECONDS:
+            return list(cached[0])
+
+    try:
+        response = requests.get(
+            f"{EODHD_SPLITS_URL}/{symbol}",
+            params={
+                "api_token": api_key,
+                "from": start_date.isoformat(),
+                "to": end_date.isoformat(),
+                "fmt": "json",
+            },
+            timeout=30,
+        )
+        response.raise_for_status()
+        payload = response.json()
+    except requests.RequestException:
+        logger.error("Error HTTP al descargar splits EODHD para %s", asset)
+        return None
+    except (ValueError, TypeError):
+        logger.error("Respuesta de splits EODHD inválida para %s", asset)
+        return None
+
+    if not isinstance(payload, list):
+        logger.error("Formato de splits EODHD inválido para %s", asset)
+        return None
+
+    events = []
+    for item in payload:
+        if not isinstance(item, dict):
+            logger.error("Evento de split inválido para %s", asset)
+            return None
+        try:
+            event_date = pd.Timestamp(item["date"])
+            if pd.isna(event_date):
+                raise ValueError("invalid split date")
+            ratio = str(item["split"]).strip()
+            numerator_text, denominator_text = ratio.split("/", 1)
+            numerator = float(numerator_text)
+            denominator = float(denominator_text)
+            if (
+                event_date.tzinfo is not None
+                or not np.isfinite(numerator)
+                or not np.isfinite(denominator)
+                or numerator <= 0
+                or denominator <= 0
+            ):
+                raise ValueError("invalid split fields")
+            events.append((event_date.date(), numerator, denominator))
+        except (KeyError, TypeError, ValueError, ZeroDivisionError):
+            logger.error("Ratio o fecha de split inválidos para %s", asset)
+            return None
+
+    events.sort(key=lambda event: event[0])
+    with _cache_lock:
+        _split_cache[asset] = (list(events), time.monotonic())
+    return events
+
+
+def _apply_split_adjustment(frame, events):
+    """Convert historical OHLC to current share units, excluding dividends."""
+    adjusted = frame.copy()
+    for event_date, new_shares, old_shares in events:
+        price_factor = old_shares / new_shares
+        before_split = adjusted.index.date < event_date
+        if before_split.any():
+            adjusted.loc[before_split, ["Open", "High", "Low", "Close"]] *= price_factor
+    adjusted.attrs["price_adjustment_policy"] = "split_adjusted_ohlc_no_dividend_adjustment"
+    adjusted.attrs["split_events_applied"] = len(events)
+    return adjusted
 
 def download_eodhd_daily(asset, configured_currency, remove_incomplete, has_daily_gaps):
     """Download, normalize and validate one ETF daily history.
@@ -70,9 +147,10 @@ def download_eodhd_daily(asset, configured_currency, remove_incomplete, has_dail
         return None
 
     today = datetime.now(timezone.utc).date()
+    start_date = today - timedelta(days=370)
     params = {
         "api_token": api_key,
-        "from": (today - timedelta(days=370)).isoformat(),
+        "from": start_date.isoformat(),
         "to": today.isoformat(),
         "period": "d",
         "fmt": "json",
@@ -136,6 +214,13 @@ def download_eodhd_daily(asset, configured_currency, remove_incomplete, has_dail
     ).fillna(0.0)
     frame.loc[frame["Volume"] < 0, "Volume"] = 0.0
 
+    split_events = _download_split_events(
+        asset, symbol, start_date, today, api_key
+    )
+    if split_events is None:
+        return None
+    frame = _apply_split_adjustment(frame, split_events)
+
     valid_ohlc = (
         (frame["High"] >= frame["Low"])
         & (frame["High"] >= frame["Open"])
@@ -163,9 +248,10 @@ def download_eodhd_daily(asset, configured_currency, remove_incomplete, has_dail
 
     _save_cache(asset, frame)
     logger.info(
-        "EODHD OK: %s (%s), %s velas diarias",
+        "EODHD OK: %s (%s), %s velas diarias; splits=%s",
         asset,
         symbol,
         len(frame),
+        len(split_events),
     )
     return frame.copy()

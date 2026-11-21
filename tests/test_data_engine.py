@@ -1545,6 +1545,74 @@ class TestDataCache(unittest.TestCase):
 
 class TestYahooDownload(unittest.TestCase):
 
+    def test_retries_intraday_http_422_with_shorter_window(self):
+        index = pd.date_range(
+            "2026-10-01T13:30:00Z",
+            periods=220,
+            freq="15min",
+        )
+        payload = {
+            "chart": {
+                "error": None,
+                "result": [{
+                    "meta": {
+                        "currency": "USD",
+                        "fullExchangeName": "London Stock Exchange",
+                        "exchangeTimezoneName": "Europe/London",
+                    },
+                    "timestamp": [int(value.timestamp()) for value in index],
+                    "indicators": {
+                        "quote": [{
+                            "open": [100.0] * len(index),
+                            "high": [102.0] * len(index),
+                            "low": [99.0] * len(index),
+                            "close": [101.0] * len(index),
+                            "volume": [1000] * len(index),
+                        }],
+                    },
+                }],
+            },
+        }
+
+        class Response422:
+            status_code = 422
+
+        class ResponseOK:
+            status_code = 200
+
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return payload
+
+        with (
+            patch.object(engine, "datetime", FrozenDateTime),
+            patch.object(
+                engine.requests,
+                "get",
+                side_effect=[Response422(), ResponseOK()],
+            ) as request,
+            patch.object(
+                engine,
+                "_remove_incomplete_candle",
+                side_effect=lambda frame, interval, asset: frame,
+            ),
+            patch.object(engine, "_has_intraday_gaps", return_value=False),
+        ):
+            result = engine._download_yahoo(
+                "CNDX",
+                {"yahoo": "CNDX.L", "currency": "USD"},
+                "15m",
+            )
+
+        self.assertIsNotNone(result)
+        self.assertEqual(len(result), 220)
+        self.assertEqual(request.call_count, 2)
+        first_period = request.call_args_list[0].kwargs["params"]["period1"]
+        second_period = request.call_args_list[1].kwargs["params"]["period1"]
+        self.assertGreater(second_period, first_period)
+
     def test_discards_incomplete_daily_candle_before_ohlc_validation(self):
         index = pd.bdate_range(
             end="2026-11-19",

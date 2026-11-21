@@ -19,7 +19,7 @@ class TestBacktestV3(unittest.TestCase):
 
         close = [100.0 + i * 0.1 for i in range(rows)]
 
-        return pd.DataFrame(
+        data = pd.DataFrame(
             {
                 "Open": close,
                 "High": [price + 1 for price in close],
@@ -29,6 +29,12 @@ class TestBacktestV3(unittest.TestCase):
             },
             index=index,
         )
+        data.attrs.update({
+            "data_provider": "twelvedata",
+            "price_adjustment_policy": "raw_unadjusted_intraday",
+            "price_adjustment_verified": True,
+        })
+        return data
 
     def make_execution_data(self, rows=14):
         index = pd.date_range(
@@ -143,6 +149,87 @@ class TestBacktestV3(unittest.TestCase):
         live_mock.assert_called_once_with("AAPL", "15m")
         self.assertEqual(backtest_v3._provider_for_asset("AAPL", "15m"), "twelvedata")
 
+    def test_daily_backtest_history_is_capped_to_two_years(self):
+        index = pd.date_range(
+            "2010-01-01",
+            periods=5000,
+            freq="1D",
+            tz="UTC",
+        )
+        values = [100.0 + i * 0.001 for i in range(len(index))]
+        data = pd.DataFrame(
+            {
+                "Open": values,
+                "High": [value + 1 for value in values],
+                "Low": [value - 1 for value in values],
+                "Close": values,
+                "Volume": [1000] * len(index),
+            },
+            index=index,
+        )
+        data.attrs.update({
+            "data_provider": "twelvedata",
+            "price_adjustment_policy": "split_adjusted_ohlc_no_dividend_adjustment",
+            "price_adjustment_verified": True,
+        })
+        with (
+            patch.object(backtest_v3, "BACKTEST_DATA_MODE", "download"),
+            patch.object(backtest_v3, "download_data", return_value=data),
+            patch.object(backtest_v3, "_save_snapshot", return_value=None),
+        ):
+            result = backtest_v3.download_history(
+                "AAPL", "1d", asset="AAPL"
+            )
+        self.assertIsNotNone(result)
+        self.assertLessEqual(
+            (result.index[-1] - result.index[0]).days,
+            backtest_v3.BACKTEST_DAILY_LOOKBACK_DAYS,
+        )
+        self.assertGreaterEqual(len(result), backtest_v3.MIN_BARS)
+
+    def test_backtest_rejects_unverified_price_adjustment_metadata(self):
+        data = self.make_data()
+        data.attrs["price_adjustment_verified"] = False
+        with (
+            patch.object(backtest_v3, "BACKTEST_DATA_MODE", "download"),
+            patch.object(backtest_v3, "download_data", return_value=data),
+        ):
+            result = backtest_v3.download_history("AAPL", "15m", asset="AAPL")
+        self.assertIsNone(result)
+        self.assertIn("ajuste de precios no está verificado", backtest_v3.DOWNLOAD_ERRORS[("AAPL", "15m")])
+
+    def test_snapshot_metadata_records_provider_and_adjustment_policy(self):
+        data = self.make_data()
+        metadata = backtest_v3._snapshot_metadata(
+            "AAPL",
+            "AAPL",
+            "15m",
+            data,
+            backtest_v3.Path("snapshot.csv"),
+            "sha256",
+            "twelvedata",
+        )
+        self.assertEqual(metadata["provider"], "twelvedata")
+        self.assertEqual(metadata["adjustment_policy"], "raw_unadjusted_intraday")
+        self.assertTrue(metadata["price_adjustment_verified"])
+
+        daily_data = self.make_data()
+        daily_data.attrs.update({
+            "data_provider": "twelvedata",
+            "price_adjustment_policy": "split_adjusted_ohlc_no_dividend_adjustment",
+            "price_adjustment_verified": True,
+        })
+        daily_metadata = backtest_v3._snapshot_metadata(
+            "AAPL",
+            "AAPL",
+            "1d",
+            daily_data,
+            backtest_v3.Path("daily_snapshot.csv"),
+            "sha256",
+            "twelvedata",
+        )
+        self.assertEqual(daily_metadata["period_requested"], "2y")
+
     def test_backtest_rejects_duplicate_timestamps_from_provider(self):
         data = self.make_data()
         duplicated = pd.concat([data, data.iloc[[-1]]])
@@ -195,6 +282,45 @@ class TestBacktestV3(unittest.TestCase):
         self.assertEqual(backtest_v3._provider_for_asset("CSPX", "15m"), "yahoo")
         self.assertEqual(backtest_v3._provider_for_asset("CSPX", "1d"), "eodhd")
         self.assertEqual(backtest_v3._provider_for_asset("CNDX", "1d"), "eodhd")
+    def test_backtest_cost_model_applies_known_stock_fees_and_flags_unknown_spread(self):
+        fields = backtest_v3._estimate_backtest_cost_fields(
+            "AAPL",
+            {
+                "entry": 100.0,
+                "exit": 110.0,
+                "stop": 95.0,
+                "score": 90,
+                "entry_time": "2026-11-20T10:00:00",
+                "exit_time": "2026-11-20T11:00:00",
+            },
+        )
+        self.assertAlmostEqual(fields["commission_cost_usd"], 4.0)
+        self.assertAlmostEqual(fields["hypothetical_risk_budget_usd"], 2.5)
+        self.assertAlmostEqual(fields["result_R_after_known_fees"], 0.4)
+        self.assertFalse(fields["costs_complete"])
+        self.assertIn("live_market_bid_ask_spread_missing", fields["unpriced_costs"])
+
+    def test_metrics_report_known_fee_adjusted_results_separately(self):
+        metrics = backtest_v3.calculate_metrics([
+            {
+                "result_R": 2.0,
+                "result_R_after_known_fees": 1.5,
+                "duration_bars": 2,
+                "costs_complete": False,
+            },
+            {
+                "result_R": -1.0,
+                "result_R_after_known_fees": -1.2,
+                "duration_bars": 3,
+                "costs_complete": False,
+            },
+        ])
+        self.assertAlmostEqual(metrics["total_R"], 1.0)
+        self.assertAlmostEqual(metrics["known_fee_adjusted_total_R"], 0.3)
+        self.assertAlmostEqual(metrics["known_fee_adjusted_average_R"], 0.15)
+        self.assertEqual(metrics["trades_with_complete_costs"], 0)
+        self.assertEqual(metrics["trades_with_unpriced_costs"], 2)
+
     def test_run_backtest_rejects_invalid_history_before_indicators(self):
         data = self.make_execution_data()
         data.iloc[6, data.columns.get_loc("High")] = 1.0

@@ -1330,6 +1330,24 @@ def _download_yahoo(asset, config, interval):
             timeout=25,
         )
 
+        # Yahoo puede rechazar con HTTP 422 el límite exacto de 60 días
+        # para intervalos intradía. Reintenta una sola vez con 55 días.
+        if response.status_code == 422 and interval == "15m":
+            logger.warning(
+                "Yahoo HTTP 422 para %s; reintentando con ventana intradía de 55 días",
+                ticker,
+            )
+            retry_params = dict(params)
+            retry_params["period1"] = int(
+                (now - timedelta(days=55)).timestamp()
+            )
+            response = requests.get(
+                f"{YAHOO_CHART_URL}/{ticker}",
+                params=retry_params,
+                headers=headers,
+                timeout=25,
+            )
+
         if response.status_code == 429:
             logger.error(
                 "Yahoo limitó las peticiones para %s (HTTP 429)",
@@ -1536,6 +1554,25 @@ def _download_yahoo(asset, config, interval):
 # DESCARGA PRINCIPAL
 # ---------------------------------------------------------------------
 
+def _attach_market_data_metadata(dataframe, asset, interval):
+    """Attach explicit, provider-verified OHLC adjustment metadata."""
+    provider = (
+        "eodhd"
+        if asset in LONDON_ASSETS and interval == "1d"
+        else PROVIDER_MAP.get(asset)
+    )
+    if interval == "15m":
+        policy = "raw_unadjusted_intraday"
+    else:
+        policy = "split_adjusted_ohlc_no_dividend_adjustment"
+
+    dataframe = dataframe.copy()
+    dataframe.attrs["data_provider"] = provider
+    dataframe.attrs["price_adjustment_policy"] = policy
+    dataframe.attrs["price_adjustment_verified"] = True
+    return dataframe
+
+
 def download_data(asset, interval="15m"):
     if interval not in INTERVAL_MAP:
         logger.error(
@@ -1565,7 +1602,9 @@ def download_data(asset, interval="15m"):
                 has_gaps = _has_daily_gaps(validated, asset)
 
             if not has_gaps:
-                return validated
+                return _attach_market_data_metadata(
+                    validated, asset, interval
+                )
 
         logger.warning(
             "Caché rechazada por validación | %s | %s",
@@ -1608,6 +1647,9 @@ def download_data(asset, interval="15m"):
         return None
 
     if dataframe is not None and not dataframe.empty:
+        dataframe = _attach_market_data_metadata(
+            dataframe, asset, interval
+        )
         _save_cached_data(
             asset,
             interval,

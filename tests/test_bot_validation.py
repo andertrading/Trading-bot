@@ -208,6 +208,46 @@ class TestBotValidation(unittest.TestCase):
         )
         self.assertFalse(result["tradable"])
 
+    def test_unverified_etoro_execution_price_basis_blocks_candidate(self):
+        with patch.object(
+            Bot, "ETORO_EXECUTION_PRICE_BASIS_CONFIRMED", False
+        ):
+            result = Bot.apply_validation_gate(
+                self.candidate,
+                {"status": "OK"},
+            )
+        self.assertIn(
+            "Correspondencia entre OHLC históricos y precios bid/ask ejecutables de eToro no verificada",
+            result["validation_reasons"],
+        )
+        self.assertFalse(result["tradable"])
+
+    def test_unconfirmed_etoro_execution_and_fee_details_block_candidate(self):
+        with patch.object(
+            Bot, "ETORO_EXECUTION_TYPES_CONFIRMED", False
+        ), patch.object(
+            Bot, "ETORO_FEE_SCHEDULE_CONFIRMED", False
+        ), patch.object(
+            Bot, "ETORO_ACCOUNT_CURRENCY_CONFIRMED", False
+        ):
+            result = Bot.apply_validation_gate(
+                self.candidate,
+                {"status": "OK"},
+            )
+        self.assertIn(
+            "Tipo de ejecución REAL/CFD pendiente de verificar en cada instrumento de eToro",
+            result["validation_reasons"],
+        )
+        self.assertIn(
+            "Nivel Club y comisiones personales de eToro pendientes de confirmar",
+            result["validation_reasons"],
+        )
+        self.assertIn(
+            "Divisa real de la cuenta eToro pendiente de confirmar",
+            result["validation_reasons"],
+        )
+        self.assertFalse(result["tradable"])
+
     def test_unconfirmed_fx_blocks_candidate(self):
         with patch.object(
             Bot,

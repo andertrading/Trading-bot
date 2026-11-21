@@ -32,7 +32,7 @@ RISK_TIERS = {
 INTRADAY_INTERVAL = "15m"
 SWING_INTERVAL = "1d"
 
-# Activos candidatos.
+# Activos candidatos. Las comisiones se centralizan en transaction_costs.py.
 # La moneda de cuenta es USD.
 ASSETS = {
     "CSPX": {
@@ -40,8 +40,6 @@ ASSETS = {
         "yahoo": "CSPX.L",
         "type": "ETF",
         "currency": "USD",
-        "entry_fee_type": "none",
-        "entry_fee": 0.0,
         "enabled": True,
     },
     "CNDX": {
@@ -49,8 +47,6 @@ ASSETS = {
         "yahoo": "CNDX.L",
         "type": "ETF",
         "currency": "USD",
-        "entry_fee_type": "none",
-        "entry_fee": 0.0,
         "enabled": True,
     },
     "TSLA": {
@@ -58,8 +54,6 @@ ASSETS = {
         "yahoo": "TSLA",
         "type": "STOCK",
         "currency": "USD",
-        "entry_fee_type": "fixed",
-        "entry_fee": 1.0,
         "enabled": True,
     },
     "NVDA": {
@@ -67,8 +61,6 @@ ASSETS = {
         "yahoo": "NVDA",
         "type": "STOCK",
         "currency": "USD",
-        "entry_fee_type": "fixed",
-        "entry_fee": 1.0,
         "enabled": True,
     },
     "AAPL": {
@@ -76,8 +68,6 @@ ASSETS = {
         "yahoo": "AAPL",
         "type": "STOCK",
         "currency": "USD",
-        "entry_fee_type": "fixed",
-        "entry_fee": 1.0,
         "enabled": True,
     },
     "MSFT": {
@@ -85,8 +75,6 @@ ASSETS = {
         "yahoo": "MSFT",
         "type": "STOCK",
         "currency": "USD",
-        "entry_fee_type": "fixed",
-        "entry_fee": 1.0,
         "enabled": True,
     },
     "TTWO": {
@@ -94,8 +82,6 @@ ASSETS = {
         "yahoo": "TTWO",
         "type": "STOCK",
         "currency": "USD",
-        "entry_fee_type": "fixed",
-        "entry_fee": 1.0,
         "enabled": True,
     },
     "BTC": {
@@ -103,8 +89,6 @@ ASSETS = {
         "yahoo": "BTC-USD",
         "type": "CRYPTO",
         "currency": "USD",
-        "entry_fee_type": "percentage",
-        "entry_fee": 0.01,
         "enabled": True,
     },
     "ETH": {
@@ -112,8 +96,6 @@ ASSETS = {
         "yahoo": "ETH-USD",
         "type": "CRYPTO",
         "currency": "USD",
-        "entry_fee_type": "percentage",
-        "entry_fee": 0.01,
         "enabled": True,
     },
     "SOL": {
@@ -121,8 +103,6 @@ ASSETS = {
         "yahoo": "SOL-USD",
         "type": "CRYPTO",
         "currency": "USD",
-        "entry_fee_type": "percentage",
-        "entry_fee": 0.01,
         "enabled": True,
     },
     "XLM": {
@@ -130,8 +110,6 @@ ASSETS = {
         "yahoo": "XLM-USD",
         "type": "CRYPTO",
         "currency": "USD",
-        "entry_fee_type": "percentage",
-        "entry_fee": 0.01,
         "enabled": True,
     },
     "XRP": {
@@ -139,8 +117,6 @@ ASSETS = {
         "yahoo": "XRP-USD",
         "type": "CRYPTO",
         "currency": "USD",
-        "entry_fee_type": "percentage",
-        "entry_fee": 0.01,
         "enabled": True,
     },
 }
@@ -153,11 +129,9 @@ DISABLED_ASSETS = {
     "OIL": "CL=F",
 }
 
-# IMPORTANTE:
-# Las comisiones de entrada configuradas en ASSETS son estimaciones
-# provisionales. No deben considerarse verificadas con eToro.
-# También están pendientes de confirmar las comisiones de cierre,
-# spreads y conversiones de divisa.
+# El modelo de costes eToro está centralizado en transaction_costs.py.
+# Las tarifas públicas son estimaciones base; no equivalen al ticket
+# personalizado de la cuenta ni confirman el tipo REAL/CFD.
 
 # Costes pendientes de confirmar.
 CLOSE_FEES_CONFIRMED = False
@@ -166,6 +140,45 @@ FX_CONVERSION_CONFIRMED = False
 
 # No calcular tamaños hasta validar precios y costes.
 ALLOW_POSITION_SIZING = False
+
+# Modelo de costes eToro (referencias públicas; no son confirmación de tu ticket).
+# Se usa REAL como escenario base para compras largas sin apalancamiento.
+# La clasificación exacta debe verificarse en el ticket de cada instrumento.
+ETORO_EXECUTION_TYPES = {
+    asset: "REAL" for asset in ASSETS
+}
+ETORO_EXECUTION_TYPES_CONFIRMED = False
+
+# Tarifas publicadas; se aplican como escenario base/conservador.
+# Acciones reales: máximo del rango publicado ($1-$2 por lado).
+ETORO_STOCK_REAL_COMMISSION_USD_PER_SIDE = 2.0
+# Cripto real: tarifa base Bronze/Silver/Gold, sujeta al nivel Club.
+ETORO_CRYPTO_REAL_FEE_PCT_PER_SIDE = 0.01
+# CFD: spread de apertura/cierre por cada lado.
+ETORO_STOCK_CFD_FEE_PCT_PER_SIDE = 0.0015
+ETORO_ETF_CFD_FEE_PCT_PER_SIDE = 0.0015
+ETORO_CRYPTO_CFD_FEE_PCT_PER_SIDE = 0.01
+
+# Spread de mercado real de cada instrumento: no se infiere de OHLC.
+# Introducir el spread completo bid-ask en puntos básicos solo tras medirlo.
+ETORO_MARKET_SPREAD_BPS = {
+    asset: None for asset in ASSETS
+}
+# Conversión de divisa de operación: solo necesaria si cotización != cuenta.
+ETORO_FX_CONVERSION_FEE_PCT = None
+ETORO_FUNDING_FX_CONVERSION_FEE_PCT = None
+ETORO_EXECUTION_PRICE_BASIS_CONFIRMED = False
+# Financiación CFD: tarifas dinámicas, deben copiarse del ticket de eToro.
+ETORO_CFD_STOCK_ETF_ANNUAL_FEE_PCT = 0.064
+ETORO_CFD_STOCK_ETF_BENCHMARK_RATE_PCT = None
+ETORO_CFD_STOCK_SHORT_BORROW_USD_PER_1000_PER_DAY = {
+    asset: None for asset in ASSETS
+}
+ETORO_CFD_CRYPTO_OVERNIGHT_USD_PER_UNIT_DAY = {
+    asset: None for asset in ASSETS
+}
+ETORO_FEE_SCHEDULE_CONFIRMED = False
+ETORO_ACCOUNT_CURRENCY_CONFIRMED = False
 
 # Antigüedad máxima general de datos.
 DATA_MAX_AGE_MINUTES = 30
