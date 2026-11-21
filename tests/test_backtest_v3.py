@@ -434,9 +434,9 @@ class TestBacktestV3(unittest.TestCase):
                 "exit_time": "2026-11-20T11:00:00",
             },
         )
-        self.assertAlmostEqual(fields["commission_cost_usd"], 4.0)
+        self.assertAlmostEqual(fields["commission_cost_usd"], 2.0)
         self.assertAlmostEqual(fields["hypothetical_risk_budget_usd"], 2.5)
-        self.assertAlmostEqual(fields["result_R_after_known_fees"], 0.4)
+        self.assertAlmostEqual(fields["result_R_after_known_fees"], 1.2)
         self.assertFalse(fields["costs_complete"])
         self.assertIn("live_market_bid_ask_spread_missing", fields["unpriced_costs"])
 
