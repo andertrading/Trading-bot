@@ -1076,7 +1076,12 @@ class TestDailyGaps(unittest.TestCase):
             "2026-11-16",
             "2026-11-18",
         ])
-        self.assertTrue(engine._has_daily_gaps(df, "BTC"))
+        with self.assertLogs("data_engine", level="ERROR") as captured:
+            self.assertTrue(engine._has_daily_gaps(df, "BTC"))
+        message = "\\n".join(captured.output)
+        self.assertIn("anterior=2026-11-16T00:00:00+00:00", message)
+        self.assertIn("siguiente=2026-11-18T00:00:00+00:00", message)
+        self.assertIn("días_transcurridos=2.0", message)
 
     def test_accepts_us_weekend_gap(self):
         df = self.make_daily([
