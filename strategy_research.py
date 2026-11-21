@@ -539,6 +539,30 @@ def main():
             **oos_portfolio["summary"],
         })
 
+    failed_pairs = sorted({
+        (str(row["asset"]).upper(), str(row["timeframe"]).lower())
+        for row in all_errors
+    })
+    failed_pair_set = set(failed_pairs)
+    for coverage_row in coverage_rows:
+        key = (
+            str(coverage_row["asset"]).upper(),
+            str(coverage_row["timeframe"]).lower(),
+        )
+        if key in failed_pair_set and coverage_row["status"] == "AVAILABLE":
+            coverage_row["status"] = "RESEARCH_ERROR"
+    coverage_summary["research_error_combinations"] = [
+        {"asset": asset, "timeframe": timeframe}
+        for asset, timeframe in failed_pairs
+    ]
+    if failed_pairs:
+        coverage_summary["status"] = "PARTIAL"
+    pd.DataFrame(coverage_rows).to_csv(
+        "strategy_research_coverage.csv", index=False
+    )
+    with open("strategy_research_status.json", "w", encoding="utf-8") as status_file:
+        json.dump(coverage_summary, status_file, ensure_ascii=False, indent=2)
+
     pd.DataFrame(all_summary).to_csv("strategy_research_summary.csv", index=False)
     pd.DataFrame(all_walk_forward).to_csv("strategy_research_walkforward.csv", index=False)
     pd.DataFrame(all_trades).to_csv("strategy_research_trades.csv", index=False)
