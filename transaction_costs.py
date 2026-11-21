@@ -17,6 +17,8 @@ from config import (
     ETORO_EXECUTION_TYPES_CONFIRMED,
     ETORO_FEE_SCHEDULE_CONFIRMED,
     ETORO_FX_CONVERSION_FEE_PCT,
+    ETORO_FUNDING_FX_CONVERSION_FEE_PCT,
+    ETORO_EXECUTION_PRICE_BASIS_CONFIRMED,
     ETORO_MARKET_SPREAD_BPS,
     ETORO_STOCK_CFD_FEE_PCT_PER_SIDE,
     ETORO_STOCK_REAL_COMMISSION_USD_PER_SIDE,
@@ -142,8 +144,8 @@ def estimate_etoro_trade_costs(
             "CFD: spread porcentual de apertura/cierre publicado, sujeto a cambios"
         )
 
-    if market_spread_bps is None:
-        market_spread_bps = ETORO_MARKET_SPREAD_BPS.get(asset)
+    if not ETORO_EXECUTION_PRICE_BASIS_CONFIRMED:
+        result["unpriced_costs"].append("historical_ohlc_to_etoro_execution_price_basis_unverified")
     if market_spread_bps is None:
         result["unpriced_costs"].append("live_market_bid_ask_spread_missing")
     elif not _finite(market_spread_bps) or float(market_spread_bps) < 0:
@@ -210,4 +212,58 @@ def estimate_etoro_trade_costs(
     )
     result["valid"] = True
     result["complete"] = not result["unpriced_costs"]
+    return result
+
+
+def estimate_funding_conversion_cost(
+    amount,
+    source_currency,
+    target_currency=ACCOUNT_CURRENCY,
+    *,
+    fx_rate=None,
+    conversion_fee_pct=None,
+):
+    """Estimate one-off funding FX cost separately from per-trade FX."""
+    result = {
+        "valid": False,
+        "complete": False,
+        "source_currency": str(source_currency or "").upper(),
+        "target_currency": str(target_currency or "").upper(),
+        "conversion_cost_target_currency": None,
+        "unpriced_costs": [],
+    }
+    if not _finite(amount) or float(amount) < 0:
+        result["unpriced_costs"].append("invalid_funding_amount")
+        return result
+    amount = float(amount)
+    source = result["source_currency"]
+    target = result["target_currency"]
+    if not source or not target:
+        result["unpriced_costs"].append("funding_currency_missing")
+        return result
+    if source == target:
+        result["conversion_cost_target_currency"] = 0.0
+        result["valid"] = True
+        result["complete"] = True
+        return result
+
+    if conversion_fee_pct is None:
+        conversion_fee_pct = ETORO_FUNDING_FX_CONVERSION_FEE_PCT
+    if (
+        conversion_fee_pct is None
+        or fx_rate is None
+        or not _finite(conversion_fee_pct)
+        or not _finite(fx_rate)
+        or float(conversion_fee_pct) < 0
+        or float(fx_rate) <= 0
+    ):
+        result["unpriced_costs"].append("funding_fx_rate_or_fee_missing")
+        result["valid"] = True
+        return result
+
+    result["conversion_cost_target_currency"] = (
+        amount * float(fx_rate) * float(conversion_fee_pct)
+    )
+    result["valid"] = True
+    result["complete"] = True
     return result
