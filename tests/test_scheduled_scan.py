@@ -48,6 +48,8 @@ def make_candidate(now):
         "data_age_minutes": 3.0,
         "data_valid": True,
         "last_price": 100.0,
+        "last_high": 100.5,
+        "last_low": 99.5,
     }
 
 
@@ -140,6 +142,72 @@ class ScheduledScanTests(unittest.TestCase):
         self.assertEqual(result["lifecycle_transitions"], 1)
 
 
+    def test_stale_candidate_is_not_created_or_sent(self):
+        stale = copy.deepcopy(self.scan)
+        stale["results"] = [make_candidate(self.now - timedelta(hours=2))]
+        store = MemoryStore("url", "token")
+        with patch.object(
+            scheduled_scan, "UpstashSignalStateStore", return_value=store
+        ), patch.object(
+            scheduled_scan.Bot, "run_scan", return_value=stale
+        ), patch.object(scheduled_scan, "SIGNAL_ALERTS_ENABLED", False):
+            result = scheduled_scan.run_scheduled_scan("15m")
+
+        self.assertEqual(result["signals_created"], 0)
+        self.assertEqual(result["stale_candidates_skipped"], 1)
+        self.assertEqual(store.state["signals"], {})
+
+    def test_expired_signal_is_still_monitored_for_stop_touch(self):
+        store = MemoryStore("url", "token")
+        old = {
+            "schema_version": 1,
+            "signal_id": "expired-monitor-1",
+            "asset": "BTC",
+            "timeframe": "15m",
+            "status": "EXPIRED",
+            "monitor_status": "ACTIVE",
+            "generated_at": (self.now - timedelta(hours=1)).isoformat(),
+            "expires_at": (self.now - timedelta(minutes=30)).isoformat(),
+            "monitoring_expires_at": (self.now + timedelta(hours=4)).isoformat(),
+            "direction": "LONG",
+            "entry_reference": 100.0,
+            "stop": 99.0,
+            "target": 102.0,
+            "alert_sent": False,
+            "position_status": "UNKNOWN",
+        }
+        store.upsert(old)
+        current = {
+            "action": "NO TRADE",
+            "asset": "BTC",
+            "timeframe": "15m",
+            "data_valid": True,
+            "last_price": 99.5,
+            "last_high": 100.0,
+            "last_low": 98.8,
+            "data_timestamp": (self.now - timedelta(minutes=15)).isoformat(),
+        }
+        scan = {
+            "timeframes": ["15m"],
+            "analyses_completed": 1,
+            "technical_candidates_found": 0,
+            "candidates_blocked": 0,
+            "validated_candidates": 0,
+            "no_trade_count": 1,
+            "results": [current],
+        }
+        with patch.object(
+            scheduled_scan, "UpstashSignalStateStore", return_value=store
+        ), patch.object(
+            scheduled_scan.Bot, "run_scan", return_value=scan
+        ), patch.object(scheduled_scan, "SIGNAL_ALERTS_ENABLED", False):
+            result = scheduled_scan.run_scheduled_scan("15m")
+
+        updated = store.state["signals"]["expired-monitor-1"]
+        self.assertEqual(updated["status"], "EXPIRED")
+        self.assertEqual(updated["monitor_status"], "STOP_TOUCHED")
+        self.assertEqual(result["lifecycle_transitions"], 1)
+
     def test_alerts_remain_blocked_until_strategy_validation_passes(self):
         store = MemoryStore("url", "token")
         with patch.object(
@@ -192,6 +260,8 @@ class ScheduledScanTests(unittest.TestCase):
         }
         message = scheduled_scan._lifecycle_message(signal, "SIGNAL_EXPIRED")
         self.assertIn("ID: <code>abcdef123456</code>", message)
+        self.assertIn("No abras una nueva operación", message)
+        self.assertIn("no es una instrucción para cerrar", message)
 
     def test_invalid_timeframe_is_rejected_before_network_access(self):
         with self.assertRaises(ValueError):

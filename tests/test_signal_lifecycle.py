@@ -58,6 +58,13 @@ class SignalLifecycleTests(unittest.TestCase):
     def test_build_signal_calculates_potential_and_expiry(self):
         signal = build_signal_record(candidate(), NOW, 30)
         self.assertEqual(signal["status"], "PENDING")
+        self.assertEqual(signal["monitor_status"], "ACTIVE")
+        self.assertEqual(
+            signal["monitoring_expires_at"],
+            (NOW + timedelta(minutes=30) + timedelta(hours=8)).isoformat(),
+        )
+        self.assertEqual(signal["minimum_risk_reward"], 2.0)
+        self.assertEqual(signal["minimum_remaining_risk_fraction"], 0.5)
         self.assertEqual(signal["expires_at"], (NOW + timedelta(minutes=30)).isoformat())
         self.assertEqual(signal["potential_risk_pct"], 1.0)
         self.assertEqual(signal["potential_reward_pct"], 2.0)
@@ -82,6 +89,14 @@ class SignalLifecycleTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             build_signal_record(candidate(), NOW, 30, NOW + timedelta(hours=1))
 
+    def test_build_signal_rejects_invalid_entry_zone_policy(self):
+        with self.assertRaises(ValueError):
+            build_signal_record(candidate(minimum_risk_reward=0), NOW, 30)
+        with self.assertRaises(ValueError):
+            build_signal_record(
+                candidate(minimum_remaining_risk_fraction=1.5), NOW, 30
+            )
+
     def test_build_signal_rejects_non_candidate(self):
         with self.assertRaises(ValueError):
             build_signal_record(candidate(action="NO TRADE"), NOW, 30)
@@ -98,6 +113,123 @@ class SignalLifecycleTests(unittest.TestCase):
         again, second_event = advance_signal(updated, NOW + timedelta(minutes=31))
         self.assertEqual(again["status"], "EXPIRED")
         self.assertIsNone(second_event)
+
+    def test_expired_signal_continues_monitoring_until_a_price_level_is_touched(self):
+        signal = build_signal_record(candidate(), NOW, 30)
+        expired, event = advance_signal(signal, NOW + timedelta(minutes=30))
+        self.assertEqual(event, "SIGNAL_EXPIRED")
+        self.assertEqual(expired["monitor_status"], "ACTIVE")
+
+        updated, event = advance_signal(
+            expired,
+            NOW + timedelta(minutes=35),
+            latest_price=179.0,
+            latest_high=179.8,
+            latest_low=178.0,
+        )
+        self.assertEqual(event, "SIGNAL_INVALIDATED_STOP_LEVEL")
+        self.assertEqual(updated["status"], "EXPIRED")
+        self.assertEqual(updated["monitor_status"], "STOP_TOUCHED")
+
+    def test_signal_candle_does_not_trigger_stop_or_target_before_alert(self):
+        signal = build_signal_record(candidate(), NOW, 30)
+        updated, event = advance_signal(
+            signal,
+            NOW + timedelta(minutes=5),
+            latest_price=180.0,
+            latest_high=184.0,
+            latest_low=178.0,
+            latest_data_timestamp=signal["data_timestamp"],
+        )
+        self.assertIsNone(event)
+        self.assertEqual(updated["status"], "PENDING")
+
+    def test_later_completed_candle_can_trigger_intrabar_stop(self):
+        signal = build_signal_record(candidate(), NOW, 30)
+        updated, event = advance_signal(
+            signal,
+            NOW + timedelta(minutes=20),
+            latest_price=179.5,
+            latest_high=179.8,
+            latest_low=178.0,
+            latest_data_timestamp=NOW + timedelta(minutes=15),
+        )
+        self.assertEqual(event, "SIGNAL_INVALIDATED_STOP_LEVEL")
+        self.assertEqual(updated["monitor_status"], "STOP_TOUCHED")
+
+    def test_intrabar_stop_is_detected_even_when_close_is_above_stop(self):
+        signal = build_signal_record(candidate(), NOW, 30)
+        updated, event = advance_signal(
+            signal,
+            NOW + timedelta(minutes=5),
+            latest_price=179.5,
+            latest_high=179.8,
+            latest_low=178.0,
+        )
+        self.assertEqual(event, "SIGNAL_INVALIDATED_STOP_LEVEL")
+        self.assertEqual(updated["monitor_status"], "STOP_TOUCHED")
+
+    def test_intrabar_target_is_detected_even_when_close_is_below_target(self):
+        signal = build_signal_record(candidate(), NOW, 30)
+        updated, event = advance_signal(
+            signal,
+            NOW + timedelta(minutes=5),
+            latest_price=182.0,
+            latest_high=184.0,
+            latest_low=181.5,
+        )
+        self.assertEqual(event, "TARGET_LEVEL_REACHED")
+        self.assertEqual(updated["monitor_status"], "TARGET_TOUCHED")
+
+    def test_stop_wins_if_stop_and_target_are_touched_in_same_candle(self):
+        signal = build_signal_record(candidate(), NOW, 30)
+        updated, event = advance_signal(
+            signal,
+            NOW + timedelta(minutes=5),
+            latest_price=180.0,
+            latest_high=184.0,
+            latest_low=178.0,
+        )
+        self.assertEqual(event, "SIGNAL_INVALIDATED_STOP_LEVEL")
+        self.assertEqual(updated["monitor_status"], "STOP_TOUCHED")
+
+    def test_entry_zone_invalidates_if_remaining_risk_is_too_small(self):
+        signal = build_signal_record(candidate(), NOW, 30)
+        updated, event = advance_signal(
+            signal,
+            NOW + timedelta(minutes=5),
+            latest_price=179.0,
+        )
+        self.assertEqual(event, "SIGNAL_ENTRY_ZONE_INVALIDATED")
+        self.assertEqual(updated["status"], "INVALIDATED")
+
+    def test_entry_zone_invalidates_if_current_rr_falls_below_two(self):
+        signal = build_signal_record(candidate(), NOW, 30)
+        updated, event = advance_signal(
+            signal,
+            NOW + timedelta(minutes=5),
+            latest_price=180.5,
+        )
+        self.assertEqual(event, "SIGNAL_ENTRY_ZONE_INVALIDATED")
+        self.assertEqual(updated["status"], "INVALIDATED")
+
+    def test_entry_zone_remains_valid_inside_price_band(self):
+        signal = build_signal_record(candidate(), NOW, 30)
+        updated, event = advance_signal(
+            signal,
+            NOW + timedelta(minutes=5),
+            latest_price=179.5,
+        )
+        self.assertIsNone(event)
+        self.assertEqual(updated["status"], "PENDING")
+
+    def test_monitoring_ends_after_monitoring_expiry(self):
+        signal = build_signal_record(candidate(), NOW, 30)
+        end = datetime.fromisoformat(signal["monitoring_expires_at"])
+        updated, event = advance_signal(signal, end)
+        self.assertEqual(event, "SIGNAL_EXPIRED")
+        self.assertEqual(updated["status"], "EXPIRED")
+        self.assertEqual(updated["monitor_status"], "ENDED")
 
     def test_stop_level_invalidates_without_claiming_position_closed(self):
         signal = build_signal_record(candidate(), NOW, 30)

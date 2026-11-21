@@ -110,6 +110,18 @@ def build_signal_record(result: dict, generated_at: datetime | str,
     )
     risk_pct = abs(entry - stop) / entry * 100
     reward_pct = abs(target - entry) / entry * 100
+    minimum_rr = float(result.get("minimum_risk_reward", 2.0))
+    minimum_remaining = float(
+        result.get("minimum_remaining_risk_fraction", 0.5)
+    )
+    if not math.isfinite(minimum_rr) or minimum_rr <= 0:
+        raise ValueError("minimum_risk_reward must be positive")
+    if (
+        not math.isfinite(minimum_remaining)
+        or minimum_remaining <= 0
+        or minimum_remaining > 1
+    ):
+        raise ValueError("minimum_remaining_risk_fraction must be in (0, 1]")
 
     record = {
         "schema_version": SCHEMA_VERSION,
@@ -118,9 +130,19 @@ def build_signal_record(result: dict, generated_at: datetime | str,
         "timeframe": str(result.get("timeframe", "")),
         "direction": direction,
         "status": "PENDING",
+        "monitor_status": "ACTIVE",
         "generated_at": generated.isoformat(),
         "expires_at": expiry.isoformat(),
+        "monitoring_expires_at": (
+            expiry + (
+                timedelta(hours=8)
+                if str(result.get("timeframe", "")) == "15m"
+                else timedelta(days=90)
+            )
+        ).isoformat(),
         "validity_minutes": effective_validity_minutes,
+        "minimum_risk_reward": minimum_rr,
+        "minimum_remaining_risk_fraction": minimum_remaining,
         "data_timestamp": _as_utc(candle_timestamp).isoformat(),
         "entry_reference": entry,
         "stop": stop,
@@ -148,45 +170,189 @@ def build_signal_record(result: dict, generated_at: datetime | str,
     return record
 
 
-def advance_signal(signal: dict, now: datetime | str,
-                   latest_price: float | None = None,
-                   conditions_valid: bool = True) -> tuple[dict, str | None]:
-    """Advance a pending signal and emit at most one event per state change."""
-    if not isinstance(signal, dict) or signal.get("status") != "PENDING":
-        return dict(signal), None
+def _entry_zone_is_valid(signal: dict, price: float) -> bool:
+    direction = str(signal.get("direction", "LONG")).upper()
+    entry = _positive_number(signal.get("entry_reference"), "entry_reference")
+    stop = _positive_number(signal.get("stop"), "stop")
+    target = _positive_number(signal.get("target"), "target")
+    minimum_rr = float(signal.get("minimum_risk_reward", 2.0))
+    minimum_remaining = float(
+        signal.get("minimum_remaining_risk_fraction", 0.5)
+    )
+
+    if not math.isfinite(minimum_rr) or minimum_rr <= 0:
+        raise ValueError("minimum_risk_reward must be positive")
+    if (
+        not math.isfinite(minimum_remaining)
+        or minimum_remaining <= 0
+        or minimum_remaining > 1
+    ):
+        raise ValueError("minimum_remaining_risk_fraction must be in (0, 1]")
+
+    if direction == "LONG":
+        planned_risk = entry - stop
+        remaining_risk = price - stop
+        reward = target - price
+    elif direction == "SHORT":
+        planned_risk = stop - entry
+        remaining_risk = stop - price
+        reward = price - target
+    else:
+        raise ValueError("unsupported signal direction")
+
+    if planned_risk <= 0 or remaining_risk <= 0 or reward <= 0:
+        return False
+
+    remaining_fraction = remaining_risk / planned_risk
+    current_rr = reward / remaining_risk
+
+    return (
+        remaining_fraction + 1e-9 >= minimum_remaining
+        and current_rr + 1e-6 >= minimum_rr
+    )
+
+
+def advance_signal(
+    signal: dict,
+    now: datetime | str,
+    latest_price: float | None = None,
+    conditions_valid: bool = True,
+    latest_high: float | None = None,
+    latest_low: float | None = None,
+    latest_data_timestamp: datetime | str | None = None,
+) -> tuple[dict, str | None]:
+    """
+    Advance entry validity and market-level monitoring independently.
+
+    An expired/invalidated entry remains monitored for stop/target touches,
+    because the bot cannot know whether the user entered manually.
+    """
+    if not isinstance(signal, dict):
+        return {}, None
 
     updated = dict(signal)
     current = _as_utc(now)
+    entry_status = updated.get("status", "PENDING")
+    monitor_status = updated.get("monitor_status")
+
+    if monitor_status is None:
+        monitor_status = (
+            "ACTIVE"
+            if entry_status in {"PENDING", "EXPIRED", "INVALIDATED"}
+            else "ENDED"
+        )
+        updated["monitor_status"] = monitor_status
+
+    if monitor_status != "ACTIVE":
+        return updated, None
+
     expires = _as_utc(updated["expires_at"])
-
-    if current >= expires:
-        updated["status"] = "EXPIRED"
-        event = "SIGNAL_EXPIRED"
+    monitoring_expiry_raw = updated.get("monitoring_expires_at")
+    if monitoring_expiry_raw:
+        monitoring_expires = _as_utc(monitoring_expiry_raw)
     else:
-        event = None
-        if latest_price is not None:
-            price = _positive_number(latest_price, "latest_price")
-            direction = updated.get("direction", "LONG")
-            stop = float(updated["stop"])
-            target = float(updated["target"])
-            if direction == "LONG" and price <= stop:
-                updated["status"] = "INVALIDATED"
-                event = "SIGNAL_INVALIDATED_STOP_LEVEL"
-            elif direction == "SHORT" and price >= stop:
-                updated["status"] = "INVALIDATED"
-                event = "SIGNAL_INVALIDATED_STOP_LEVEL"
-            elif direction == "LONG" and price >= target:
-                updated["status"] = "TARGET_REACHED"
-                event = "TARGET_LEVEL_REACHED"
-            elif direction == "SHORT" and price <= target:
-                updated["status"] = "TARGET_REACHED"
-                event = "TARGET_LEVEL_REACHED"
+        monitoring_window = (
+            timedelta(hours=8)
+            if updated.get("timeframe") == "15m"
+            else timedelta(days=90)
+        )
+        monitoring_expires = expires + monitoring_window
+        updated["monitoring_expires_at"] = monitoring_expires.isoformat()
 
-        if event is None and not conditions_valid:
+    monitoring_expired = current >= monitoring_expires
+    expired_now = entry_status == "PENDING" and current >= expires
+    event = None
+
+    # Never evaluate the candle that created the signal: its high/low
+    # happened before the alert could be acted on. Only later completed
+    # candles may advance the signal lifecycle.
+    price_data_is_new = True
+    signal_data_timestamp = updated.get("data_timestamp")
+    if latest_data_timestamp is not None and signal_data_timestamp:
+        price_data_is_new = (
+            _as_utc(latest_data_timestamp) > _as_utc(signal_data_timestamp)
+        )
+
+    # Use the completed candle's high/low so intrabar stop/target touches
+    # are not missed merely because the candle later closed back inside.
+    high = None
+    low = None
+    if price_data_is_new and (latest_high is not None or latest_low is not None):
+        fallback = (
+            _positive_number(latest_price, "latest_price")
+            if latest_price is not None
+            else None
+        )
+        high = (
+            _positive_number(latest_high, "latest_high")
+            if latest_high is not None
+            else fallback
+        )
+        low = (
+            _positive_number(latest_low, "latest_low")
+            if latest_low is not None
+            else fallback
+        )
+        if high is not None and low is not None and high < low:
+            raise ValueError("latest_high must be greater than or equal to latest_low")
+    elif price_data_is_new and latest_price is not None:
+        price = _positive_number(latest_price, "latest_price")
+        high = price
+        low = price
+
+    direction = str(updated.get("direction", "LONG")).upper()
+    stop = _positive_number(updated.get("stop"), "stop")
+    target = _positive_number(updated.get("target"), "target")
+
+    stop_hit = False
+    target_hit = False
+    if high is not None and low is not None:
+        if direction == "LONG":
+            stop_hit = low <= stop
+            target_hit = high >= target
+        elif direction == "SHORT":
+            stop_hit = high >= stop
+            target_hit = low <= target
+        else:
+            raise ValueError("unsupported signal direction")
+
+    # Conservative ordering: if both levels were touched in one candle,
+    # assume the stop happened first.
+    if stop_hit:
+        updated["monitor_status"] = "STOP_TOUCHED"
+        if entry_status == "PENDING":
+            updated["status"] = "EXPIRED" if expired_now else "INVALIDATED"
+        event = "SIGNAL_INVALIDATED_STOP_LEVEL"
+    elif target_hit:
+        updated["monitor_status"] = "TARGET_TOUCHED"
+        if entry_status == "PENDING":
+            updated["status"] = "EXPIRED" if expired_now else "TARGET_REACHED"
+        event = "TARGET_LEVEL_REACHED"
+    elif monitoring_expired:
+        updated["monitor_status"] = "ENDED"
+        if entry_status == "PENDING" and expired_now:
+            updated["status"] = "EXPIRED"
+            event = "SIGNAL_EXPIRED"
+        else:
+            updated["last_checked_at"] = current.isoformat()
+            updated["last_event"] = "SIGNAL_MONITORING_ENDED"
+            updated["position_status"] = "UNKNOWN"
+            return updated, None
+    elif entry_status == "PENDING":
+        if expired_now:
+            updated["status"] = "EXPIRED"
+            event = "SIGNAL_EXPIRED"
+        elif not conditions_valid:
             updated["status"] = "INVALIDATED"
             event = "SIGNAL_INVALIDATED"
-        elif event is None:
-            return updated, None
+        elif price_data_is_new and latest_price is not None:
+            price = _positive_number(latest_price, "latest_price")
+            if not _entry_zone_is_valid(updated, price):
+                updated["status"] = "INVALIDATED"
+                event = "SIGNAL_ENTRY_ZONE_INVALIDATED"
+
+    if event is None:
+        return updated, None
 
     updated["last_event"] = event
     updated["last_checked_at"] = current.isoformat()
