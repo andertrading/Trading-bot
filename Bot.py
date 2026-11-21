@@ -1108,6 +1108,10 @@ def analyze_asset(asset, timeframe):
         result["data_age_minutes"] = round(age_minutes, 2)
         result["data_valid"] = True
         result["last_price"] = float(df["Close"].iloc[-1])
+        result["data_provider"] = df.attrs.get("data_provider", "unknown")
+        result["price_adjustment_policy"] = df.attrs.get(
+            "price_adjustment_policy", "unknown"
+        )
         result["mode"] = "PAPER_ONLY"
         result["currency"] = ACCOUNT_CURRENCY
 
