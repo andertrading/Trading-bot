@@ -527,8 +527,10 @@ class EtoroReadOnlyClient:
             raise ValueError("fields contiene un campo no permitido")
         if len(set(fields)) != len(fields):
             raise ValueError("fields no puede contener duplicados")
-        if "instrumentId" not in fields or "displayname" not in fields:
-            raise ValueError("fields debe incluir instrumentId y displayname")
+        if not set(INSTRUMENT_SEARCH_FIELDS).issubset(set(fields)):
+            raise ValueError(
+                "fields debe incluir todos los campos necesarios para validar el instrumento"
+            )
         if isinstance(page_size, bool) or not isinstance(page_size, int) or not 1 <= page_size <= 1000:
             raise ValueError("page_size debe estar entre 1 y 1000")
         if isinstance(page_number, bool) or not isinstance(page_number, int) or page_number < 1:
