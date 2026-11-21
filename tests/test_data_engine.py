@@ -2125,6 +2125,44 @@ class TestAutomatedScanSchedulingHelpers(unittest.TestCase):
 
 
 
+class TestExtendedDailyYahooCleaning(unittest.TestCase):
+    def setUp(self):
+        self.frame = make_ohlcv(
+            pd.bdate_range("2025-01-01", periods=260, tz="UTC")
+        )
+
+    @patch.dict(os.environ, {"BACKTEST_EXTENDED_DAILY_HISTORY": "true"})
+    def test_extended_daily_drops_rows_with_nonfinite_ohlc(self):
+        frame = self.frame.copy()
+        frame.iloc[10, frame.columns.get_loc("Open")] = np.nan
+
+        cleaned = engine._drop_invalid_ohlc_rows(frame, "CSPX", "1d")
+
+        self.assertEqual(len(cleaned), len(frame) - 1)
+        self.assertTrue(
+            np.isfinite(cleaned[["Open", "High", "Low", "Close"]].to_numpy()).all()
+        )
+
+    @patch.dict(os.environ, {"BACKTEST_EXTENDED_DAILY_HISTORY": "false"})
+    def test_live_daily_keeps_strict_missing_ohlc_behavior(self):
+        frame = self.frame.copy()
+        frame.iloc[10, frame.columns.get_loc("Open")] = np.nan
+
+        unchanged = engine._drop_invalid_ohlc_rows(frame, "CSPX", "1d")
+
+        self.assertEqual(len(unchanged), len(frame))
+        self.assertTrue(pd.isna(unchanged["Open"].iloc[10]))
+
+    @patch.dict(os.environ, {"BACKTEST_EXTENDED_DAILY_HISTORY": "true"})
+    def test_intraday_is_not_cleaned_by_daily_backtest_filter(self):
+        frame = self.frame.copy()
+        frame.iloc[10, frame.columns.get_loc("Open")] = np.nan
+
+        unchanged = engine._drop_invalid_ohlc_rows(frame, "CSPX", "15m")
+
+        self.assertEqual(len(unchanged), len(frame))
+
+
 class TestExtendedDailyHistoryIsBacktestOnly(unittest.TestCase):
     def setUp(self):
         engine._data_cache.clear()
