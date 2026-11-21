@@ -48,7 +48,16 @@ def _send_signal_report(scan_result: dict, candidate: dict, signal: dict) -> boo
         logger.error("No se pudo construir el informe Telegram para %s", signal["signal_id"])
         return False
 
-    chart = Bot.generate_candidate_chart(report_candidate)
+    try:
+        chart = Bot.generate_candidate_chart(report_candidate)
+    except Exception:
+        # Chart generation is optional; a rendering failure must not suppress
+        # the actionable text alert or leave the persisted signal unnotified.
+        logger.exception(
+            "No se pudo generar el gráfico para %s; se enviará el mensaje de texto",
+            signal["signal_id"],
+        )
+        chart = None
     if chart is not None:
         return bool(Bot.send_telegram_photo(chart, messages[1]))
     return bool(Bot.send_telegram_message(messages[1]))
