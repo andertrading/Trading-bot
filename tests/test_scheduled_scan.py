@@ -558,6 +558,7 @@ class ScheduledScanTests(unittest.TestCase):
 
     @patch.object(scheduled_scan.Bot, "send_telegram_message", return_value=True)
     def test_scan_summary_counts_successful_lifecycle_notification_retries(self, send):
+        """Successful lifecycle retries must be visible in scan telemetry."""
         store = MemoryStore("url", "token")
         signal = {
             "signal_id": "retry-metric",
