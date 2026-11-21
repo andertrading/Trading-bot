@@ -183,6 +183,7 @@ def simulate_portfolio(
                     "stop": stop,
                     "score": score,
                     "result_R": result_r,
+                    "exit_price": float(trade.get("exit", entry + result_r * (entry - stop))),
                     "requested_risk_pct": requested_pct,
                     "risk_per_unit": entry - stop,
                 })
@@ -323,13 +324,8 @@ def simulate_portfolio(
             elif position["asset_type"] == "ETF":
                 exit_cost = 0.0
             else:
-                exit_cost = position["entry"] * position["quantity"] * 0.0
-                exit_cost = item["entry"] * position["quantity"] * 0.0 + position["entry"] * 0.0
-                exit_cost = item["entry"] * 0.0
-                exit_cost = position["entry"] * 0.0
-                exit_cost = position["entry"] * position["quantity"] * 0.0
-                exit_cost = position["exit_price"] * position["quantity"] * crypto_rate if "exit_price" in position else 0.0
-            exit_notional = item.get("exit", position["entry"]) * position["quantity"]
+                exit_cost = 0.0
+            exit_notional = position["exit_price"] * position["quantity"]
             if position["asset_type"] == "CRYPTO" and costs_included:
                 exit_cost = exit_notional * crypto_rate
             exit_cost += exit_notional * spread_bps / 20000.0 if costs_included else 0.0
@@ -402,7 +398,10 @@ def simulate_portfolio(
             "costs_included": False,
         })
 
-    pnl_values = [row["realized_pnl_usd"] for row in accepted_rows]
+    pnl_values = [
+        row["net_realized_pnl_usd"] if costs_included else row["realized_pnl_usd"]
+        for row in accepted_rows
+    ]
     gains = sum(value for value in pnl_values if value > 0)
     losses = abs(sum(value for value in pnl_values if value < 0))
     summary = result["summary"]
