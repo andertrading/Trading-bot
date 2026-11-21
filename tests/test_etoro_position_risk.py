@@ -74,7 +74,7 @@ class InstrumentBreakdownClientTests(unittest.TestCase):
         self.assertTrue(args[1].endswith("/api/v2/trading/info/instrument-breakdown"))
         self.assertEqual(kwargs["headers"]["CID"], "12345")
         self.assertEqual(kwargs["headers"]["x-api-key"], "app-key")
-        self.assertNotIn("json", kwargs)
+        self.assertIsNone(kwargs["json"])
 
     def test_invalid_cid_is_rejected_without_request(self):
         session = Mock()
