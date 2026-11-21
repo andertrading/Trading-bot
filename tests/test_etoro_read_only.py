@@ -261,6 +261,8 @@ class InstrumentDiscoveryTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             client.search_instruments({}, fields=["instrumentId", "notAField"])
         with self.assertRaises(ValueError):
+            client.search_instruments({}, fields=["instrumentId", "displayname"])
+        with self.assertRaises(ValueError):
             client.search_instruments({}, page_size=1001)
         with self.assertRaises(ValueError):
             client.search_instruments({}, page_number=0)
