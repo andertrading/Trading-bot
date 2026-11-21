@@ -802,9 +802,24 @@ def main():
     calendar_rows, calendar_summary = _history_calendar_coverage(
         history_bounds, assets, timeframes
     )
+    core_assets = [
+        (asset, ticker)
+        for asset, ticker in assets
+        if asset not in {"CSPX", "CNDX"}
+    ]
+    core_asset_names = {asset for asset, _ in core_assets}
+    core_calendar_rows, core_calendar_summary = _history_calendar_coverage(
+        history_bounds, core_assets, timeframes
+    )
     coverage_summary["history_calendar_coverage"] = calendar_summary
+    coverage_summary["core_stocks_crypto_history_calendar_coverage"] = (
+        core_calendar_summary
+    )
     pd.DataFrame(calendar_rows).to_csv(
         "strategy_research_history_calendar_coverage.csv", index=False
+    )
+    pd.DataFrame(core_calendar_rows).to_csv(
+        "strategy_research_core_history_calendar_coverage.csv", index=False
     )
 
     synchronized_rows = []
@@ -898,6 +913,104 @@ def main():
             synchronized_cost_rows.extend(
                 _broker_cost_sensitivity_rows(allocated_cost_trades)
             )
+
+    # The two ETFs have only ~59 days of shared 15m history. Run a second,
+    # separately labelled OOS portfolio for the 10 stocks/crypto assets whose
+    # shared 15m history spans almost the full 700-day snapshot.
+    core_synchronized_rows = []
+    core_net_portfolio_rows = []
+    for timeframe in timeframes:
+        core_window = core_calendar_summary["by_timeframe"][
+            str(timeframe).lower()
+        ]
+        if not core_window["common_window_exists"]:
+            for strategy_name in STRATEGIES:
+                core_synchronized_rows.append({
+                    "universe_group": "CORE_STOCKS_CRYPTO_10",
+                    "strategy": strategy_name,
+                    "timeframe": timeframe,
+                    "status": "NO_COMMON_CALENDAR_WINDOW",
+                    "universe_available_series": core_window["available_series"],
+                    "universe_expected_series": core_window["expected_series"],
+                    "trades": 0,
+                    "costs_included": False,
+                })
+            continue
+
+        core_start = core_window["common_start_utc"]
+        core_end = core_window["common_end_utc"]
+        core_split = _chronological_period_bounds(core_start, core_end)
+        _, core_oos_start, _, _ = core_split
+
+        for strategy_name in STRATEGIES:
+            source_trades = [
+                trade for trade in all_trades
+                if trade.get("strategy") == strategy_name
+                and str(trade.get("asset", "")).upper() in core_asset_names
+            ]
+            selected = _synchronized_oos_trades(
+                source_trades, timeframe, core_start, core_end
+            )
+            metrics = bt.calculate_metrics(selected)
+            portfolio = bt.simulate_portfolio(
+                selected, capital_usd=bt.INITIAL_CAPITAL_USD
+            )
+            core_synchronized_rows.append({
+                "universe_group": "CORE_STOCKS_CRYPTO_10",
+                "strategy": strategy_name,
+                "timeframe": timeframe,
+                "status": core_window["status"],
+                "common_start_utc": core_start,
+                "common_end_utc": core_end,
+                "oos_start_utc": core_oos_start.isoformat(),
+                "oos_end_utc": core_end,
+                "universe_available_series": core_window["available_series"],
+                "universe_expected_series": core_window["expected_series"],
+                "trades": metrics["trades"],
+                "wins": metrics["wins"],
+                "losses": metrics["losses"],
+                "trade_win_rate_pct": metrics["win_rate_pct"],
+                "total_R": metrics["total_R"],
+                "average_R": metrics["average_R"],
+                "profit_factor_R": metrics["profit_factor_R"],
+                "max_drawdown_R": metrics["max_drawdown_R"],
+                "average_duration_bars": metrics["average_duration_bars"],
+                **portfolio["summary"],
+                "costs_included": False,
+                "interpretation": (
+                    "Synchronized OOS for five US stocks and five crypto assets; "
+                    "ETFs excluded to avoid truncating the common M15 history. "
+                    "Bounds are comparable; source and internal-gap caveats remain."
+                ),
+            })
+
+            for broker_scenario, cost_model, fee_model_note in _net_portfolio_cost_scenarios():
+                for spread_bps in (0, 5, 10, 20):
+                    net_portfolio = bt.simulate_portfolio(
+                        selected,
+                        capital_usd=bt.INITIAL_CAPITAL_USD,
+                        execution_costs={
+                            **cost_model,
+                            "spread_bps": spread_bps,
+                        },
+                    )
+                    core_net_portfolio_rows.append({
+                        "universe_group": "CORE_STOCKS_CRYPTO_10",
+                        "strategy": strategy_name,
+                        "timeframe": timeframe,
+                        "status": core_window["status"],
+                        "broker_scenario": broker_scenario,
+                        "fee_model_note": fee_model_note,
+                        "spread_bps_scenario": spread_bps,
+                        **net_portfolio["summary"],
+                    })
+
+    pd.DataFrame(core_synchronized_rows).to_csv(
+        "strategy_research_core_synchronized_calendar.csv", index=False
+    )
+    pd.DataFrame(core_net_portfolio_rows).to_csv(
+        "strategy_research_core_net_aware_portfolio.csv", index=False
+    )
 
     pd.DataFrame(synchronized_rows).to_csv(
         "strategy_research_synchronized_calendar.csv", index=False
