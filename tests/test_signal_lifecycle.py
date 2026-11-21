@@ -157,6 +157,62 @@ class SignalLifecycleTests(unittest.TestCase):
         self.assertEqual(event, "SIGNAL_INVALIDATED_STOP_LEVEL")
         self.assertEqual(updated["monitor_status"], "STOP_TOUCHED")
 
+    def test_out_of_order_candle_cannot_invalidate_signal(self):
+        signal = build_signal_record(candidate(), NOW, 30)
+        newer, event = advance_signal(
+            signal,
+            NOW + timedelta(minutes=20),
+            latest_price=179.5,
+            latest_high=179.8,
+            latest_low=179.2,
+            latest_data_timestamp=NOW + timedelta(minutes=15),
+        )
+        self.assertIsNone(event)
+        self.assertEqual(
+            newer["last_market_data_timestamp"],
+            (NOW + timedelta(minutes=15)).isoformat(),
+        )
+
+        stale, stale_event = advance_signal(
+            newer,
+            NOW + timedelta(minutes=25),
+            latest_price=178.0,
+            latest_high=179.0,
+            latest_low=177.5,
+            latest_data_timestamp=NOW + timedelta(minutes=10),
+        )
+        self.assertIsNone(stale_event)
+        self.assertEqual(stale["status"], "PENDING")
+        self.assertEqual(stale["monitor_status"], "ACTIVE")
+        self.assertEqual(
+            stale["last_market_data_timestamp"],
+            (NOW + timedelta(minutes=15)).isoformat(),
+        )
+
+    def test_duplicate_candle_cannot_trigger_a_second_market_event(self):
+        signal = build_signal_record(candidate(), NOW, 30)
+        newer, event = advance_signal(
+            signal,
+            NOW + timedelta(minutes=20),
+            latest_price=179.5,
+            latest_high=179.8,
+            latest_low=179.2,
+            latest_data_timestamp=NOW + timedelta(minutes=15),
+        )
+        self.assertIsNone(event)
+
+        duplicate, duplicate_event = advance_signal(
+            newer,
+            NOW + timedelta(minutes=21),
+            latest_price=178.0,
+            latest_high=179.0,
+            latest_low=177.5,
+            latest_data_timestamp=NOW + timedelta(minutes=15),
+        )
+        self.assertIsNone(duplicate_event)
+        self.assertEqual(duplicate["status"], "PENDING")
+        self.assertEqual(duplicate["monitor_status"], "ACTIVE")
+
     def test_intrabar_stop_is_detected_even_when_close_is_above_stop(self):
         signal = build_signal_record(candidate(), NOW, 30)
         updated, event = advance_signal(
