@@ -295,6 +295,11 @@ class InstrumentDiscoveryTests(unittest.TestCase):
         with self.assertRaises(EtoroAPIError):
             resolve_unique_instrument(response, "Tesla Inc")
 
+    def test_incomplete_paginated_search_is_rejected(self):
+        response = EtoroResponse({"items": [self.item], "totalItems": 101}, 200, {})
+        with self.assertRaises(EtoroAPIError):
+            resolve_unique_instrument(response, "TSLA")
+
 
 class RealtimeQuoteValidationTests(unittest.TestCase):
     def setUp(self):
