@@ -757,6 +757,7 @@ def main():
 
     synchronized_rows = []
     synchronized_cost_rows = []
+    net_portfolio_rows = []
     for timeframe in timeframes:
         timeframe_window = calendar_summary["by_timeframe"][str(timeframe).lower()]
         if not timeframe_window["common_window_exists"]:
@@ -793,6 +794,25 @@ def main():
             portfolio = bt.simulate_portfolio(
                 selected, capital_usd=bt.INITIAL_CAPITAL_USD
             )
+            for spread_bps in (0, 5, 10, 20):
+                net_portfolio = bt.simulate_portfolio(
+                    selected,
+                    capital_usd=bt.INITIAL_CAPITAL_USD,
+                    execution_costs={
+                        "venue": "ETORO_REAL",
+                        "spread_bps": spread_bps,
+                        "crypto_rate_per_side": 0.01,
+                        "stock_fee_per_side_usd": 1.0,
+                    },
+                )
+                net_portfolio_rows.append({
+                    "strategy": strategy_name,
+                    "timeframe": timeframe,
+                    "status": timeframe_universe_status,
+                    "broker_scenario": "ETORO_REAL_STANDARD_CRYPTO_FEE",
+                    "spread_bps_scenario": spread_bps,
+                    **net_portfolio["summary"],
+                })
             synchronized_rows.append({
                 "strategy": strategy_name,
                 "timeframe": timeframe,
@@ -832,6 +852,10 @@ def main():
     )
     pd.DataFrame(synchronized_cost_rows).to_csv(
         "strategy_research_synchronized_broker_cost_scenarios.csv",
+        index=False,
+    )
+    pd.DataFrame(net_portfolio_rows).to_csv(
+        "strategy_research_net_aware_portfolio.csv",
         index=False,
     )
     for portfolio_row in oos_portfolio_rows:
