@@ -1,3 +1,4 @@
+import os
 import unittest
 from unittest.mock import patch
 from contextlib import redirect_stdout
