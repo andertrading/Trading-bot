@@ -279,24 +279,41 @@ def simulate_portfolio(
         )
         # Entry fees reduce both spendable cash and the equity denominator
         # used by the hard per-trade and aggregate risk limits.
+        def side_cost(item, quantity, price):
+            notional = price * quantity
+            asset_type = str(ASSETS[item["asset"]].get("type", "")).upper()
+            if asset_type == "STOCK":
+                fee = stock_fee
+            elif asset_type == "ETF":
+                fee = 0.0
+            else:
+                fee = notional * crypto_rate_for_asset(item["asset"])
+            fee += notional * spread_bps / 20000.0
+            return fee
+
         def batch_entry_costs(factor):
             if factor <= 1e-12 or not costs_included:
                 return 0.0
-            entry_fees = 0.0
-            for item, requested_risk, _ in requests:
-                allocated = requested_risk * factor
-                quantity = allocated / item["risk_per_unit"]
-                entry_notional = item["entry"] * quantity
-                asset_type = str(ASSETS[item["asset"]].get("type", "")).upper()
-                if asset_type == "STOCK":
-                    fee = stock_fee
-                elif asset_type == "ETF":
-                    fee = 0.0
-                else:
-                    fee = entry_notional * crypto_rate_for_asset(item["asset"])
-                fee += entry_notional * spread_bps / 20000.0
-                entry_fees += fee
-            return entry_fees
+            return sum(
+                side_cost(
+                    item,
+                    requested_risk * factor / item["risk_per_unit"],
+                    item["entry"],
+                )
+                for item, requested_risk, _ in requests
+            )
+
+        def batch_exit_costs(factor):
+            if factor <= 1e-12 or not costs_included:
+                return 0.0
+            return sum(
+                side_cost(
+                    item,
+                    requested_risk * factor / item["risk_per_unit"],
+                    item["exit_price"],
+                )
+                for item, requested_risk, _ in requests
+            )
 
         def risk_constraints_satisfied(factor):
             post_entry_equity = max(
@@ -339,7 +356,8 @@ def simulate_portfolio(
             # account balance when the position later closes.
             return (
                 total_requested_notional * factor
-                + 2.0 * batch_entry_costs(factor)
+                + batch_entry_costs(factor)
+                + batch_exit_costs(factor)
             )
 
         low, high = 0.0, risk_factor
@@ -380,10 +398,14 @@ def simulate_portfolio(
                 entry_cost = entry_notional * crypto_rate_for_asset(item["asset"])
             entry_cost += entry_notional * spread_bps / 20000.0 if costs_included else 0.0
             total_entry_cost += entry_cost
+            reserved_exit_cost = (
+                side_cost(item, quantity, item["exit_price"])
+                if costs_included else 0.0
+            )
             position = {
                 **item,
                 "entry_cost_usd": entry_cost,
-                "reserved_exit_cost_usd": entry_cost,
+                "reserved_exit_cost_usd": reserved_exit_cost,
                 "asset_type": asset_type,
                 "allocated_risk_usd": allocated_risk,
                 "notional_usd": notional,
