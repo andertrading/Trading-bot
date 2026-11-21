@@ -259,6 +259,29 @@ class TestEtoroTransactionCosts(unittest.TestCase):
         self.assertEqual(result["overnight_cost"], 0.0)
         self.assertNotIn("cfd_overnight_fee_missing", result["unpriced_costs"])
 
+    def test_omitted_crypto_cfd_overnight_units_fail_closed_by_default(self):
+        with patch.dict(
+            costs.ETORO_CFD_CRYPTO_OVERNIGHT_USD_PER_UNIT_DAY,
+            {"BTC": 0.05},
+        ):
+            result = costs.estimate_etoro_trade_costs(
+                "BTC",
+                100.0,
+                110.0,
+                1.0,
+                execution_type="CFD",
+                market_spread_bps=0,
+                leverage=1.0,
+                side="BUY",
+                country_code="ES",
+            )
+        self.assertIsNone(result["overnight_cost"])
+        self.assertIn(
+            "cfd_overnight_charge_units_missing",
+            result["unpriced_costs"],
+        )
+        self.assertFalse(result["complete"])
+
     def test_unleveraged_long_crypto_cfd_in_spain_requires_overnight_fee(self):
         result = costs.estimate_etoro_trade_costs(
             "BTC",
