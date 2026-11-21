@@ -250,6 +250,8 @@ def simulate_portfolio(
         peak_open_notional = max(peak_open_notional, open_notional)
 
         # Realize exits only after allocating entries at this timestamp.
+        closed_at_timestamp = []
+        timestamp_pnl = 0.0
         for item in sorted(
             exits.get(event_time, []),
             key=lambda row: row["source_index"],
@@ -258,12 +260,19 @@ def simulate_portfolio(
             if position is None:
                 continue
             pnl = position["allocated_risk_usd"] * position["result_R"]
-            equity += pnl
+            position["realized_pnl_usd"] = pnl
+            position["status"] = "CLOSED"
+            closed_at_timestamp.append(position)
+            timestamp_pnl += pnl
+
+        # All exits at one timestamp are realized as a single portfolio event;
+        # the arbitrary order of same-time instruments must not distort DD.
+        if closed_at_timestamp:
+            equity += timestamp_pnl
             equity_peak = max(equity_peak, equity)
             max_drawdown = max(max_drawdown, equity_peak - equity)
-            position["realized_pnl_usd"] = pnl
-            position["equity_after_exit_usd"] = equity
-            position["status"] = "CLOSED"
+            for position in closed_at_timestamp:
+                position["equity_after_exit_usd"] = equity
 
     accepted_rows = []
     for position in accepted:
@@ -300,7 +309,7 @@ def simulate_portfolio(
             sum(value > 0 for value in pnl_values) / len(pnl_values) * 100,
             4,
         ) if pnl_values else 0.0,
-        "profit_factor": round(gains / losses, 6) if losses > 0 else (None if gains == 0 else "infinite"),
+        "profit_factor": round(gains / losses, 6) if losses > 0 else (None if gains == 0 else None),
         "max_drawdown_usd": round(max_drawdown, 8),
         "max_drawdown_pct": round(max_drawdown / capital * 100, 6),
         "peak_open_risk_usd": round(peak_open_risk, 8),
