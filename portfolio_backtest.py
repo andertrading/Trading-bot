@@ -40,14 +40,17 @@ def _timestamp(value):
     return stamp.tz_convert("UTC")
 
 
-def _empty_result(capital):
+def _empty_result(capital, costs_included=False):
     return {
         "summary": {
             "initial_capital_usd": float(capital),
             "ending_equity_usd": float(capital),
             "gross_pnl_usd": 0.0,
             "gross_return_pct": 0.0,
-            "pnl_basis": "GROSS_EX_COSTS",
+            "pnl_basis": "GROSS_EX_COSTS" if not costs_included else "NET_AFTER_ASSUMED_COSTS",
+            "net_pnl_usd": 0.0 if costs_included else None,
+            "total_entry_cost_usd": 0.0,
+            "total_exit_cost_usd": 0.0,
             "trades_considered": 0,
             "trades_accepted": 0,
             "trades_rejected": 0,
@@ -60,7 +63,7 @@ def _empty_result(capital):
             "risk_limit_breach_events": 0,
             "peak_open_notional_usd": 0.0,
             "portfolio_risk_limit_pct": 0.0,
-            "costs_included": False,
+            "costs_included": bool(costs_included),
         },
         "trades": [],
         "rejections": [],
@@ -72,6 +75,7 @@ def simulate_portfolio(
     capital_usd=None,
     max_portfolio_risk_pct=None,
     max_risk_per_trade_pct=None,
+    execution_costs=None,
 ):
     """Allocate simultaneous long trades under shared risk and cash limits.
 
@@ -106,7 +110,26 @@ def simulate_portfolio(
     portfolio_limit_pct = min(float(portfolio_pct), HARD_MAX_PORTFOLIO_RISK)
     per_trade_limit_pct = min(float(trade_pct), HARD_MAX_RISK_PER_TRADE)
 
-    result = _empty_result(capital)
+    if execution_costs is not None and not isinstance(execution_costs, dict):
+        raise ValueError("execution_costs debe ser un objeto")
+    cost_model = dict(execution_costs or {})
+    spread_bps = float(cost_model.get("spread_bps", 0.0))
+    if not _finite(spread_bps) or spread_bps < 0 or spread_bps > 5000:
+        raise ValueError("spread_bps debe estar entre 0 y 5000")
+    venue = str(cost_model.get("venue", "ETORO_REAL")).upper()
+    if venue not in {"ETORO_REAL", "BITVAVO_MAKER", "BITVAVO_TAKER"}:
+        raise ValueError("venue de costes no admitido")
+    crypto_rate = float(cost_model.get(
+        "crypto_rate_per_side",
+        0.01 if venue == "ETORO_REAL" else 0.0015 if venue == "BITVAVO_MAKER" else 0.0025,
+    ))
+    stock_fee = float(cost_model.get("stock_fee_per_side_usd", 1.0))
+    if not _finite(crypto_rate) or not 0 <= crypto_rate <= 0.1:
+        raise ValueError("crypto_rate_per_side inválido")
+    if not _finite(stock_fee) or not 0 <= stock_fee <= 100:
+        raise ValueError("stock_fee_per_side_usd inválido")
+    costs_included = execution_costs is not None
+    result = _empty_result(capital, costs_included=costs_included)
     result["summary"]["trades_considered"] = len(trades or [])
     result["summary"]["portfolio_risk_limit_pct"] = portfolio_limit_pct * 100
 
@@ -182,6 +205,9 @@ def simulate_portfolio(
     open_positions = {}
     accepted = []
     equity = capital
+    gross_total_pnl = 0.0
+    total_entry_cost = 0.0
+    total_exit_cost = 0.0
     equity_peak = capital
     max_drawdown = 0.0
     max_drawdown_pct = 0.0
@@ -240,8 +266,22 @@ def simulate_portfolio(
                 continue
 
             quantity = allocated_risk / item["risk_per_unit"]
+            asset_type = str(ASSETS[item["asset"]].get("type", "")).upper()
+            entry_notional = item["entry"] * quantity
+            if not costs_included:
+                entry_cost = 0.0
+            elif asset_type == "STOCK":
+                entry_cost = stock_fee
+            elif asset_type == "ETF":
+                entry_cost = 0.0
+            else:
+                entry_cost = entry_notional * crypto_rate
+            entry_cost += entry_notional * spread_bps / 20000.0 if costs_included else 0.0
+            total_entry_cost += entry_cost
             position = {
                 **item,
+                "entry_cost_usd": entry_cost,
+                "asset_type": asset_type,
                 "allocated_risk_usd": allocated_risk,
                 "notional_usd": notional,
                 "quantity": quantity,
@@ -264,7 +304,10 @@ def simulate_portfolio(
 
         # Realize exits only after allocating entries at this timestamp.
         closed_at_timestamp = []
-        timestamp_pnl = 0.0
+        timestamp_pnl = -sum(
+            p["entry_cost_usd"] for p in accepted
+            if p["entry_time"] == event_time
+        )
         for item in sorted(
             exits.get(event_time, []),
             key=lambda row: row["source_index"],
@@ -273,15 +316,38 @@ def simulate_portfolio(
             if position is None:
                 continue
             pnl = position["allocated_risk_usd"] * position["result_R"]
+            if not costs_included:
+                exit_cost = 0.0
+            elif position["asset_type"] == "STOCK":
+                exit_cost = stock_fee
+            elif position["asset_type"] == "ETF":
+                exit_cost = 0.0
+            else:
+                exit_cost = position["entry"] * position["quantity"] * 0.0
+                exit_cost = item["entry"] * position["quantity"] * 0.0 + position["entry"] * 0.0
+                exit_cost = item["entry"] * 0.0
+                exit_cost = position["entry"] * 0.0
+                exit_cost = position["entry"] * position["quantity"] * 0.0
+                exit_cost = position["exit_price"] * position["quantity"] * crypto_rate if "exit_price" in position else 0.0
+            exit_notional = item.get("exit", position["entry"]) * position["quantity"]
+            if position["asset_type"] == "CRYPTO" and costs_included:
+                exit_cost = exit_notional * crypto_rate
+            exit_cost += exit_notional * spread_bps / 20000.0 if costs_included else 0.0
+            total_exit_cost += exit_cost
             position["realized_pnl_usd"] = pnl
+            position["exit_cost_usd"] = exit_cost
+            position["net_realized_pnl_usd"] = pnl - exit_cost - position["entry_cost_usd"]
             position["status"] = "CLOSED"
             closed_at_timestamp.append(position)
-            timestamp_pnl += pnl
+            timestamp_pnl += pnl - exit_cost
 
         # All exits at one timestamp are realized as a single portfolio event;
         # the arbitrary order of same-time instruments must not distort DD.
-        if closed_at_timestamp:
+        if closed_at_timestamp or timestamp_pnl:
             equity += timestamp_pnl
+            gross_total_pnl += sum(p["realized_pnl_usd"] for p in closed_at_timestamp)
+            total_entry_cost += 0.0
+            total_exit_cost += sum(p.get("exit_cost_usd", 0.0) for p in closed_at_timestamp)
             equity_peak = max(equity_peak, equity)
             current_drawdown = equity_peak - equity
             max_drawdown = max(max_drawdown, current_drawdown)
@@ -329,6 +395,9 @@ def simulate_portfolio(
             "notional_usd": round(position["notional_usd"], 8),
             "allocation_factor": round(position["allocation_factor"], 8),
             "realized_pnl_usd": round(position.get("realized_pnl_usd", 0.0), 8),
+            "entry_cost_usd": round(position.get("entry_cost_usd", 0.0), 8),
+            "exit_cost_usd": round(position.get("exit_cost_usd", 0.0), 8),
+            "net_realized_pnl_usd": round(position.get("net_realized_pnl_usd", 0.0), 8),
             "equity_after_exit_usd": round(position.get("equity_after_exit_usd", equity), 8),
             "costs_included": False,
         })
@@ -339,9 +408,13 @@ def simulate_portfolio(
     summary = result["summary"]
     summary.update({
         "ending_equity_usd": round(equity, 8),
-        "gross_pnl_usd": round(equity - capital, 8),
-        "gross_return_pct": round((equity / capital - 1) * 100, 6),
-        "pnl_basis": "GROSS_EX_COSTS",
+        "gross_pnl_usd": round(gross_total_pnl if costs_included else equity - capital, 8),
+        "gross_return_pct": round(((capital + (gross_total_pnl if costs_included else equity - capital)) / capital - 1) * 100, 6),
+        "net_pnl_usd": round(equity - capital, 8) if costs_included else None,
+        "net_return_pct": round((equity / capital - 1) * 100, 6) if costs_included else None,
+        "total_entry_cost_usd": round(total_entry_cost, 8),
+        "total_exit_cost_usd": round(total_exit_cost, 8),
+        "pnl_basis": "NET_AFTER_ASSUMED_COSTS" if costs_included else "GROSS_EX_COSTS",
         "trades_accepted": len(accepted_rows),
         "trades_rejected": len(rejected),
         "win_rate_pct": round(
@@ -355,7 +428,7 @@ def simulate_portfolio(
         "peak_open_risk_pct_of_equity": round(peak_open_risk_pct, 6),
         "risk_limit_breach_events": risk_limit_breach_events,
         "peak_open_notional_usd": round(peak_open_notional, 8),
-        "costs_included": False,
+        "costs_included": costs_included,
     })
     result["trades"] = accepted_rows
     result["rejections"] = rejected
