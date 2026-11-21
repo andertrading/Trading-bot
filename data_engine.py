@@ -1679,6 +1679,7 @@ def _download_twelvedata_extended(asset, config, interval):
         logger.error("BACKFILL INSUFICIENTE | %s", asset)
         return None
 
+    coinbase_repair_used = False
     if asset in CRYPTO_ASSETS:
         # Repair isolated provider omissions by requesting only the missing
         # timestamps plus their surrounding candles. Never synthesize OHLC.
@@ -1723,6 +1724,8 @@ def _download_twelvedata_extended(asset, config, interval):
                         previous_timestamp + pd.Timedelta(minutes=15),
                         next_timestamp - pd.Timedelta(minutes=15),
                     )
+                    if repair is not None and not repair.empty:
+                        coinbase_repair_used = True
                 if repair is not None and not repair.empty:
                     repair_frames.append(repair)
 
@@ -1731,6 +1734,15 @@ def _download_twelvedata_extended(asset, config, interval):
             combined = pd.concat([combined, *repair_frames]).sort_index()
             combined = combined.loc[~combined.index.duplicated(keep="last")]
             combined = _normalise_dataframe(combined)
+
+    if combined is not None:
+        combined.attrs["price_adjustment_policy"] = "raw_unadjusted_intraday"
+        combined.attrs["price_adjustment_verified"] = True
+        combined.attrs["price_source_detail"] = (
+            "Twelve Data primary with exact-gap Coinbase Exchange USD repair"
+            if coinbase_repair_used
+            else "Twelve Data historical intraday"
+        )
 
     if _has_intraday_gaps(combined, asset):
         logger.error(
