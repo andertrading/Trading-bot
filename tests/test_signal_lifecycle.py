@@ -459,6 +459,17 @@ class SignalLifecycleTests(unittest.TestCase):
                         "last_checked_at": "2026-01-02T00:00:00Z",
                         "pending_notification_event": "SIGNAL_EXPIRED",
                     },
+                    "pending_notification_queue": {
+                        "signal_id": "pending_notification_queue",
+                        "status": "EXPIRED",
+                        "generated_at": "2026-01-01T00:00:00Z",
+                        "last_checked_at": "2026-01-02T00:00:00Z",
+                        "pending_notification_event": "SIGNAL_INVALIDATED",
+                        "pending_notification_events": [
+                            "SIGNAL_INVALIDATED",
+                            "SIGNAL_INVALIDATED_STOP_LEVEL",
+                        ],
+                    },
                     "pending": {
                         "signal_id": "pending",
                         "status": "PENDING",
@@ -489,6 +500,7 @@ class SignalLifecycleTests(unittest.TestCase):
         self.assertIn("recent", loaded["signals"])
         self.assertIn("pending", loaded["signals"])
         self.assertIn("pending_notification", loaded["signals"])
+        self.assertIn("pending_notification_queue", loaded["signals"])
 
     def test_upstash_store_requires_credentials(self):
         with self.assertRaises(ValueError):
