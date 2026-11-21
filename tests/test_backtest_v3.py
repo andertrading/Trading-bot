@@ -149,6 +149,32 @@ class TestBacktestV3(unittest.TestCase):
         live_mock.assert_called_once_with("AAPL", "15m")
         self.assertEqual(backtest_v3._provider_for_asset("AAPL", "15m"), "twelvedata")
 
+    def test_backtest_rejects_unverified_price_adjustment_metadata(self):
+        data = self.make_data()
+        data.attrs["price_adjustment_verified"] = False
+        with (
+            patch.object(backtest_v3, "BACKTEST_DATA_MODE", "download"),
+            patch.object(backtest_v3, "download_data", return_value=data),
+        ):
+            result = backtest_v3.download_history("AAPL", "15m", asset="AAPL")
+        self.assertIsNone(result)
+        self.assertIn("ajuste de precios no está verificado", backtest_v3.DOWNLOAD_ERRORS[("AAPL", "15m")])
+
+    def test_snapshot_metadata_records_provider_and_adjustment_policy(self):
+        data = self.make_data()
+        metadata = backtest_v3._snapshot_metadata(
+            "AAPL",
+            "AAPL",
+            "15m",
+            data,
+            backtest_v3.Path("snapshot.csv"),
+            "sha256",
+            "twelvedata",
+        )
+        self.assertEqual(metadata["provider"], "twelvedata")
+        self.assertEqual(metadata["adjustment_policy"], "raw_unadjusted_intraday")
+        self.assertTrue(metadata["price_adjustment_verified"])
+
     def test_backtest_rejects_duplicate_timestamps_from_provider(self):
         data = self.make_data()
         duplicated = pd.concat([data, data.iloc[[-1]]])
