@@ -160,7 +160,10 @@ class TestRiskManager(unittest.TestCase):
         self.assertAlmostEqual(result["position_size"], 0.5)
         self.assertAlmostEqual(result["position_risk_usd"], 3)
         self.assertAlmostEqual(result["total_reserved_risk_usd"], 5)
-        self.assertLessEqual(result["total_reserved_risk_usd"], 10)
+        self.assertLessEqual(
+            result["total_reserved_risk_usd"],
+            result["risk_amount_usd"],
+        )
 
     def test_fixed_costs_consuming_budget_block_position_size(self):
         with patch("risk_manager.ALLOW_POSITION_SIZING", True):
@@ -316,7 +319,7 @@ class TestRiskManager(unittest.TestCase):
                     quote_to_usd=1,
                     portfolio_risk_usd=0,
                     costs_per_unit_quote=0,
-                fixed_costs_quote=0,
+                    fixed_costs_quote=0,
                 )
 
         self.assertAlmostEqual(
