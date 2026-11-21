@@ -17,6 +17,7 @@ from etoro_read_only import (
     EtoroReadOnlyClient,
     resolve_unique_instrument,
 )
+from etoro_position_risk import calculate_account_gross_stop_risk_from_client
 
 
 def _asset_candidates(symbol: str, asset: Mapping[str, Any]) -> list[tuple[str, str]]:
@@ -54,11 +55,30 @@ def run_audit(
     now_utc: datetime,
 ) -> dict[str, Any]:
     """Run account schema, exact instrument and realtime quote checks."""
+    snapshot = None
     try:
-        client.get_account_snapshot(account_currency)
+        snapshot = client.get_account_snapshot(account_currency)
         account_valid = True
     except Exception:
         account_valid = False
+
+    gross_position_risk_validated = False
+    complete_position_risk_validated = False
+    if account_valid:
+        try:
+            risk_diagnostic = calculate_account_gross_stop_risk_from_client(
+                client,
+                snapshot,
+                now_utc,
+            )
+            gross_position_risk_validated = risk_diagnostic["status"] in {
+                "GROSS_ONLY_UNVALIDATED",
+                "COMPLETE_NO_OPEN_POSITIONS",
+            }
+            complete_position_risk_validated = risk_diagnostic["complete"]
+        except Exception:
+            gross_position_risk_validated = False
+            complete_position_risk_validated = False
 
     enabled_assets = {
         symbol: asset
@@ -119,6 +139,7 @@ def run_audit(
         and len(resolved) == len(enabled_assets)
         and eligibility_valid
         and quotes_valid
+        and gross_position_risk_validated
     )
     return {
         "audit_scope": "read-only diagnostics; not authorization to trade",
@@ -126,6 +147,9 @@ def run_audit(
         "instrument_resolution": instrument_report,
         "instrument_eligibility_validated": eligibility_valid,
         "complete_realtime_quotes_validated": quotes_valid,
+        "gross_position_stop_risk_diagnostic_validated": gross_position_risk_validated,
+        "complete_position_risk_validated": complete_position_risk_validated,
+        "portfolio_risk_admission_ready": False,
         "overall_pass": overall,
     }
 
