@@ -1070,6 +1070,9 @@ def _download_twelvedata(asset, config, interval):
         "interval": INTERVAL_MAP[interval],
         "outputsize": 5000,
         "timezone": "UTC",
+        # Explicitly pin the documented corporate-action policy:
+        # daily bars are split-adjusted; intraday bars remain raw.
+        "adjust": "splits" if interval == "1d" else "none",
         "apikey": api_key,
     }
 
