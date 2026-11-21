@@ -171,6 +171,15 @@ class PositionGrossStopRiskTests(unittest.TestCase):
         self.assertIsNone(result["risk_usd"])
         self.assertFalse(result["complete"])
 
+    def test_empty_portfolio_has_zero_open_position_risk(self):
+        result = calculate_account_gross_stop_risk_usd({}, {})
+        self.assertEqual(result["risk_usd"], Decimal("0"))
+        self.assertTrue(result["complete"])
+
+    def test_position_mapping_key_must_match_position_id(self):
+        with self.assertRaises(EtoroAPIError):
+            calculate_account_gross_stop_risk_usd({9999: position()}, {101: quote()})
+
     def test_missing_quote_blocks_aggregate(self):
         with self.assertRaises(EtoroAPIError):
             calculate_account_gross_stop_risk_usd({7001: position()}, {})
