@@ -2058,6 +2058,54 @@ if __name__ == "__main__":
     unittest.main()
 
 
+
+
+class TestExtendedHistoryIsBacktestOnly(unittest.TestCase):
+
+    def setUp(self):
+        self.frame = make_ohlcv(
+            pd.date_range(
+                "2026-11-18T00:00:00Z",
+                periods=220,
+                freq="15min",
+            )
+        )
+
+    def test_extended_backfill_requires_explicit_backtest_flag(self):
+        with (
+            patch.dict("os.environ", {}, clear=True),
+            patch.object(engine, "_get_cached_data", return_value=None),
+            patch.object(engine, "_download_twelvedata", return_value=self.frame) as normal,
+            patch.object(engine, "_download_twelvedata_extended") as extended,
+            patch.object(engine, "_save_cached_data"),
+        ):
+            result = engine.download_data("BTC", "15m")
+
+        self.assertIsNotNone(result)
+        normal.assert_called_once()
+        extended.assert_not_called()
+
+    def test_extended_backfill_is_used_only_when_flag_is_true(self):
+        with (
+            patch.dict(
+                "os.environ",
+                {
+                    "BACKTEST_EXTENDED_INTRADAY_HISTORY": "true",
+                },
+            ),
+            patch.object(engine, "_get_cached_data", return_value=None),
+            patch.object(engine, "_download_twelvedata") as normal,
+            patch.object(
+                engine, "_download_twelvedata_extended", return_value=self.frame
+            ) as extended,
+            patch.object(engine, "_save_cached_data"),
+        ):
+            result = engine.download_data("BTC", "15m")
+
+        self.assertIsNotNone(result)
+        extended.assert_called_once()
+        normal.assert_not_called()
+
 class TestTwelveDataHistoricalWindows(unittest.TestCase):
 
     def test_crypto_history_is_chunked_below_five_thousand_bars(self):
