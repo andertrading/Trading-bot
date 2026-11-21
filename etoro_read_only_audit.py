@@ -66,17 +66,17 @@ def run_audit(
         if isinstance(asset, Mapping) and asset.get("enabled") is True
     }
 
-    resolved: dict[str, int] = {}
+    resolved: dict[str, Mapping[str, Any]] = {}
     for symbol, asset in enabled_assets.items():
         item = _resolve_asset(client, symbol, asset)
         if item is not None:
-            resolved[symbol] = item["instrumentId"]
+            resolved[symbol] = item
 
     quotes_valid = False
     if resolved and len(resolved) == len(enabled_assets):
         try:
             client.get_realtime_quotes(
-                list(resolved.values()),
+                [item["instrumentId"] for item in resolved.values()],
                 now_utc,
                 max_age_seconds=30,
             )
@@ -87,8 +87,17 @@ def run_audit(
     instrument_report = [
         {
             "symbol": symbol,
-            "resolved": symbol in resolved,
-            "instrument_id": resolved.get(symbol),
+            "expected_asset_type": asset.get("type"),
+            "candidate_found": symbol in resolved,
+            "instrument_id": (
+                resolved[symbol]["instrumentId"] if symbol in resolved else None
+            ),
+            "instrument_type": (
+                resolved[symbol]["instrumentType"] if symbol in resolved else None
+            ),
+            "display_name": (
+                resolved[symbol]["displayname"] if symbol in resolved else None
+            ),
         }
         for symbol in enabled_assets
     ]
@@ -98,6 +107,7 @@ def run_audit(
         and quotes_valid
     )
     return {
+        "audit_scope": "read-only diagnostics; not authorization to trade",
         "account_snapshot_schema_valid": account_valid,
         "instrument_resolution": instrument_report,
         "complete_realtime_quotes_validated": quotes_valid,
