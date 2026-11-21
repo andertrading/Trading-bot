@@ -50,6 +50,14 @@ class TestTelegramResearchReport(unittest.TestCase):
         self.assertIn("VALIDACIONES PENDIENTES", report)
         self.assertIn("Spread not confirmed", report)
 
+
+    def test_report_displays_data_provider_and_ohlc_policy(self):
+        self.candidate["data_provider"] = "twelvedata"
+        self.candidate["price_adjustment_policy"] = "raw_unadjusted_intraday"
+        report = Bot.build_telegram_messages(self.scan)[1]
+        self.assertIn("Proveedor: <b>twelvedata</b>", report)
+        self.assertIn("raw_unadjusted_intraday", report)
+
     def test_report_discloses_unvalidated_probability_and_expiry(self):
         report = Bot.build_telegram_messages(self.scan)[1]
         self.assertIn("Probabilidad histórica: <b>NO VALIDADA</b>", report)
