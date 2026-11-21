@@ -16,6 +16,7 @@ from etoro_read_only import (
     normalize_realtime_quotes,
     normalize_account_snapshot,
     resolve_unique_instrument,
+    resolve_unique_instrument_by_symbol,
     normalize_cost_estimate,
     normalize_instrument_eligibility,
     validate_what_if_payload,
@@ -358,6 +359,64 @@ class InstrumentDiscoveryTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             client.search_instruments({}, page_number=0)
         session.request.assert_not_called()
+
+    def test_v2_symbol_search_uses_documented_endpoint_and_parameters(self):
+        session = Mock()
+        session.request.return_value = FakeResponse(data={
+            "results": [{
+                "instrumentId": 123,
+                "displayName": "Tesla",
+                "symbol": "TSLA",
+                "type": "Stocks",
+            }],
+            "pagination": {"hasNext": False, "nextPageToken": None, "pageSize": 100},
+        })
+        client = EtoroReadOnlyClient("app-key", "user-key", session=session)
+        result = client.search_instrument_by_symbol("TSLA")
+        args, kwargs = session.request.call_args
+        self.assertTrue(args[1].endswith("/api/v2/market-data/instruments"))
+        self.assertEqual(kwargs["params"], {"symbols": "TSLA", "pageSize": 100})
+        self.assertEqual(result.data["results"][0]["symbol"], "TSLA")
+
+    def test_v2_symbol_search_rejects_invalid_input_without_request(self):
+        session = Mock()
+        client = EtoroReadOnlyClient("app-key", "user-key", session=session)
+        for symbol in ("", "TSLA&other=true", "A" * 33):
+            with self.assertRaises(ValueError):
+                client.search_instrument_by_symbol(symbol)
+        session.request.assert_not_called()
+
+    def test_v2_symbol_response_is_normalized_only_for_one_exact_match(self):
+        response = EtoroResponse({
+            "results": [{
+                "instrumentId": 123,
+                "displayName": "Tesla",
+                "symbol": "TSLA",
+                "type": "Stocks",
+            }],
+            "pagination": {"hasNext": False, "nextPageToken": None, "pageSize": 100},
+        }, 200, {})
+        item = resolve_unique_instrument_by_symbol(response, "tsla")
+        self.assertEqual(item["instrumentId"], 123)
+        self.assertEqual(item["displayname"], "Tesla")
+        self.assertEqual(item["instrumentType"], "Stocks")
+
+    def test_v2_symbol_response_rejects_incomplete_pagination_and_duplicates(self):
+        incomplete = EtoroResponse({
+            "results": [],
+            "pagination": {"hasNext": True, "nextPageToken": "next", "pageSize": 100},
+        }, 200, {})
+        with self.assertRaises(EtoroAPIError):
+            resolve_unique_instrument_by_symbol(incomplete, "TSLA")
+        duplicate = EtoroResponse({
+            "results": [
+                {"instrumentId": 123, "displayName": "Tesla", "symbol": "TSLA", "type": "Stocks"},
+                {"instrumentId": 124, "displayName": "Tesla", "symbol": "TSLA", "type": "Stocks"},
+            ],
+            "pagination": {"hasNext": False, "nextPageToken": None, "pageSize": 100},
+        }, 200, {})
+        with self.assertRaises(EtoroAPIError):
+            resolve_unique_instrument_by_symbol(duplicate, "TSLA")
 
     def test_exact_unique_active_instrument_is_resolved(self):
         response = EtoroResponse(
