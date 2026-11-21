@@ -145,6 +145,58 @@ STRATEGIES = {
 }
 
 
+def _net_portfolio_cost_scenarios():
+    """Commission-only venue sensitivities; spreads remain a separate axis."""
+    common = {
+        "venue": "ETORO_REAL",
+        "stock_fee_per_side_usd": 1.0,
+        "crypto_rate_per_side": 0.01,
+    }
+    bitvavo_usdc_rates = {
+        "BTC": 0.0005,
+        "ETH": 0.0005,
+        "SOL": 0.0005,
+        "XRP": 0.0005,
+    }
+    maker_rates = {**bitvavo_usdc_rates, "XLM": 0.0015}
+    taker_rates = {**bitvavo_usdc_rates, "XLM": 0.0025}
+    return [
+        (
+            "ETORO_REAL_STANDARD_CRYPTO_FEE",
+            dict(common),
+            (
+                "eToro real stocks: $1 per side; ETFs: $0; crypto: 1% per side. "
+                "Account tier and actual instrument ticket remain to be confirmed."
+            ),
+        ),
+        (
+            "ETORO_STOCKS_BITVAVO_USDC_MAKER_XLM_EUR_MAKER",
+            {
+                **common,
+                "crypto_rate_by_asset": maker_rates,
+            },
+            (
+                "Hybrid commission proxy: eToro real stocks/ETFs; Bitvavo "
+                "BTC/ETH/SOL/XRP-USDC at 0.05% per side and XLM/EUR maker "
+                "at 0.15% per side. EUR/USDC conversion, market spread, "
+                "slippage, deposit/withdrawal and network costs excluded."
+            ),
+        ),
+        (
+            "ETORO_STOCKS_BITVAVO_USDC_TAKER_XLM_EUR_TAKER",
+            {
+                **common,
+                "crypto_rate_by_asset": taker_rates,
+            },
+            (
+                "Hybrid commission proxy: eToro real stocks/ETFs; Bitvavo "
+                "BTC/ETH/SOL/XRP-USDC at 0.05% per side and XLM/EUR taker "
+                "at 0.25% per side. EUR/USDC conversion, market spread, "
+                "slippage, deposit/withdrawal and network costs excluded."
+            ),
+        ),
+    ]
+
 
 def _snapshot_coverage(assets, timeframes, manifest):
     """Compare immutable snapshots with the configured asset/timeframe universe."""
@@ -794,25 +846,25 @@ def main():
             portfolio = bt.simulate_portfolio(
                 selected, capital_usd=bt.INITIAL_CAPITAL_USD
             )
-            for spread_bps in (0, 5, 10, 20):
-                net_portfolio = bt.simulate_portfolio(
-                    selected,
-                    capital_usd=bt.INITIAL_CAPITAL_USD,
-                    execution_costs={
-                        "venue": "ETORO_REAL",
-                        "spread_bps": spread_bps,
-                        "crypto_rate_per_side": 0.01,
-                        "stock_fee_per_side_usd": 1.0,
-                    },
-                )
-                net_portfolio_rows.append({
-                    "strategy": strategy_name,
-                    "timeframe": timeframe,
-                    "status": timeframe_universe_status,
-                    "broker_scenario": "ETORO_REAL_STANDARD_CRYPTO_FEE",
-                    "spread_bps_scenario": spread_bps,
-                    **net_portfolio["summary"],
-                })
+            for broker_scenario, cost_model, fee_model_note in _net_portfolio_cost_scenarios():
+                for spread_bps in (0, 5, 10, 20):
+                    net_portfolio = bt.simulate_portfolio(
+                        selected,
+                        capital_usd=bt.INITIAL_CAPITAL_USD,
+                        execution_costs={
+                            **cost_model,
+                            "spread_bps": spread_bps,
+                        },
+                    )
+                    net_portfolio_rows.append({
+                        "strategy": strategy_name,
+                        "timeframe": timeframe,
+                        "status": timeframe_universe_status,
+                        "broker_scenario": broker_scenario,
+                        "fee_model_note": fee_model_note,
+                        "spread_bps_scenario": spread_bps,
+                        **net_portfolio["summary"],
+                    })
             synchronized_rows.append({
                 "strategy": strategy_name,
                 "timeframe": timeframe,
