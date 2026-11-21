@@ -453,17 +453,17 @@ def validate_what_if_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
     """Validate the documented hypothetical-open schema before sending POST."""
     if not isinstance(payload, Mapping) or not payload:
         raise ValueError("El payload de costes hipotéticos debe ser un objeto no vacío")
-    unknown = set(payload).difference(WHAT_IF_ALLOWED_FIELDS)
+    unknown = [key for key in payload if key not in WHAT_IF_ALLOWED_FIELDS]
     if unknown:
-        raise ValueError(f"Campos no permitidos en costes hipotéticos: {sorted(unknown)}")
+        raise ValueError(f"Campos no permitidos en costes hipotéticos: {unknown!r}")
     if payload.get("action") != "open":
         raise ValueError("Solo se permite action='open'")
     transaction = payload.get("transaction")
     if not isinstance(transaction, str) or transaction not in {"buy", "sellShort"}:
         raise ValueError("transaction debe ser buy o sellShort")
 
-    has_id = "instrumentId" in payload and payload["instrumentId"] is not None
-    has_symbol = "symbol" in payload and payload["symbol"] is not None
+    has_id = "instrumentId" in payload
+    has_symbol = "symbol" in payload
     if has_id == has_symbol:
         raise ValueError("Debe indicarse exactamente uno de instrumentId o symbol")
     if has_id:
