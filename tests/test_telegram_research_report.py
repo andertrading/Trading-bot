@@ -109,6 +109,19 @@ class TestTelegramResearchReport(unittest.TestCase):
         self.assertIn("Caducidad de la señal:", report)
         self.assertNotIn("Caducidad de la señal: <b>NO CONFIGURADA</b>", report)
 
+    def test_report_recomputes_rr_instead_of_trusting_candidate_field(self):
+        self.candidate["risk_reward"] = 999
+        report = Bot.build_telegram_messages(self.scan)[1]
+        self.assertIn("Ratio riesgo/beneficio teórico: <b>2.00</b>", report)
+        self.assertIn("Beneficio teórico al TP: <b>5.00 USD</b>", report)
+        self.assertNotIn("999.00", report)
+
+    def test_report_marks_rr_unavailable_for_invalid_long_levels(self):
+        self.candidate["stop"] = 181.0
+        report = Bot.build_telegram_messages(self.scan)[1]
+        self.assertIn("Ratio riesgo/beneficio teórico: <b>N/D</b>", report)
+        self.assertIn("Beneficio teórico al TP: <b>N/D</b>", report)
+
     def test_candidate_without_valid_levels_does_not_crash(self):
         self.candidate["entry_reference"] = None
         self.candidate["stop"] = None
