@@ -543,15 +543,20 @@ class RealtimeQuoteValidationTests(unittest.TestCase):
         with self.assertRaises(EtoroAPIError):
             normalize_realtime_quotes(EtoroResponse(zero, 200, {}), [101], self.now)
 
-    def test_naive_or_non_utc_time_is_rejected(self):
+    def test_naive_time_is_rejected_and_explicit_offset_is_normalized_to_utc(self):
         with self.assertRaises(EtoroAPIError):
             normalize_realtime_quotes(self.response, [101], datetime(2026, 11, 21, 12, 0, 0))
-        non_utc = {"results": [dict(
+        offset_data = {"results": [dict(
             self.response.data["results"][0],
             date="2026-11-21T12:59:45+01:00",
         )]}
-        with self.assertRaises(EtoroAPIError):
-            normalize_realtime_quotes(EtoroResponse(non_utc, 200, {}), [101], self.now)
+        quotes = normalize_realtime_quotes(
+            EtoroResponse(offset_data, 200, {}), [101], self.now
+        )
+        self.assertEqual(
+            quotes[101].timestamp,
+            datetime(2026, 11, 21, 11, 59, 45, tzinfo=timezone.utc),
+        )
 
     def test_client_get_realtime_quotes_uses_strict_validation(self):
         session = Mock()
@@ -742,6 +747,24 @@ class InstrumentEligibilityTests(unittest.TestCase):
         duplicate = dict(self.response.data, eligibilities=[self.item, self.item])
         with self.assertRaises(EtoroAPIError):
             normalize_instrument_eligibility(EtoroResponse(duplicate, 200, {}), [101])
+
+    def test_currency_code_is_normalized_but_non_usd_is_rejected(self):
+        for currency in ("usd", " USD "):
+            with self.subTest(currency=currency):
+                normalized = dict(self.response.data, currency=currency)
+                result = normalize_instrument_eligibility(
+                    EtoroResponse(normalized, 200, {}), [101]
+                )
+                self.assertTrue(result[101].supports_long)
+
+        wrong_currency = dict(self.response.data, currency="EUR")
+        with self.assertRaises(EtoroAPIError):
+            normalize_instrument_eligibility(EtoroResponse(wrong_currency, 200, {}), [101])
+        invalid_currency = dict(self.response.data, currency=123)
+        with self.assertRaisesRegex(EtoroAPIError, "divisa.*no es válida"):
+            normalize_instrument_eligibility(
+                EtoroResponse(invalid_currency, 200, {}), [101]
+            )
 
     def test_wrong_currency_or_invalid_leverage_config_is_rejected(self):
         wrong_currency = dict(self.response.data, currency="EUR")
