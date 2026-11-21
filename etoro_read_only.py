@@ -872,10 +872,12 @@ class EtoroReadOnlyClient:
         params: Mapping[str, Any] | None = None,
         json_body: Mapping[str, Any] | None = None,
         allow_partial: bool = False,
+        client_id: int | None = None,
     ) -> EtoroResponse:
         # Internal allowlist is intentionally narrow; callers cannot supply URLs.
         allowed = {
             ("GET", "/api/v1/trading/info/real/pnl"),
+            ("GET", "/api/v2/trading/info/instrument-breakdown"),
             ("GET", "/api/v2/market-data/rates"),
             ("GET", "/api/v1/market-data/search"),
             ("POST", "/api/v2/trading/info/costs"),
@@ -891,6 +893,16 @@ class EtoroReadOnlyClient:
         )
         if (method, path) not in allowed and not is_candle_path:
             raise EtoroAPIError("Endpoint no permitido por el cliente de solo lectura")
+        if path == "/api/v2/trading/info/instrument-breakdown":
+            if (
+                method != "GET"
+                or isinstance(client_id, bool)
+                or not isinstance(client_id, int)
+                or client_id <= 0
+            ):
+                raise EtoroAPIError("CID inválido para el desglose de posiciones")
+        elif client_id is not None:
+            raise EtoroAPIError("CID no permitido para este endpoint")
         if path == "/api/v2/trading/info/costs":
             if method != "POST" or not isinstance(json_body, Mapping) or json_body.get("action") != "open":
                 raise EtoroAPIError("Solo se permite la estimación hipotética de apertura")
@@ -918,6 +930,8 @@ class EtoroReadOnlyClient:
             "x-request-id": str(uuid4()),
             "Accept": "application/json",
         }
+        if path == "/api/v2/trading/info/instrument-breakdown":
+            headers["CID"] = str(client_id)
         url = API_BASE_URL + path
 
         for attempt in range(self._max_attempts):
@@ -1038,6 +1052,16 @@ class EtoroReadOnlyClient:
     ) -> dict[int, EtoroInstrumentEligibility]:
         response = self.get_instrument_eligibility(instrument_ids, currency)
         return normalize_instrument_eligibility(response, instrument_ids)
+
+    def get_instrument_breakdown(self, client_id: int) -> EtoroResponse:
+        """Fetch the documented position-level breakdown for one client ID."""
+        if isinstance(client_id, bool) or not isinstance(client_id, int) or client_id <= 0:
+            raise ValueError("client_id debe ser un entero positivo")
+        return self._request(
+            "GET",
+            "/api/v2/trading/info/instrument-breakdown",
+            client_id=client_id,
+        )
 
     def get_account_pnl(self) -> EtoroResponse:
         return self._request("GET", "/api/v1/trading/info/real/pnl")
