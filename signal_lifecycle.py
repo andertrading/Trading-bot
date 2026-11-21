@@ -129,6 +129,11 @@ def build_signal_record(result: dict, generated_at: datetime | str,
         "potential_risk_pct": round(risk_pct, 4),
         "score": result.get("score"),
         "reasons": list(result.get("reasons") or []),
+        "validation_reasons": list(result.get("validation_reasons") or []),
+        "provisional_risk_pct": result.get("provisional_risk_pct"),
+        "data_age_minutes": result.get("data_age_minutes"),
+        "alert_sent": False,
+        "pending_notification_event": None,
         "probability": None,
         "probability_status": "NOT_CALIBRATED",
         "position_status": "UNKNOWN",
@@ -148,12 +153,12 @@ def advance_signal(signal: dict, now: datetime | str,
     current = _as_utc(now)
     expires = _as_utc(updated["expires_at"])
 
-    if not conditions_valid:
-        updated["status"] = "INVALIDATED"
-        event = "SIGNAL_INVALIDATED"
-    elif current >= expires:
+    if current >= expires:
         updated["status"] = "EXPIRED"
         event = "SIGNAL_EXPIRED"
+    elif not conditions_valid:
+        updated["status"] = "INVALIDATED"
+        event = "SIGNAL_INVALIDATED"
     elif latest_price is not None:
         price = _positive_number(latest_price, "latest_price")
         direction = updated.get("direction", "LONG")
