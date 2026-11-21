@@ -450,6 +450,9 @@ def main():
     pd.DataFrame(all_trades).to_csv("strategy_research_trades.csv", index=False)
     pd.DataFrame(all_errors).to_csv("strategy_research_errors.csv", index=False)
     pd.DataFrame(portfolio_rows).to_csv("strategy_research_portfolio.csv", index=False)
+    pd.DataFrame(oos_portfolio_rows).to_csv(
+        "strategy_research_oos_portfolio.csv", index=False
+    )
 
     print("\n=== PORTFOLIO COMPARISON (GROSS, COSTS NOT INCLUDED) ===")
     for row in portfolio_rows:
