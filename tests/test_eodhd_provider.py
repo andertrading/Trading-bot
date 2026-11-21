@@ -198,6 +198,23 @@ class TestEODHDProvider(unittest.TestCase):
 
 
 class TestEODHDDispatch(unittest.TestCase):
+    def test_live_engine_declares_consistent_split_adjustment_policy(self):
+        sample = pd.DataFrame(
+            {"Open": [100.0], "High": [102.0], "Low": [99.0], "Close": [101.0], "Volume": [10.0]},
+            index=pd.DatetimeIndex(["2026-11-20"], tz="UTC"),
+        )
+        intraday = engine._attach_market_data_metadata(sample, "AAPL", "15m")
+        daily_stock = engine._attach_market_data_metadata(sample, "AAPL", "1d")
+        daily_etf = engine._attach_market_data_metadata(sample, "CSPX", "1d")
+
+        self.assertEqual(intraday.attrs["price_adjustment_policy"], "raw_unadjusted_intraday")
+        self.assertEqual(daily_stock.attrs["price_adjustment_policy"], "split_adjusted_ohlc_no_dividend_adjustment")
+        self.assertEqual(daily_etf.attrs["price_adjustment_policy"], "split_adjusted_ohlc_no_dividend_adjustment")
+        self.assertEqual(daily_etf.attrs["data_provider"], "eodhd")
+        self.assertTrue(intraday.attrs["price_adjustment_verified"])
+        self.assertTrue(daily_stock.attrs["price_adjustment_verified"])
+        self.assertTrue(daily_etf.attrs["price_adjustment_verified"])
+
     def test_daily_london_etf_uses_eodhd(self):
         expected = pd.DataFrame(
             {"Open": [100.0], "High": [102.0], "Low": [99.0], "Close": [101.0], "Volume": [10.0]},
