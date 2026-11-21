@@ -1216,24 +1216,47 @@ def _log_dataframe_timestamps(provider, asset, interval, df):
 def _twelvedata_request(params):
     global _last_api_request
 
-    with _api_lock:
-        elapsed = time.monotonic() - _last_api_request
-        wait_time = TWELVE_DATA_MIN_INTERVAL - elapsed
+    for attempt in range(3):
+        with _api_lock:
+            elapsed = time.monotonic() - _last_api_request
+            wait_time = TWELVE_DATA_MIN_INTERVAL - elapsed
 
-        if wait_time > 0:
-            logger.info(
-                "Límite Twelve Data: esperando %.1f segundos",
-                wait_time,
+            if wait_time > 0:
+                logger.info(
+                    "Límite Twelve Data: esperando %.1f segundos",
+                    wait_time,
+                )
+                time.sleep(wait_time)
+
+            _last_api_request = time.monotonic()
+            response = requests.get(
+                TWELVE_DATA_URL,
+                params=params,
+                timeout=30,
             )
-            time.sleep(wait_time)
 
-        _last_api_request = time.monotonic()
+        if response.status_code != 429 and response.status_code < 500:
+            return response
 
-        return requests.get(
-            TWELVE_DATA_URL,
-            params=params,
-            timeout=30,
+        if attempt == 2:
+            return response
+
+        retry_after = response.headers.get("Retry-After")
+        try:
+            retry_delay = float(retry_after)
+        except (TypeError, ValueError):
+            retry_delay = 10.0 * (2 ** attempt)
+
+        retry_delay = min(max(retry_delay, 1.0), 60.0)
+        logger.warning(
+            "Twelve Data HTTP %s; reintento %s/2 en %.1f segundos",
+            response.status_code,
+            attempt + 1,
+            retry_delay,
         )
+        time.sleep(retry_delay)
+
+    return response
 
 
 def _download_twelvedata(
@@ -1474,10 +1497,11 @@ def _download_twelvedata(
 
         return df
 
-    except requests.RequestException:
+    except requests.RequestException as exc:
         logger.error(
-            "Error de conexión Twelve Data para %s",
+            "Error de conexión Twelve Data para %s: %s",
             asset,
+            exc,
         )
         return None
 
