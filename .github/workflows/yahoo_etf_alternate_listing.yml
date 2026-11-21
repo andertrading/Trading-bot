@@ -1,0 +1,141 @@
+name: Trading Bot 3.0 - Yahoo ETF Alternate Listings
+
+on:
+  workflow_dispatch:
+
+  pull_request:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/yahoo_etf_alternate_listing.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  yahoo-etf-diagnostic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Descargar repositorio
+        uses: actions/checkout@v4
+      - name: Preparar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Instalar dependencias
+        run: |
+          python -m pip install --upgrade pip
+          pip install pandas numpy requests
+      - name: Comparar cotizaciones LSE y SIX sin cambiar el proveedor activo
+        run: |
+          python - <<'PY'
+          from datetime import datetime, timedelta, timezone
+          import sys
+          import time
+          import numpy as np
+          import pandas as pd
+          import requests
+
+          BASE = "https://query1.finance.yahoo.com/v8/finance/chart"
+          SYMBOLS = {
+              "CSPX_LSE": ("CSPX.L", "USD", "LSE"),
+              "CSPX_SIX": ("CSSPX.SW", "USD", "SIX"),
+              "CNDX_LSE": ("CNDX.L", "USD", "LSE"),
+              "CNDX_SIX": ("CSNDX.SW", "USD", "SIX"),
+          }
+          INTERVALS = {"15m": ("15m", 60), "1d": ("1d", 3650)}
+          session = requests.Session()
+          session.headers.update({
+              "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120.0 Safari/537.36"
+          })
+          failures = []
+          print("DIAGNÓSTICO ETF: comparación LSE frente a SIX")
+          print("No se modifica PROVIDER_MAP ni config.py.")
+          print("=" * 78)
+
+          for label, (symbol, expected_currency, exchange) in SYMBOLS.items():
+              for interval, (yahoo_interval, lookback_days) in INTERVALS.items():
+                  now = datetime.now(timezone.utc)
+                  params = {
+                      "period1": int((now - timedelta(days=lookback_days)).timestamp()),
+                      "period2": int(now.timestamp()),
+                      "interval": yahoo_interval,
+                      "events": "history",
+                      "includeAdjustedClose": "true",
+                  }
+                  print(f"\n{label} | {symbol} | {exchange} | {interval}")
+                  try:
+                      response = session.get(f"{BASE}/{symbol}", params=params, timeout=30)
+                      print(f"HTTP: {response.status_code}")
+                      response.raise_for_status()
+                      chart = response.json().get("chart", {})
+                      if chart.get("error"):
+                          raise RuntimeError(str(chart["error"]))
+                      results = chart.get("result") or []
+                      if not results:
+                          raise RuntimeError("Yahoo no devolvió result")
+                      result = results[0]
+                      meta = result.get("meta", {})
+                      currency = meta.get("currency")
+                      exchange_name = meta.get("fullExchangeName") or meta.get("exchangeName")
+                      print(f"Moneda: {currency} | Mercado: {exchange_name}")
+                      if currency != expected_currency:
+                          raise RuntimeError(f"Moneda incompatible: {currency}")
+                      timestamps = result.get("timestamp") or []
+                      quote_list = result.get("indicators", {}).get("quote") or []
+                      if not timestamps or not quote_list:
+                          raise RuntimeError("Histórico vacío")
+                      quote = quote_list[0]
+                      df = pd.DataFrame({
+                          "Open": quote.get("open", []),
+                          "High": quote.get("high", []),
+                          "Low": quote.get("low", []),
+                          "Close": quote.get("close", []),
+                          "Volume": quote.get("volume", []),
+                      }, index=pd.to_datetime(timestamps, unit="s", utc=True))
+                      # Excluir solo la vela aún en curso. Las velas cerradas
+                      # defectuosas se informan; nunca se reparan ni se ocultan.
+                      if interval == "15m":
+                          df = df[df.index <= pd.Timestamp(now - timedelta(minutes=15))]
+                      else:
+                          df = df[df.index.date < now.date()]
+                      for column in ("Open", "High", "Low", "Close"):
+                          df[column] = pd.to_numeric(df[column], errors="coerce")
+                      ohlc = df[["Open", "High", "Low", "Close"]]
+                      finite = np.isfinite(ohlc.to_numpy()).all(axis=1)
+                      positive = (ohlc > 0).all(axis=1)
+                      coherent = (
+                          (df["High"] >= df["Low"])
+                          & (df["High"] >= df["Open"])
+                          & (df["High"] >= df["Close"])
+                          & (df["Low"] <= df["Open"])
+                          & (df["Low"] <= df["Close"])
+                      )
+                      invalid = ~(finite & positive & coherent)
+                      print(f"Velas cerradas: {len(df)}")
+                      print(f"Velas OHLC defectuosas: {int(invalid.sum())}")
+                      print(f"Última vela UTC: {df.index[-1] if not df.empty else 'N/A'}")
+                      if invalid.any():
+                          print("MUESTRA DE VELAS DEFECTUOSAS:")
+                          print(df.loc[invalid].head(10).to_string())
+                      if len(df) < 220:
+                          failures.append(f"{symbol} {interval}: menos de 220 velas")
+                      if invalid.any():
+                          failures.append(f"{symbol} {interval}: OHLC defectuoso")
+                      if df.empty:
+                          failures.append(f"{symbol} {interval}: histórico vacío")
+                  except Exception as exc:
+                      failures.append(f"{symbol} {interval}: {type(exc).__name__}: {exc}")
+                      print(f"ERROR: {type(exc).__name__}: {exc}")
+                  time.sleep(2)
+
+          print("\n" + "=" * 78)
+          print("RESUMEN")
+          for failure in failures:
+              print("FALLO:", failure)
+          if failures:
+              print("El diagnóstico ha terminado con incidencias que requieren revisión.")
+          else:
+              print("Todas las cotizaciones y temporalidades superan las comprobaciones básicas.")
+          PY
