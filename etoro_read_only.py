@@ -634,6 +634,7 @@ class EtoroInstrumentEligibility:
     instrument_id: int
     symbol: str
     allow_open_position: bool
+    supports_long: bool
     allow_mit_orders: bool
     allow_entry_orders: bool
     allow_exit_orders: bool
@@ -791,6 +792,9 @@ def normalize_instrument_eligibility(
             instrument_id=instrument_id,
             symbol=symbol,
             allow_open_position=allow_open,
+            supports_long=allow_open and any(
+                config["direction"] == "LONG" for config in validated_configs
+            ),
             allow_mit_orders=item["allowMitOrders"],
             allow_entry_orders=item["allowEntryOrders"],
             allow_exit_orders=item["allowExitOrders"],
