@@ -41,6 +41,7 @@ The eToro public fee schedule says stock commissions vary by country and exchang
 
 ## Backtest interpretation
 
+- Daily backtests use at most the last two years of bars, matching the data engine's validated equity/crypto gap window; 15-minute backtests use the provider's available history.
 - `result_R` is the gross strategy result.
 - `result_R_after_known_fees` subtracts only the fees that the model can calculate from the published baseline and configured inputs. It is **not** an all-in net result while any cost is unpriced.
 - `costs_complete` is the explicit all-cost completeness flag.
