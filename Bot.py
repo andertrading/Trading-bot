@@ -861,7 +861,7 @@ def build_telegram_messages(scan_result):
             "━━━━━━━━━━━━━━━━━━\n"
             "Probabilidad histórica: <b>NO VALIDADA</b>\n"
             f"Caducidad de la señal: <b>{expiry_text}</b>\n"
-            f"Ventana para entrar: <b>{escape_html(entry_window_text)}</b>\\n"
+            f"Ventana para entrar: <b>{escape_html(entry_window_text)}</b>\n"
             f"Duración estimada de operación: <b>{escape_html(duration_text)}</b>\n"
             "Noticias y costes: <b>NO INCORPORADOS AÚN</b>\n"
             f"{escape_html(report_closing)}\n"
