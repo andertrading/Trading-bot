@@ -224,7 +224,7 @@ def _snapshot_metadata(
         "auto_adjust": None,
         "adjustment_policy": "as_returned_by_provider_unverified",
         "closed_candle_policy": (
-            "Se excluye la última fila descargada"
+            "El motor live excluye velas incompletas antes de devolver el histórico"
         ),
         "downloaded_at_utc": _utc_now(),
         "first_timestamp": str(data.index[0]),
