@@ -131,165 +131,70 @@ class TestBacktestV3(unittest.TestCase):
 
         self.assertFalse(backtest_v3._valid_ohlc(data))
 
-    def test_duplicate_timestamps_are_removed(self):
+    def test_backtest_uses_live_data_engine_provider(self):
+        data = self.make_data()
+        with (
+            patch.object(backtest_v3, "BACKTEST_DATA_MODE", "download"),
+            patch.object(backtest_v3, "download_data", return_value=data) as live_mock,
+            patch.object(backtest_v3, "_save_snapshot", return_value=None),
+        ):
+            result = backtest_v3.download_history("AAPL", "15m", asset="AAPL")
+        self.assertIsNotNone(result)
+        live_mock.assert_called_once_with("AAPL", "15m")
+        self.assertEqual(backtest_v3._provider_for_asset("AAPL", "15m"), "twelvedata")
+
+    def test_backtest_rejects_duplicate_timestamps_from_provider(self):
         data = self.make_data()
         duplicated = pd.concat([data, data.iloc[[-1]]])
-
         with (
-            patch.object(
-                backtest_v3,
-                "BACKTEST_DATA_MODE",
-                "download",
-            ),
-            patch.object(
-                backtest_v3.yf,
-                "download",
-                return_value=duplicated,
-            ),
-            patch.object(
-                backtest_v3,
-                "_save_snapshot",
-                return_value=None,
-            ),
+            patch.object(backtest_v3, "BACKTEST_DATA_MODE", "download"),
+            patch.object(backtest_v3, "download_data", return_value=duplicated),
         ):
-            cleaned = backtest_v3.download_history(
-                "AAPL",
-                "15m",
-            )
+            result = backtest_v3.download_history("AAPL", "15m", asset="AAPL")
+        self.assertIsNone(result)
+        self.assertIn("timestamps duplicados", backtest_v3.DOWNLOAD_ERRORS[("AAPL", "15m")])
 
-        self.assertIsNotNone(cleaned)
-        self.assertFalse(cleaned.index.has_duplicates)
-
-    def test_download_excludes_incomplete_last_ohlc_candle(self):
+    def test_backtest_does_not_drop_an_additional_closed_candle(self):
         data = self.make_data()
-        data.iloc[-1, data.columns.get_loc("High")] = 1.0
-        last_timestamp = data.index[-1]
-
         with (
-            patch.object(
-                backtest_v3,
-                "BACKTEST_DATA_MODE",
-                "download",
-            ),
-            patch.object(
-                backtest_v3.yf,
-                "download",
-                return_value=data,
-            ),
-            patch.object(
-                backtest_v3,
-                "_save_snapshot",
-                return_value=None,
-            ),
+            patch.object(backtest_v3, "BACKTEST_DATA_MODE", "download"),
+            patch.object(backtest_v3, "download_data", return_value=data),
+            patch.object(backtest_v3, "_save_snapshot", return_value=None),
         ):
-            cleaned = backtest_v3.download_history(
-                "AAPL",
-                "15m",
-            )
+            result = backtest_v3.download_history("AAPL", "15m", asset="AAPL")
+        self.assertEqual(len(result), len(data))
+        self.assertEqual(result.index[-1], data.index[-1])
 
-        self.assertIsNotNone(cleaned)
-        self.assertEqual(len(cleaned), len(data) - 1)
-        self.assertNotIn(last_timestamp, cleaned.index)
-
-    def test_download_rejects_conflicting_duplicate_timestamps(self):
-        data = self.make_data()
-        conflicting = data.iloc[[-1]].copy()
-
-        for column in ("Open", "High", "Low", "Close"):
-            conflicting[column] += 0.5
-
-        duplicated = pd.concat([data, conflicting])
-
-        with (
-            patch.object(
-                backtest_v3,
-                "BACKTEST_DATA_MODE",
-                "download",
-            ),
-            patch.object(
-                backtest_v3.yf,
-                "download",
-                return_value=duplicated,
-            ),
-        ):
-            cleaned = backtest_v3.download_history(
-                "AAPL",
-                "15m",
-            )
-
-        self.assertIsNone(cleaned)
-        self.assertIn(
-            "timestamp duplicado conflictivo",
-            backtest_v3.DOWNLOAD_ERRORS[("AAPL", "15m")],
-        )
-
-    def test_download_rejects_incoherent_history(self):
+    def test_backtest_rejects_incoherent_history_from_provider(self):
         data = self.make_data()
         data.loc[data.index[10], "High"] = 1.0
-
         backtest_v3.EXCLUDED_OHLC_CANDLES.clear()
-
-        # Capturamos el mensaje esperado del rechazo OHLC.
-        # El test sigue comprobando el rechazo, pero evita
-        # imprimir un falso error de AAPL en la consola.
         with (
-            patch.object(
-                backtest_v3,
-                "BACKTEST_DATA_MODE",
-                "download",
-            ),
-            patch.object(
-                backtest_v3.yf,
-                "download",
-                return_value=data,
-            ),
+            patch.object(backtest_v3, "BACKTEST_DATA_MODE", "download"),
+            patch.object(backtest_v3, "download_data", return_value=data),
             redirect_stdout(StringIO()),
         ):
-            result = backtest_v3.download_history(
-                "AAPL",
-                "15m",
-            )
-
+            result = backtest_v3.download_history("AAPL", "15m", asset="AAPL")
         self.assertIsNone(result)
+        self.assertIn("OHLC incoherentes", backtest_v3.DOWNLOAD_ERRORS[("AAPL", "15m")])
+        self.assertEqual(len(backtest_v3.EXCLUDED_OHLC_CANDLES), 1)
 
-        self.assertIn(
-            "OHLC incoherentes",
-            backtest_v3.DOWNLOAD_ERRORS[("AAPL", "15m")],
-        )
-
-        self.assertEqual(
-            len(backtest_v3.EXCLUDED_OHLC_CANDLES),
-            1,
-        )
-
-    def test_download_rejects_missing_ohlc_instead_of_dropping_row(self):
+    def test_backtest_rejects_missing_ohlc_in_provider_history(self):
         data = self.make_data()
         data.iloc[10, data.columns.get_loc("Close")] = float("nan")
-
         with (
-            patch.object(
-                backtest_v3,
-                "BACKTEST_DATA_MODE",
-                "download",
-            ),
-            patch.object(
-                backtest_v3.yf,
-                "download",
-                return_value=data,
-            ),
+            patch.object(backtest_v3, "BACKTEST_DATA_MODE", "download"),
+            patch.object(backtest_v3, "download_data", return_value=data),
         ):
-            result = backtest_v3.download_history(
-                "AAPL",
-                "15m",
-            )
-
+            result = backtest_v3.download_history("AAPL", "15m", asset="AAPL")
         self.assertIsNone(result)
+        self.assertIn("Close contiene precios ausentes", backtest_v3.DOWNLOAD_ERRORS[("AAPL", "15m")])
 
-        self.assertIn(
-            "valores ausentes",
-            backtest_v3.DOWNLOAD_ERRORS[("AAPL", "15m")],
-        )
-
+    def test_provider_mapping_matches_live_routing(self):
+        self.assertEqual(backtest_v3._provider_for_asset("BTC", "15m"), "twelvedata")
+        self.assertEqual(backtest_v3._provider_for_asset("CSPX", "15m"), "yahoo")
+        self.assertEqual(backtest_v3._provider_for_asset("CSPX", "1d"), "eodhd")
+        self.assertEqual(backtest_v3._provider_for_asset("CNDX", "1d"), "eodhd")
     def test_run_backtest_rejects_invalid_history_before_indicators(self):
         data = self.make_execution_data()
         data.iloc[6, data.columns.get_loc("High")] = 1.0
