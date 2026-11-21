@@ -270,7 +270,7 @@ class InstrumentDiscoveryTests(unittest.TestCase):
 
     def test_exact_unique_active_instrument_is_resolved(self):
         response = EtoroResponse(
-            {"items": [self.item]},
+            {"items": [self.item], "totalItems": 1},
             200,
             {},
         )
