@@ -33,7 +33,7 @@ jobs:
           import yfinance as yf
 
           report = {}
-          for symbol in ("CSPX.L", "CNDX.L"):
+          for symbol in ("CSPX.L", "CNDX.L", "CSSPX.SW", "CSNDX.SW"):
               report[symbol] = {}
               for repair in (False, True):
                   df = yf.Ticker(symbol).history(
@@ -100,3 +100,7 @@ jobs:
             CSPX.L_repair_true.csv
             CNDX.L_repair_false.csv
             CNDX.L_repair_true.csv
+            CSSPX.SW_repair_false.csv
+            CSSPX.SW_repair_true.csv
+            CSNDX.SW_repair_false.csv
+            CSNDX.SW_repair_true.csv
