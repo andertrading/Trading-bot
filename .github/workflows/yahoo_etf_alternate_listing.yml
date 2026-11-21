@@ -31,6 +31,7 @@ jobs:
         run: |
           python - <<'PY'
           from datetime import datetime, timedelta, timezone
+          from email.utils import parsedate_to_datetime
           import time
           import numpy as np
           import pandas as pd
@@ -82,12 +83,33 @@ jobs:
                       print(f"HTTP inicial: {response.status_code}", flush=True)
 
                       if response.status_code == 429:
-                          retry_after = response.headers.get("Retry-After", "")
+                          retry_after = response.headers.get("Retry-After", "").strip()
                           try:
                               wait_seconds = int(retry_after)
                           except (TypeError, ValueError):
-                              wait_seconds = 90
-                          wait_seconds = min(max(wait_seconds, 60), 180)
+                              try:
+                                  retry_date = parsedate_to_datetime(retry_after)
+                                  if retry_date.tzinfo is None:
+                                      retry_date = retry_date.replace(tzinfo=timezone.utc)
+                                  wait_seconds = max(
+                                      0,
+                                      int((retry_date - datetime.now(timezone.utc)).total_seconds()),
+                                  )
+                              except (TypeError, ValueError, OverflowError):
+                                  wait_seconds = 90
+
+                          # Nunca reintentar antes de un Retry-After largo.
+                          # Si supera el presupuesto del diagnóstico, abortar.
+                          if wait_seconds > 180:
+                              print(
+                                  f"Retry-After={wait_seconds} s supera el límite "
+                                  "de espera del diagnóstico. Se aborta sin reintentar.",
+                                  flush=True,
+                              )
+                              rate_limited = True
+                              break
+
+                          wait_seconds = max(wait_seconds, 5)
                           print(
                               f"Yahoo ha limitado las peticiones. "
                               f"Retry-After={retry_after or 'no indicado'}. "
