@@ -290,6 +290,57 @@ def _market_close_time(asset, session_date):
     return regular_close
 
 
+def _filter_out_of_session_intraday(df, asset):
+    """
+    Excluye velas intradía etiquetadas fuera de la sesión regular.
+
+    Los proveedores pueden devolver barras de pre/posmercado o marcas
+    posteriores al cierre anticipado. Solo se excluyen en días que el
+    calendario reconoce como sesiones; las velas en festivos se conservan
+    para que la validación estricta las rechace.
+    """
+    if (
+        df is None
+        or df.empty
+        or asset in CRYPTO_ASSETS
+        or not isinstance(df.index, pd.DatetimeIndex)
+        or df.index.tz is None
+    ):
+        return df
+
+    market_tz, regular_open, _ = _session_for_asset(asset)
+    keep = []
+    excluded = []
+
+    for timestamp in df.index:
+        local = timestamp.tz_convert(market_tz)
+        session_date = local.date()
+
+        if not _is_trading_day(session_date, asset):
+            keep.append(True)
+            continue
+
+        close_time = _market_close_time(asset, session_date)
+        local_time = local.time().replace(tzinfo=None)
+        in_regular_session = regular_open <= local_time < close_time
+        keep.append(in_regular_session)
+
+        if not in_regular_session:
+            excluded.append(local.isoformat())
+
+    if not excluded:
+        return df
+
+    logger.warning(
+        "VELAS FUERA DE SESIÓN EXCLUIDAS | %s | cantidad=%s | ejemplos=%s",
+        asset,
+        len(excluded),
+        excluded[:5],
+    )
+
+    return df.loc[keep].copy()
+
+
 # ---------------------------------------------------------------------
 # CONFIGURACION Y CACHÉ
 # ---------------------------------------------------------------------
@@ -1345,6 +1396,9 @@ def _download_twelvedata(
             interval,
             df,
         )
+
+        if interval == "15m":
+            df = _filter_out_of_session_intraday(df, asset)
 
         df = _remove_incomplete_candle(
             df,
