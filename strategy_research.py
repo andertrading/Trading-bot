@@ -53,7 +53,12 @@ def _candidate(data, asset, timeframe, index, reasons):
 
 
 def baseline(data, asset, timeframe, index=-1):
-    return strategies.evaluate_signal_at(data, asset, timeframe, index)
+    signal = strategies.evaluate_signal_at(data, asset, timeframe, index)
+    if signal.get("action") == "BUY CANDIDATE":
+        # Equalize portfolio risk tier across all research hypotheses.
+        signal = dict(signal)
+        signal["score"] = 85
+    return signal
 
 
 def trend_pullback_reclaim(data, asset, timeframe, index=-1):
