@@ -1,0 +1,102 @@
+name: One-off Yahoo ETF OHLC Diagnostic
+
+on:
+  push:
+    branches:
+      - oneoff/yahoo-etf-ohlc-diagnostic-20261121
+
+permissions:
+  contents: read
+
+jobs:
+  diagnostic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install yfinance
+        run: python -m pip install yfinance==0.2.65 pandas
+
+      - name: Compare Yahoo raw and repaired daily OHLC
+        run: |
+          python - <<'PY'
+          import json
+          import numpy as np
+          import pandas as pd
+          import yfinance as yf
+
+          report = {}
+          for symbol in ("CSPX.L", "CNDX.L"):
+              report[symbol] = {}
+              for repair in (False, True):
+                  df = yf.Ticker(symbol).history(
+                      start="2021-11-21",
+                      end="2026-11-21",
+                      interval="1d",
+                      auto_adjust=False,
+                      actions=True,
+                      repair=repair,
+                      timeout=30,
+                  )
+                  label = "repair_true" if repair else "repair_false"
+                  df.to_csv(f"{symbol}_{label}.csv")
+                  required = ["Open", "High", "Low", "Close"]
+                  values = df[required].apply(pd.to_numeric, errors="coerce")
+                  finite = np.isfinite(values.to_numpy(dtype=float)).all(axis=1)
+                  coherent = (
+                      (values["High"] >= values["Low"])
+                      & (values["High"] >= values["Open"])
+                      & (values["High"] >= values["Close"])
+                      & (values["Low"] <= values["Open"])
+                      & (values["Low"] <= values["Close"])
+                  )
+                  invalid = ~(finite & coherent)
+                  report[symbol][label] = {
+                      "rows": int(len(df)),
+                      "nonfinite_ohlc": int((~finite).sum()),
+                      "incoherent_ohlc": int((finite & ~coherent).sum()),
+                      "first_date": str(df.index.min()) if len(df) else None,
+                      "last_date": str(df.index.max()) if len(df) else None,
+                      "sample_invalid_rows": [
+                          {
+                              "date": str(idx),
+                              **{
+                                  col: (
+                                      float(row[col])
+                                      if pd.notna(row[col]) else None
+                                  )
+                                  for col in required
+                              },
+                          }
+                          for idx, row in df.loc[invalid].head(25).iterrows()
+                      ],
+                  }
+                  print(
+                      symbol, label,
+                      "rows=", len(df),
+                      "nonfinite=", int((~finite).sum()),
+                      "incoherent=", int((finite & ~coherent).sum()),
+                  )
+
+          with open("yahoo_etf_ohlc_diagnostic.json", "w", encoding="utf-8") as f:
+              json.dump(report, f, ensure_ascii=False, indent=2)
+          PY
+
+      - name: Upload Yahoo ETF diagnostics
+        uses: actions/upload-artifact@v4
+        with:
+          name: yahoo-etf-ohlc-diagnostic-2026-11-21
+          retention-days: 14
+          path: |
+            yahoo_etf_ohlc_diagnostic.json
+            CSPX.L_repair_false.csv
+            CSPX.L_repair_true.csv
+            CNDX.L_repair_false.csv
+            CNDX.L_repair_true.csv
