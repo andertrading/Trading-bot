@@ -13,12 +13,12 @@ class TestEtoroTransactionCosts(unittest.TestCase):
             patch.object(costs, "ETORO_EXECUTION_PRICE_BASIS_CONFIRMED", True),
         )
 
-    def test_real_stock_uses_conservative_two_dollar_fee_each_side(self):
+    def test_real_stock_uses_one_dollar_fee_each_side_for_spain_us_share(self):
         result = costs.estimate_etoro_trade_costs(
             "AAPL", 100.0, 110.0, 1.0
         )
         self.assertTrue(result["valid"])
-        self.assertEqual(result["commission_cost"], 4.0)
+        self.assertEqual(result["commission_cost"], 2.0)
         self.assertFalse(result["complete"])
         self.assertIn("live_market_bid_ask_spread_missing", result["unpriced_costs"])
 
@@ -319,7 +319,7 @@ class TestEtoroTransactionCosts(unittest.TestCase):
             )
         self.assertTrue(result["complete"])
         self.assertEqual(result["unpriced_costs"], [])
-        self.assertAlmostEqual(result["known_costs_total"], 4.105)
+        self.assertAlmostEqual(result["known_costs_total"], 2.105)
 
 
 if __name__ == "__main__":

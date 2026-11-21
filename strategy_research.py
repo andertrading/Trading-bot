@@ -355,6 +355,7 @@ def main():
     all_summary = []
     all_walk_forward = []
     all_trades = []
+    all_oos_trades = []
     all_errors = []
     portfolio_rows = []
     oos_portfolio_rows = []
@@ -504,11 +505,14 @@ def main():
                         history_start, history_end,
                     )
                 )
-                strategy_oos_trades.extend(
-                    _out_of_sample_trades(
-                        trades, history_start, history_end
-                    )
+                pair_oos_trades = _out_of_sample_trades(
+                    trades, history_start, history_end
                 )
+                strategy_oos_trades.extend(pair_oos_trades)
+                for oos_trade in pair_oos_trades:
+                    item = dict(oos_trade)
+                    item["strategy"] = strategy_name
+                    all_oos_trades.append(item)
                 print(
                     f"{asset} {timeframe}: n={metrics['trades']} "
                     f"avgR={metrics['average_R']:.4f} "
@@ -538,6 +542,11 @@ def main():
             "portfolio_calendar_comparable": False,
             **oos_portfolio["summary"],
         })
+
+    broker_scenario_rows = _broker_cost_sensitivity_rows(all_oos_trades)
+    pd.DataFrame(broker_scenario_rows).to_csv(
+        "strategy_research_broker_cost_scenarios.csv", index=False
+    )
 
     failed_pairs = sorted({
         (str(row["asset"]).upper(), str(row["timeframe"]).lower())
@@ -591,6 +600,272 @@ def main():
             "max_DD_USD=", round(row.get("max_drawdown_usd", 0.0), 2),
             "accepted=", row.get("trades_accepted", 0),
         )
+
+
+
+
+XTB_OMI_SYMBOLS = {
+    "AAPL": "AAPL.US",
+    "MSFT": "MSFT.US",
+    "NVDA": "NVDA.US",
+    "TSLA": "TSLA.US",
+    "TTWO": "TTWO.US",
+    "CSPX": "CSPX.UK",
+    "CNDX": "CNDX.UK",
+}
+
+BITVAVO_EUR_PAIRS = {
+    "BTC": "BTC/EUR",
+    "ETH": "ETH/EUR",
+    "SOL": "SOL/EUR",
+    "XLM": "XLM/EUR",
+    "XRP": "XRP/EUR",
+}
+
+def _broker_cost_sensitivity_rows(
+    oos_trades,
+    assets_config=None,
+    spread_bps_values=(0, 5, 10, 20),
+    xtb_monthly_turnover_limit_usd=100000.0,
+):
+    """Compare published-fee scenarios without pretending historical spreads are known.
+
+    This is a per-trade expectancy sensitivity report, not a portfolio equity
+    curve. XTB zero-commission rows are conditional on eligible real OMI
+    instruments, a USD account for USD-quoted assets, monthly OMI turnover
+    below the EUR 100k threshold (approximated conservatively in USD), and no
+    additional turnover from activity outside this research strategy.
+    Bitvavo rows assume EUR spot markets and its standard Category A fees.
+    """
+    assets_config = assets_config or bt.ASSETS
+    prepared = []
+
+    for source in oos_trades or []:
+        trade = dict(source)
+        asset = str(trade.get("asset", "")).upper()
+        config = assets_config.get(asset, {})
+        asset_type = str(config.get("type", "")).upper()
+        currency = str(config.get("currency", "")).upper()
+        try:
+            entry = float(trade["entry"])
+            exit_price = float(trade["exit"])
+            quantity = float(trade["hypothetical_quantity"])
+            risk_budget = float(trade["hypothetical_risk_budget_usd"])
+            gross_pnl = float(trade["hypothetical_gross_pnl_usd"])
+            entry_time = _utc_timestamp(trade["entry_time"])
+            exit_time = _utc_timestamp(trade["exit_time"])
+        except (KeyError, TypeError, ValueError, OverflowError):
+            continue
+
+        values = (entry, exit_price, quantity, risk_budget, gross_pnl)
+        if (
+            asset_type not in {"STOCK", "ETF", "CRYPTO"}
+            or not all(math.isfinite(value) for value in values)
+            or min(entry, exit_price, quantity, risk_budget) <= 0
+        ):
+            continue
+
+        trade["_asset"] = asset
+        trade["_asset_type"] = asset_type
+        trade["_currency"] = currency
+        trade["_entry_notional"] = entry * quantity
+        trade["_exit_notional"] = exit_price * quantity
+        trade["_turnover"] = (entry + exit_price) * quantity
+        trade["_risk_budget"] = risk_budget
+        trade["_gross_pnl"] = gross_pnl
+        trade["_entry_month"] = entry_time.strftime("%Y-%m")
+        trade["_exit_month"] = exit_time.strftime("%Y-%m")
+        prepared.append(trade)
+
+    if not prepared:
+        return []
+
+    # XTB's advertised 0% OMI commission depends on monthly turnover. Estimate
+    # turnover for each research strategy across all stock/ETF executions.
+    monthly_turnover = {}
+    strategy_currency_ok = {}
+    strategy_instrument_ok = {}
+    for trade in prepared:
+        if trade["_asset_type"] not in {"STOCK", "ETF"}:
+            continue
+        strategy = str(trade.get("strategy", "unknown"))
+        monthly_turnover.setdefault(strategy, {})
+        strategy_currency_ok[strategy] = (
+            strategy_currency_ok.get(strategy, True)
+            and trade["_currency"] == "USD"
+        )
+        strategy_instrument_ok[strategy] = (
+            strategy_instrument_ok.get(strategy, True)
+            and trade["_asset"] in XTB_OMI_SYMBOLS
+        )
+        bucket = monthly_turnover[strategy]
+        bucket[trade["_entry_month"]] = (
+            bucket.get(trade["_entry_month"], 0.0)
+            + trade["_entry_notional"]
+        )
+        bucket[trade["_exit_month"]] = (
+            bucket.get(trade["_exit_month"], 0.0)
+            + trade["_exit_notional"]
+        )
+
+    max_monthly_turnover = {
+        strategy: max(months.values(), default=0.0)
+        for strategy, months in monthly_turnover.items()
+    }
+    xtb_eligible = {
+        strategy: (
+            max_monthly_turnover.get(strategy, 0.0)
+            <= float(xtb_monthly_turnover_limit_usd)
+            and strategy_currency_ok.get(strategy, False)
+            and strategy_instrument_ok.get(strategy, False)
+        )
+        for strategy in monthly_turnover
+    }
+
+    groups = {}
+    for trade in prepared:
+        strategy = str(trade.get("strategy", "unknown"))
+        asset = trade["_asset"]
+        asset_type = trade["_asset_type"]
+        timeframe = str(trade.get("timeframe", "unknown"))
+        key = (strategy, asset, timeframe)
+        groups.setdefault(key, []).append(trade)
+
+    rows = []
+    for (strategy, asset, timeframe), group in sorted(groups.items()):
+        asset_type = group[0]["_asset_type"]
+        venues = []
+
+        # Published eToro fee assumptions for a Spain-based account trading
+        # this universe: $1 per side for these US-listed individual shares,
+        # ETFs zero commission, and standard 1% crypto fee on each side.
+        # Club-tier crypto discounts and actual ticket details still require
+        # confirmation. Market spread remains separately unknown below.
+        if asset_type in {"STOCK", "ETF", "CRYPTO"}:
+            venues.append(("ETORO_REAL", "published_fee_scenario"))
+
+        if asset_type in {"STOCK", "ETF"}:
+            venues.append(("XTB_OMI", "zero_commission_conditional"))
+
+        if asset_type == "CRYPTO" and asset in {"BTC", "ETH", "SOL", "XRP", "XLM"}:
+            venues.extend([
+                ("BITVAVO_SPOT", "maker"),
+                ("BITVAVO_SPOT", "taker"),
+            ])
+
+        for venue, fee_mode in venues:
+            if venue == "XTB_OMI" and not xtb_eligible.get(strategy, False):
+                eligibility_note = (
+                    "ZERO_COMMISSION_NOT_ASSUMED: monthly turnover threshold "
+                    "or USD quote-currency condition not met"
+                )
+            elif venue == "XTB_OMI":
+                eligibility_note = (
+                    "CONDITIONAL: XTB OMI symbol mapping verified, USD account, "
+                    "external account turnover not included"
+                )
+            elif venue == "BITVAVO_SPOT":
+                eligibility_note = (
+                    "EUR spot market; maker fills may not execute; FX, deposit, "
+                    "withdrawal and network costs excluded"
+                )
+            else:
+                eligibility_note = (
+                    "REAL execution assumed; exact instrument ticket and Club "
+                    "tier still require confirmation"
+                )
+
+            for spread_bps in spread_bps_values:
+                gross_r_values = []
+                net_r_values = []
+                commission_total = 0.0
+                spread_total = 0.0
+                gross_total = 0.0
+                net_total = 0.0
+                valid = venue != "XTB_OMI" or xtb_eligible.get(strategy, False)
+
+                if valid:
+                    for trade in group:
+                        turnover = trade["_turnover"]
+                        if venue == "ETORO_REAL":
+                            if asset_type == "STOCK":
+                                commission = 2.0
+                            elif asset_type == "ETF":
+                                commission = 0.0
+                            else:
+                                commission = turnover * 0.01
+                        elif venue == "XTB_OMI":
+                            commission = 0.0
+                        elif fee_mode == "maker":
+                            commission = turnover * 0.0015
+                        else:
+                            commission = turnover * 0.0025
+
+                        spread_cost = turnover * float(spread_bps) / 20000.0
+                        total_cost = commission + spread_cost
+                        gross_r = trade["_gross_pnl"] / trade["_risk_budget"]
+                        net_pnl = trade["_gross_pnl"] - total_cost
+                        net_r = net_pnl / trade["_risk_budget"]
+
+                        gross_r_values.append(gross_r)
+                        net_r_values.append(net_r)
+                        commission_total += commission
+                        spread_total += spread_cost
+                        gross_total += trade["_gross_pnl"]
+                        net_total += net_pnl
+
+                positive_r = sum(value for value in net_r_values if value > 0)
+                negative_r = -sum(value for value in net_r_values if value < 0)
+                rows.append({
+                    "strategy": strategy,
+                    "asset": asset,
+                    "timeframe": timeframe,
+                    "broker_symbol": (
+                        XTB_OMI_SYMBOLS.get(asset)
+                        if venue == "XTB_OMI"
+                        else BITVAVO_EUR_PAIRS.get(asset)
+                        if venue == "BITVAVO_SPOT"
+                        else asset
+                    ),
+                    "venue": venue,
+                    "fee_mode": fee_mode,
+                    "spread_bps_scenario": float(spread_bps),
+                    "trades": len(group),
+                    "gross_pnl_usd_reference": round(gross_total, 6) if valid else None,
+                    "gross_total_R_reference": round(sum(gross_r_values), 6) if valid else None,
+                    "commission_scenario_usd": round(commission_total, 6) if valid else None,
+                    "spread_scenario_usd": round(spread_total, 6) if valid else None,
+                    "total_assumed_cost_usd": round(commission_total + spread_total, 6) if valid else None,
+                    "scenario_net_pnl_usd_reference": round(net_total, 6) if valid else None,
+                    "scenario_net_total_R": round(sum(net_r_values), 6) if valid else None,
+                    "scenario_net_average_R": (
+                        round(sum(net_r_values) / len(net_r_values), 6)
+                        if valid and net_r_values else None
+                    ),
+                    "scenario_win_rate_pct": (
+                        round(100 * sum(value > 0 for value in net_r_values) / len(net_r_values), 4)
+                        if valid and net_r_values else None
+                    ),
+                    "scenario_profit_factor_R": (
+                        round(positive_r / negative_r, 6)
+                        if valid and negative_r > 0 else None
+                    ),
+                    "xtb_max_monthly_omi_turnover_usd": (
+                        round(max_monthly_turnover.get(strategy, 0.0), 2)
+                        if venue == "XTB_OMI" else None
+                    ),
+                    "scenario_status": (
+                        "NOT_PRICED_XTB_ZERO_COMMISSION_CONDITION_NOT_MET"
+                        if not valid else "HYPOTHETICAL_FEE_AND_SPREAD_SCENARIO"
+                    ),
+                    "eligibility_note": eligibility_note,
+                    "historical_spread_verified": False,
+                    "actual_costs_complete": False,
+                    "interpretation": "PER_TRADE_EXPECTANCY_ONLY_NOT_PORTFOLIO_RETURN",
+                })
+
+    return rows
+
 
 
 if __name__ == "__main__":
