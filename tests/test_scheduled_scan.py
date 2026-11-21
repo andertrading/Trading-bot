@@ -324,6 +324,27 @@ class ScheduledScanTests(unittest.TestCase):
         self.assertEqual(unchanged, signal)
         self.assertEqual(store.state["signals"], {})
 
+    @patch.object(scheduled_scan.Bot, "send_telegram_message", return_value=True)
+    @patch.object(
+        scheduled_scan.Bot, "generate_candidate_chart",
+        side_effect=RuntimeError("chart renderer unavailable"),
+    )
+    @patch.object(
+        scheduled_scan.Bot, "build_telegram_messages",
+        return_value=["summary", "signal text"],
+    )
+    def test_chart_failure_falls_back_to_text_alert(
+        self, build_messages, generate_chart, send_text
+    ):
+        result = scheduled_scan._send_signal_report(
+            self.scan, self.scan["results"][0],
+            {"expires_at": "2026-11-21T12:30:00+00:00", "signal_id": "chart-fallback"},
+        )
+        self.assertTrue(result)
+        build_messages.assert_called_once()
+        generate_chart.assert_called_once()
+        send_text.assert_called_once_with("signal text")
+
     def test_invalid_timeframe_is_rejected_before_network_access(self):
         with self.assertRaises(ValueError):
             scheduled_scan.run_scheduled_scan("5m")
