@@ -9,7 +9,8 @@ from config import (
     ACCOUNT_CURRENCY,
     ASSETS,
     ETORO_CFD_CRYPTO_OVERNIGHT_USD_PER_UNIT_DAY,
-    ETORO_CFD_OVERNIGHT_USD_PER_1000_PER_DAY,
+    ETORO_CFD_STOCK_ETF_ANNUAL_FEE_PCT,
+    ETORO_CFD_STOCK_ETF_BENCHMARK_RATE_PCT,
     ETORO_CRYPTO_CFD_FEE_PCT_PER_SIDE,
     ETORO_CRYPTO_REAL_FEE_PCT_PER_SIDE,
     ETORO_ETF_CFD_FEE_PCT_PER_SIDE,
@@ -215,16 +216,27 @@ def estimate_etoro_trade_costs(
     elif float(overnight_charge_units) == 0:
         result["overnight_cost"] = 0.0
     elif asset_type in {"STOCK", "ETF"}:
-        rate = ETORO_CFD_OVERNIGHT_USD_PER_1000_PER_DAY.get(asset)
-        if rate is None or not _finite(rate) or float(rate) < 0:
-            result["unpriced_costs"].append("cfd_overnight_fee_missing")
+        benchmark = ETORO_CFD_STOCK_ETF_BENCHMARK_RATE_PCT
+        if (
+            benchmark is None
+            or not _finite(benchmark)
+            or float(benchmark) < 0
+        ):
+            result["unpriced_costs"].append("cfd_benchmark_rate_missing")
         else:
-            result["overnight_cost"] = (
-                ((entry_notional + exit_notional) / 2.0)
-                / 1000.0
-                * float(rate)
-                * overnight_charge_units
+            annual_rate = (
+                float(ETORO_CFD_STOCK_ETF_ANNUAL_FEE_PCT)
+                + float(benchmark)
             )
+            if annual_rate < 0:
+                result["unpriced_costs"].append("invalid_cfd_annual_rate")
+            else:
+                result["overnight_cost"] = (
+                    ((entry_notional + exit_notional) / 2.0)
+                    * annual_rate
+                    * float(overnight_charge_units)
+                    / 365.0
+                )
     elif asset_type == "CRYPTO":
         rate = ETORO_CFD_CRYPTO_OVERNIGHT_USD_PER_UNIT_DAY.get(asset)
         if rate is None or not _finite(rate) or float(rate) < 0:
