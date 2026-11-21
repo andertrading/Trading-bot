@@ -181,6 +181,7 @@ def simulate_portfolio(
     equity = capital
     equity_peak = capital
     max_drawdown = 0.0
+    max_drawdown_pct = 0.0
     peak_open_risk = 0.0
     peak_open_notional = 0.0
 
@@ -270,7 +271,16 @@ def simulate_portfolio(
         if closed_at_timestamp:
             equity += timestamp_pnl
             equity_peak = max(equity_peak, equity)
-            max_drawdown = max(max_drawdown, equity_peak - equity)
+            current_drawdown = equity_peak - equity
+            max_drawdown = max(max_drawdown, current_drawdown)
+            current_drawdown_pct = (
+                current_drawdown / equity_peak * 100
+                if equity_peak > 0 else 0.0
+            )
+            max_drawdown_pct = max(
+                max_drawdown_pct,
+                current_drawdown_pct,
+            )
             for position in closed_at_timestamp:
                 position["equity_after_exit_usd"] = equity
 
@@ -311,7 +321,7 @@ def simulate_portfolio(
         ) if pnl_values else 0.0,
         "profit_factor": round(gains / losses, 6) if losses > 0 else (None if gains == 0 else None),
         "max_drawdown_usd": round(max_drawdown, 8),
-        "max_drawdown_pct": round(max_drawdown / capital * 100, 6),
+        "max_drawdown_pct": round(max_drawdown_pct, 6),
         "peak_open_risk_usd": round(peak_open_risk, 8),
         "peak_open_notional_usd": round(peak_open_notional, 8),
         "costs_included": False,

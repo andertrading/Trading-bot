@@ -55,8 +55,11 @@ jobs:
           test -f rechazos_rr_backtest_v3.csv
           test -f senales_solapadas_v3.csv
           test -f costes_backtest_v3.csv
+          test -f operaciones_cartera_backtest_v3.csv
+          test -f rechazos_cartera_backtest_v3.csv
+          test -f resultados_cartera_backtest_v3.csv
 
-          echo "Todos los CSV obligatorios están disponibles."
+          echo "Todos los CSV obligatorios, incluida la simulación de cartera, están disponibles."
 
       - name: Comprobar históricos reproducibles
         run: |
@@ -153,6 +156,9 @@ jobs:
               "rechazos_rr_backtest_v3.csv",
               "senales_solapadas_v3.csv",
               "costes_backtest_v3.csv",
+              "operaciones_cartera_backtest_v3.csv",
+              "rechazos_cartera_backtest_v3.csv",
+              "resultados_cartera_backtest_v3.csv",
           ]
 
           summary_path = os.environ["GITHUB_STEP_SUMMARY"]
@@ -211,7 +217,7 @@ jobs:
               "- Proveedores históricos: según el enrutamiento del motor live (Twelve Data, Yahoo Finance o EODHD).",
               "- Ajuste de precios: política nativa de cada proveedor; equivalencia entre fuentes no verificada.",
               "- Costes: modelo eToro parcial con tarifas públicas base; spread bid-ask real, conversión y financiación variable quedan sin precio cuando faltan datos.",
-              "- Sizing: cantidad hipotética por operación para estimar el efecto de comisiones; no representa una cartera simultánea.",
+              "- Sizing: la simulación de cartera asigna riesgo y efectivo compartidos; el modelo de costes por operación sigue siendo un escenario independiente y no se resta del P&L de cartera.",
               "",
           ]
 
@@ -413,6 +419,40 @@ jobs:
                   )
               )
 
+          portfolio_summary = data.get("resultados_cartera_backtest_v3.csv")
+          portfolio_trades = data.get("operaciones_cartera_backtest_v3.csv")
+          portfolio_rejections = data.get("rechazos_cartera_backtest_v3.csv")
+
+          report.append("\n## 10. Simulación conjunta de cartera")
+          if portfolio_summary is not None and not portfolio_summary.empty:
+              report.append(markdown_table(portfolio_summary, 10))
+          else:
+              report.append("_No se ha generado un resumen de cartera válido._\n")
+
+          if portfolio_trades is not None:
+              report.append(
+                  section(
+                      "Operaciones aceptadas por la cartera",
+                      portfolio_trades,
+                      30,
+                  )
+              )
+
+          if portfolio_rejections is not None:
+              report.append(
+                  section(
+                      "Operaciones rechazadas por límites de cartera",
+                      portfolio_rejections,
+                      30,
+                  )
+              )
+
+          report.append(
+              "\nLa simulación de cartera aplica capital y riesgo compartidos, "
+              "pero su P&L es bruto: no descuenta comisiones, spread, FX ni financiación. "
+              "Tampoco modela correlaciones ni concentración por activo.\n"
+          )
+
           errors = data.get("errores_backtest_v3.csv")
 
           if errors is not None:
@@ -493,6 +533,9 @@ jobs:
             rechazos_rr_backtest_v3.csv
             senales_solapadas_v3.csv
             costes_backtest_v3.csv
+            operaciones_cartera_backtest_v3.csv
+            rechazos_cartera_backtest_v3.csv
+            resultados_cartera_backtest_v3.csv
             historicos_backtest_v3/
           if-no-files-found: warn
           retention-days: 30
