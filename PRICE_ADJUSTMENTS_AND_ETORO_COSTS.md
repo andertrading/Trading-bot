@@ -30,7 +30,7 @@ The code uses public eToro fee information as a **baseline estimate**, not as pr
 The model also supports:
 - Full market bid/ask spread in basis points, charged as half-spread on entry and exit.
 - FX conversion when quote currency differs from account currency.
-- CFD financing: for leveraged BUY stock/ETF CFDs, the published 6.4% annual rate plus the currency benchmark, divided by 365 and multiplied by broker-billable nights (including the x3 weekend charge); for short stock/ETF CFDs, an instrument-specific borrow fee; and for crypto CFDs, the instrument-specific USD-per-unit nightly fee. Unleveraged BUY stock/ETF CFDs have no overnight fee; crypto CFD overnight fees remain applicable to Spanish clients.
+- CFD financing: for leveraged BUY stock/ETF CFDs, the published 6.4% annual rate plus the currency benchmark, applied to opening notional and divided by 365 for each broker-billable night (including the x3 weekend charge); for short stock/ETF CFDs, an instrument-specific annual borrow rate applied to opening notional; and for crypto CFDs, the instrument-specific USD-per-unit nightly fee. Unleveraged BUY stock/ETF CFDs have no overnight fee; crypto CFD overnight fees remain applicable to Spanish clients.
 - One-off deposit/withdrawal FX conversion, calculated separately from trade-level FX when the source and account currencies differ.
 
 The model deliberately does **not** invent a market spread, FX fee or CFD financing rate. Even if a spread estimate is entered, historical OHLC-to-eToro bid/ask execution-price parity remains unverified, so `costs_complete` remains false until that basis is validated. Missing components are listed in each trade row.
