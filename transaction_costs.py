@@ -11,7 +11,7 @@ from config import (
     ETORO_CFD_CRYPTO_OVERNIGHT_USD_PER_UNIT_DAY,
     ETORO_CFD_STOCK_ETF_ANNUAL_FEE_PCT,
     ETORO_CFD_STOCK_ETF_BENCHMARK_RATE_PCT,
-    ETORO_CFD_STOCK_SHORT_BORROW_USD_PER_1000_PER_DAY,
+    ETORO_CFD_STOCK_SHORT_BORROW_ANNUAL_RATE_PCT,
     ETORO_CRYPTO_CFD_FEE_PCT_PER_SIDE,
     ETORO_CRYPTO_REAL_FEE_PCT_PER_SIDE,
     ETORO_ETF_CFD_FEE_PCT_PER_SIDE,
@@ -52,7 +52,7 @@ def estimate_etoro_trade_costs(
     side="BUY",
     country_code="ES",
 ):
-    """Estimate known costs for a long trade; report every unpriced component.
+    """Estimate known costs for one trade; report every unpriced component.
 
     market_spread_bps is the full bid/ask spread in basis points. The model
     charges half the spread on entry and half on exit.
@@ -229,21 +229,21 @@ def estimate_etoro_trade_costs(
                 result["unpriced_costs"].append("invalid_cfd_annual_rate")
             else:
                 result["overnight_cost"] = (
-                    ((entry_notional + exit_notional) / 2.0)
+                    entry_notional
                     * annual_rate
                     * float(overnight_charge_units)
                     / 365.0
                 )
     elif asset_type in {"STOCK", "ETF"} and side == "SELL":
-        borrow_fee = ETORO_CFD_STOCK_SHORT_BORROW_USD_PER_1000_PER_DAY.get(asset)
-        if borrow_fee is None or not _finite(borrow_fee) or float(borrow_fee) < 0:
-            result["unpriced_costs"].append("cfd_short_borrow_fee_missing")
+        borrow_rate = ETORO_CFD_STOCK_SHORT_BORROW_ANNUAL_RATE_PCT.get(asset)
+        if borrow_rate is None or not _finite(borrow_rate) or float(borrow_rate) < 0:
+            result["unpriced_costs"].append("cfd_short_borrow_rate_missing")
         else:
             result["overnight_cost"] = (
-                ((entry_notional + exit_notional) / 2.0)
-                / 1000.0
-                * float(borrow_fee)
+                entry_notional
+                * float(borrow_rate)
                 * float(overnight_charge_units)
+                / 365.0
             )
     elif asset_type == "CRYPTO":
         rate = ETORO_CFD_CRYPTO_OVERNIGHT_USD_PER_UNIT_DAY.get(asset)
