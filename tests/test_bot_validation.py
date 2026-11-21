@@ -347,6 +347,70 @@ class TestBotValidation(unittest.TestCase):
         market_open.assert_not_called()
         self.assertEqual(result["timeframes"], ["1d"])
 
+    def test_cost_readiness_reports_missing_execution_inputs(self):
+        candidate = {
+            "asset": "AAPL",
+            "entry": 100.0,
+            "target": 110.0,
+        }
+        with patch.object(
+            Bot,
+            "estimate_etoro_trade_costs",
+            return_value={
+                "valid": True,
+                "complete": False,
+                "unpriced_costs": [
+                    "execution_type_not_confirmed_in_etoro_ticket",
+                    "live_market_bid_ask_spread_missing",
+                ],
+            },
+        ) as estimate:
+            lines = Bot._format_cost_readiness(candidate)
+
+        estimate.assert_called_once_with(
+            "AAPL", 100.0, 110.0, 1.0, side="BUY"
+        )
+        report = "\n".join(lines)
+        self.assertIn("INCOMPLETO", report)
+        self.assertIn("Tipo REAL/CFD pendiente", report)
+        self.assertIn("Spread bid/ask real no disponible", report)
+        self.assertIn("rentabilidad neta no calculable", report)
+
+    def test_cost_readiness_does_not_estimate_without_valid_levels(self):
+        candidate = {
+            "asset": "AAPL",
+            "entry": 0,
+            "target": 110.0,
+        }
+        with patch.object(Bot, "estimate_etoro_trade_costs") as estimate:
+            lines = Bot._format_cost_readiness(candidate)
+
+        estimate.assert_not_called()
+        self.assertIn("INCOMPLETO", "\n".join(lines))
+        self.assertIn("niveles de entrada u objetivo válidos", "\n".join(lines))
+
+    def test_cost_readiness_never_claims_net_return_from_unit_estimate(self):
+        candidate = {
+            "asset": "AAPL",
+            "entry": 100.0,
+            "target": 110.0,
+        }
+        with patch.object(
+            Bot,
+            "estimate_etoro_trade_costs",
+            return_value={
+                "valid": True,
+                "complete": True,
+                "unpriced_costs": [],
+            },
+        ):
+            lines = Bot._format_cost_readiness(candidate)
+
+        report = "\n".join(lines)
+        self.assertIn("unidad de referencia", report)
+        self.assertIn("No se calcula beneficio neto", report)
+
+
 
 if __name__ == "__main__":
     unittest.main()
