@@ -2,7 +2,7 @@ import unittest
 from datetime import datetime, timezone
 from decimal import Decimal
 from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from config import ASSETS
 from etoro_read_only import EtoroAPIError, EtoroAccountSnapshot, EtoroResponse
@@ -237,6 +237,35 @@ class ReadOnlyAuditTests(unittest.TestCase):
         self.assertEqual(resolved["instrument_id"], 8020)
         self.assertEqual(resolved["resolution_status"], "RESOLVED")
         self.assertEqual(client.search_calls, ["CSPX", "CSPX.L"])
+
+
+    def test_audit_reports_redacted_diagnostic_codes_for_post_resolution_failures(self):
+        client = FakeAuditClient()
+        client.get_validated_instrument_eligibility = Mock(
+            side_effect=EtoroAPIError("eToro respondió HTTP 403: private eligibility payload")
+        )
+        client.get_realtime_quotes = Mock(
+            side_effect=EtoroAPIError("eToro respondió HTTP 429: private quote payload")
+        )
+        with patch(
+            "etoro_read_only_audit.calculate_account_stop_risk_from_client",
+            side_effect=EtoroAPIError("eToro respondió HTTP 503: private position payload"),
+        ):
+            report = run_audit(client, self.assets, "USD", self.now)
+
+        self.assertEqual(report["position_risk_diagnostic_status"], "HTTP_503")
+        self.assertEqual(report["instrument_eligibility_status"], "HTTP_403")
+        self.assertEqual(report["realtime_quotes_status"], "HTTP_429")
+        self.assertFalse(report["gross_position_stop_risk_diagnostic_validated"])
+        self.assertFalse(report["instrument_eligibility_validated"])
+        self.assertFalse(report["complete_realtime_quotes_validated"])
+        self.assertNotIn("private", str(report))
+
+    def test_success_report_includes_validated_diagnostic_statuses(self):
+        report = run_audit(FakeAuditClient(), self.assets, "USD", self.now)
+        self.assertEqual(report["position_risk_diagnostic_status"], "COMPLETE_NO_OPEN_POSITIONS")
+        self.assertEqual(report["instrument_eligibility_status"], "VALIDATED")
+        self.assertEqual(report["realtime_quotes_status"], "VALIDATED")
 
 
 if __name__ == "__main__":
