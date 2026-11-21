@@ -55,6 +55,14 @@ class SignalLifecycleTests(unittest.TestCase):
         second = make_signal_id("NVDA", "15m", "2026-11-21T12:00:00Z")
         self.assertNotEqual(first, second)
 
+    def test_build_signal_recomputes_risk_reward_from_validated_levels(self):
+        signal = build_signal_record(
+            candidate(risk_reward=999, entry_reference=180.0, stop=178.2, target=183.6),
+            NOW,
+            30,
+        )
+        self.assertEqual(signal["risk_reward"], 2.0)
+
     def test_build_signal_calculates_potential_and_expiry(self):
         signal = build_signal_record(candidate(), NOW, 30)
         self.assertEqual(signal["status"], "PENDING")
