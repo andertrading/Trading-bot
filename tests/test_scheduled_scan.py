@@ -26,6 +26,9 @@ class MemoryStore:
     def update(self, signal):
         self.state["signals"][signal["signal_id"]] = copy.deepcopy(signal)
 
+    def prune(self, **kwargs):
+        return 0
+
 
 def make_candidate(now):
     return {
