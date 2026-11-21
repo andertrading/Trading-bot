@@ -442,7 +442,6 @@ def _load_snapshot(asset, ticker, interval):
         "asset": asset,
         "ticker": ticker,
         "timeframe": interval,
-        "provider": _provider_for_asset(asset, interval),
         "period_requested": (
             _daily_period_label()
             if interval == "1d"
@@ -464,6 +463,23 @@ def _load_snapshot(asset, ticker, interval):
                 f"{key} esperado={value}, "
                 f"recibido={metadata.get(key)}"
             )
+
+    expected_provider = _provider_for_asset(asset, interval)
+    actual_provider = metadata.get("provider")
+    alternate_coinbase_research_source = (
+        asset in CRYPTO_ASSETS
+        and interval == "15m"
+        and str(actual_provider).startswith("coinbase_exchange")
+        and "Coinbase Exchange" in str(metadata.get("price_source_detail", ""))
+    )
+    if (
+        actual_provider != expected_provider
+        and not alternate_coinbase_research_source
+    ):
+        raise ValueError(
+            f"Proveedor incompatible en {metadata_path}: "
+            f"esperado={expected_provider}, recibido={actual_provider}"
+        )
 
     actual_hash = _sha256_file(csv_path)
 
