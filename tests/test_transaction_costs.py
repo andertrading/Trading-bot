@@ -83,9 +83,40 @@ class TestEtoroTransactionCosts(unittest.TestCase):
             execution_type="CFD",
             market_spread_bps=0,
             overnight_charge_units=2,
+            leverage=2.0,
         )
         self.assertAlmostEqual(result["commission_cost"], 0.315)
         self.assertIn("cfd_overnight_fee_missing", result["unpriced_costs"])
+
+    def test_unleveraged_long_stock_cfd_has_no_overnight_fee(self):
+        result = costs.estimate_etoro_trade_costs(
+            "AAPL",
+            100.0,
+            110.0,
+            1.0,
+            execution_type="CFD",
+            market_spread_bps=0,
+            overnight_charge_units=None,
+            leverage=1.0,
+            side="BUY",
+        )
+        self.assertEqual(result["overnight_cost"], 0.0)
+        self.assertNotIn("cfd_overnight_fee_missing", result["unpriced_costs"])
+
+    def test_unleveraged_long_crypto_cfd_in_spain_requires_overnight_fee(self):
+        result = costs.estimate_etoro_trade_costs(
+            "BTC",
+            100.0,
+            110.0,
+            1.0,
+            execution_type="CFD",
+            market_spread_bps=0,
+            overnight_charge_units=None,
+            leverage=1.0,
+            side="BUY",
+            country_code="ES",
+        )
+        self.assertIn("cfd_overnight_charge_units_missing", result["unpriced_costs"])
 
     def test_unverified_execution_price_basis_prevents_complete_costs(self):
         with patch.object(costs, "ETORO_EXECUTION_TYPES_CONFIRMED", True), \
