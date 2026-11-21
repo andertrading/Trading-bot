@@ -225,6 +225,7 @@ class AccountSnapshotTests(unittest.TestCase):
                 "unrealizedPnL": "12.50",
                 "ordersForOpen": [{"amount": "100", "mirrorId": 0}],
                 "orders": [],
+                "mirrors": [],
                 "positions": [{
                     "positionId": 10,
                     "instrumentId": 20,
@@ -275,6 +276,19 @@ class AccountSnapshotTests(unittest.TestCase):
 
     def test_missing_positions_does_not_become_an_empty_portfolio(self):
         del self.payload["clientPortfolio"]["positions"]
+        with self.assertRaises(EtoroAPIError):
+            normalize_account_snapshot(self.payload, "USD")
+
+
+    def test_nonempty_mirrors_are_rejected_to_prevent_double_counting(self):
+        self.payload["clientPortfolio"]["mirrors"] = [{"positions": []}]
+        with self.assertRaises(EtoroAPIError):
+            normalize_account_snapshot(self.payload, "USD")
+
+    def test_mirrored_pending_order_is_rejected_for_portfolio_risk(self):
+        self.payload["clientPortfolio"]["ordersForOpen"] = [
+            {"amount": 25, "mirrorId": 7}
+        ]
         with self.assertRaises(EtoroAPIError):
             normalize_account_snapshot(self.payload, "USD")
 
