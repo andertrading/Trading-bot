@@ -800,13 +800,17 @@ class AccountSnapshotTests(unittest.TestCase):
         with self.assertRaisesRegex(EtoroAPIError, "riesgo no está cuantificado"):
             normalize_account_snapshot(self.payload, "USD")
 
-    def test_position_order_records_are_not_misclassified_as_pending_entries(self):
+    def test_market_if_touched_order_blocks_risk_snapshot(self):
         self.payload["clientPortfolio"]["orders"] = [
             {"orderId": 99, "amount": "200"}
         ]
-        snapshot = normalize_account_snapshot(self.payload, "USD")
-        self.assertEqual(snapshot.available_cash, Decimal("800"))
-        self.assertEqual(len(snapshot.positions), 1)
+        with self.assertRaisesRegex(EtoroAPIError, "Market-if-touched"):
+            normalize_account_snapshot(self.payload, "USD")
+
+    def test_missing_market_if_touched_orders_list_is_rejected(self):
+        del self.payload["clientPortfolio"]["orders"]
+        with self.assertRaises(EtoroAPIError):
+            normalize_account_snapshot(self.payload, "USD")
 
     def test_non_usd_configuration_fails_closed(self):
         with self.assertRaises(EtoroAPIError):

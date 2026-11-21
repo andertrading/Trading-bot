@@ -199,6 +199,14 @@ def normalize_account_snapshot(
             "La cuenta contiene órdenes de entrada pendientes cuyo riesgo no está cuantificado"
         )
 
+    market_if_touched_orders = portfolio.get("orders")
+    if not isinstance(market_if_touched_orders, list):
+        raise EtoroAPIError("Falta la lista explícita de órdenes Market-if-touched")
+    if market_if_touched_orders:
+        raise EtoroAPIError(
+            "La cuenta contiene órdenes Market-if-touched cuyo riesgo no está cuantificado"
+        )
+
     unrealized_pnl = _decimal(portfolio.get("unrealizedPnL"), "clientPortfolio.unrealizedPnL")
     available_cash = calculate_available_cash(portfolio)
 
