@@ -1717,8 +1717,8 @@ def _download_yahoo_alternate_daily(
             index=normalized_index,
         )
         dataframe = dataframe[~dataframe.index.duplicated(keep="last")].sort_index()
-        if dataframe.empty or _invalid_ohlc_mask(dataframe).any():
-            logger.error("OHLC alternativo incoherente para %s", asset)
+        if dataframe.empty:
+            logger.error("Histórico alternativo vacío para %s", asset)
             return None
         logger.info(
             "YAHOO ALTERNATE OK | %s | %s | %s velas | currency=%s",
