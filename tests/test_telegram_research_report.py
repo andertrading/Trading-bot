@@ -68,6 +68,13 @@ class TestTelegramResearchReport(unittest.TestCase):
         self.assertEqual(len(messages), 2)
         self.assertIn("No se han detectado candidatas técnicas", messages[1])
 
+
+    def test_report_displays_calendar_aware_signal_expiry(self):
+        self.candidate["expires_at"] = "2026-11-21T12:30:00+00:00"
+        report = Bot.build_telegram_messages(self.scan)[1]
+        self.assertIn("Caducidad de la señal:", report)
+        self.assertNotIn("Caducidad de la señal: <b>NO CONFIGURADA</b>", report)
+
     def test_candidate_without_valid_levels_does_not_crash(self):
         self.candidate["entry_reference"] = None
         self.candidate["stop"] = None
