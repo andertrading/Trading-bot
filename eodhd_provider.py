@@ -56,6 +56,10 @@ def download_eodhd_daily(asset, configured_currency, remove_incomplete, has_dail
         logger.error("EODHD no admite el activo solicitado: %s", asset)
         return None
 
+    if str(configured_currency).upper().strip() != "USD":
+        logger.error("Moneda configurada incompatible con EODHD para %s", asset)
+        return None
+
     cached = _cached(asset)
     if cached is not None:
         return cached
@@ -63,10 +67,6 @@ def download_eodhd_daily(asset, configured_currency, remove_incomplete, has_dail
     api_key = os.getenv("EODHD_API_KEY")
     if not api_key:
         logger.error("Falta EODHD_API_KEY; se bloquea el histórico diario de %s", asset)
-        return None
-
-    if str(configured_currency).upper().strip() != "USD":
-        logger.error("Moneda configurada incompatible con EODHD para %s", asset)
         return None
 
     today = datetime.now(timezone.utc).date()
