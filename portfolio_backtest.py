@@ -45,8 +45,9 @@ def _empty_result(capital):
         "summary": {
             "initial_capital_usd": float(capital),
             "ending_equity_usd": float(capital),
-            "net_pnl_usd": 0.0,
-            "return_pct": 0.0,
+            "gross_pnl_usd": 0.0,
+            "gross_return_pct": 0.0,
+            "pnl_basis": "GROSS_EX_COSTS",
             "trades_considered": 0,
             "trades_accepted": 0,
             "trades_rejected": 0,
@@ -338,8 +339,9 @@ def simulate_portfolio(
     summary = result["summary"]
     summary.update({
         "ending_equity_usd": round(equity, 8),
-        "net_pnl_usd": round(equity - capital, 8),
-        "return_pct": round((equity / capital - 1) * 100, 6),
+        "gross_pnl_usd": round(equity - capital, 8),
+        "gross_return_pct": round((equity / capital - 1) * 100, 6),
+        "pnl_basis": "GROSS_EX_COSTS",
         "trades_accepted": len(accepted_rows),
         "trades_rejected": len(rejected),
         "win_rate_pct": round(
