@@ -874,9 +874,8 @@ def build_telegram_messages(scan_result):
 
 def send_telegram_notifications(scan_result):
     """
-    Envía el resumen y las candidatas.
-    Si hay una candidata con datos disponibles,
-    adjunta también su gráfico.
+    Envía el resumen y los informes completos de las candidatas.
+    Los gráficos son adjuntos opcionales con un pie breve.
     """
 
     if not TELEGRAM_ENABLED:
@@ -904,34 +903,55 @@ def send_telegram_notifications(scan_result):
             else:
                 failed += 1
 
-        # Mensajes siguientes: candidatas y gráficos.
+        # Enviar siempre el informe completo como texto antes del gráfico.
+        # Telegram limita los pies de foto a 1024 caracteres y truncarlos
+        # podría ocultar la caducidad o las advertencias finales.
         for index, message in enumerate(messages[1:]):
-            if index < len(candidates):
-                candidate = candidates[index]
-
-                chart = generate_candidate_chart(
-                    candidate
-                )
-
-                if chart is not None:
-                    success = send_telegram_photo(
-                        chart,
-                        message,
-                    )
+            if index >= len(candidates):
+                if send_telegram_message(message):
+                    sent += 1
                 else:
-                    success = send_telegram_message(
-                        message
-                    )
+                    failed += 1
+                continue
 
-            else:
-                success = send_telegram_message(
-                    message
-                )
-
-            if success:
-                sent += 1
-            else:
+            candidate = candidates[index]
+            if not send_telegram_message(message):
                 failed += 1
+                continue
+
+            sent += 1
+            try:
+                chart = generate_candidate_chart(candidate)
+            except Exception:
+                logger.exception(
+                    "CHART GENERATION FAILED | %s | %s; full text report was sent",
+                    candidate.get("asset"),
+                    candidate.get("timeframe"),
+                )
+                chart = None
+
+            if chart is None:
+                continue
+
+            caption = (
+                "📈 <b>Gráfico técnico</b> · "
+                f"<b>{escape_html(candidate.get('asset', 'N/D'))}</b> · "
+                f"{escape_html(candidate.get('timeframe', 'N/D'))}\n"
+                "El informe completo se ha enviado en el mensaje anterior."
+            )
+            try:
+                if not send_telegram_photo(chart, caption):
+                    logger.warning(
+                        "CHART DELIVERY FAILED | %s | %s; full text report was sent",
+                        candidate.get("asset"),
+                        candidate.get("timeframe"),
+                    )
+            except Exception:
+                logger.exception(
+                    "CHART DELIVERY ERROR | %s | %s; full text report was sent",
+                    candidate.get("asset"),
+                    candidate.get("timeframe"),
+                )
 
         if failed == 0:
             logger.info(
