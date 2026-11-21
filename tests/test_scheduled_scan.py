@@ -285,6 +285,60 @@ class ScheduledScanTests(unittest.TestCase):
         )
 
     @patch.object(scheduled_scan.Bot, "send_telegram_message", return_value=True)
+    def test_successful_retry_refreshes_scan_snapshot(self, send):
+        store = MemoryStore("url", "token")
+        signal = {
+            "signal_id": "snapshot-refresh",
+            "asset": "BTC",
+            "timeframe": "15m",
+            "expires_at": "2026-11-21T12:30:00+00:00",
+            "alert_sent": True,
+            "pending_notification_event": "SIGNAL_EXPIRED",
+        }
+        store.upsert(signal)
+        state = store.load()
+
+        refreshed = scheduled_scan._retry_pending_notifications(
+            store, state, "15m", alerts_enabled=True
+        )
+
+        send.assert_called_once()
+        self.assertIsNone(
+            refreshed["signals"]["snapshot-refresh"]["pending_notification_event"]
+        )
+        self.assertIsNone(
+            store.state["signals"]["snapshot-refresh"]["pending_notification_event"]
+        )
+
+    @patch.object(scheduled_scan.Bot, "send_telegram_message", return_value=False)
+    def test_failed_retry_keeps_pending_event_in_scan_snapshot(self, send):
+        store = MemoryStore("url", "token")
+        signal = {
+            "signal_id": "snapshot-retry",
+            "asset": "BTC",
+            "timeframe": "15m",
+            "expires_at": "2026-11-21T12:30:00+00:00",
+            "alert_sent": True,
+            "pending_notification_event": "SIGNAL_EXPIRED",
+        }
+        store.upsert(signal)
+        state = store.load()
+
+        refreshed = scheduled_scan._retry_pending_notifications(
+            store, state, "15m", alerts_enabled=True
+        )
+
+        send.assert_called_once()
+        self.assertEqual(
+            refreshed["signals"]["snapshot-retry"]["pending_notification_event"],
+            "SIGNAL_EXPIRED",
+        )
+        self.assertEqual(
+            store.state["signals"]["snapshot-retry"]["pending_notification_event"],
+            "SIGNAL_EXPIRED",
+        )
+
+    @patch.object(scheduled_scan.Bot, "send_telegram_message", return_value=True)
     def test_successful_lifecycle_retry_clears_pending_event(self, send):
         store = MemoryStore("url", "token")
         signal = {
