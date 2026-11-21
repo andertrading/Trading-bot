@@ -28,6 +28,7 @@ jobs:
       - name: Probar cobertura completa del motor de datos en vivo
         env:
           TWELVE_DATA_API_KEY: ${{ secrets.TWELVE_DATA_API_KEY }}
+          EODHD_API_KEY: ${{ secrets.EODHD_API_KEY }}
         run: |
           python - <<'PY'
           import os
@@ -71,6 +72,12 @@ jobs:
                   "ERROR: Falta el secreto TWELVE_DATA_API_KEY."
               )
 
+          eodhd_assets = {"CSPX", "CNDX"} & set(enabled_assets)
+          if eodhd_assets and not os.environ.get("EODHD_API_KEY"):
+              raise SystemExit(
+                  "ERROR: Falta el secreto EODHD_API_KEY para los ETF diarios."
+              )
+
           print("COBERTURA DEL MOTOR DE DATOS")
           print(f"Activos habilitados: {len(enabled_assets)}")
           print(f"Temporalidades: {', '.join(intervals)}")
@@ -91,7 +98,14 @@ jobs:
 
               for interval in intervals:
                   key = (asset, interval)
-                  print(f"\nProbando {asset} | {interval} | {provider}")
+                  effective_provider = (
+                      "eodhd"
+                      if asset in {"CSPX", "CNDX"} and interval == "1d"
+                      else provider
+                  )
+                  print(
+                      f"\nProbando {asset} | {interval} | {effective_provider}"
+                  )
 
                   try:
                       df = download_data(asset, interval)
@@ -112,7 +126,7 @@ jobs:
                           "bars": len(df),
                           "last_timestamp": str(timestamp),
                           "fresh": fresh,
-                          "provider": provider,
+                          "provider": effective_provider,
                       }
 
                       print(f"OK: {len(df)} velas")
