@@ -300,6 +300,8 @@ def main():
     all_trades = []
     all_errors = []
     portfolio_rows = []
+    oos_portfolio_rows = []
+    history_bounds = {}
 
     if bt.BACKTEST_DATA_MODE != "replay":
         raise SystemExit("Research requires BACKTEST_DATA_MODE=replay")
@@ -316,6 +318,14 @@ def main():
 
     def download_history_with_daily_trend(ticker, interval, asset=None):
         data = original_download_history(ticker, interval, asset=asset)
+        if data is not None and not data.empty and asset is not None:
+            valid_index = pd.to_datetime(data.index, utc=True, errors="coerce")
+            valid_index = valid_index[~valid_index.isna()]
+            if len(valid_index):
+                history_bounds.setdefault(
+                    (asset, interval),
+                    (valid_index.min(), valid_index.max()),
+                )
         if data is None or interval != "15m" or asset is None:
             return data
 
@@ -364,6 +374,7 @@ def main():
         print(f"\n=== STRATEGY: {strategy_name} ===")
         bt.evaluate_signal_at = evaluator
         strategy_trades = []
+        strategy_oos_trades = []
 
         bt.DOWNLOAD_ERRORS.clear()
         bt.EXCLUDED_OHLC_CANDLES.clear()
@@ -396,8 +407,18 @@ def main():
                     "timeframe": timeframe,
                     **metrics,
                 })
+                bounds = history_bounds.get((asset, timeframe))
+                history_start, history_end = bounds if bounds else (None, None)
                 all_walk_forward.extend(
-                    _walk_forward_rows(strategy_name, trades, asset, timeframe)
+                    _walk_forward_rows(
+                        strategy_name, trades, asset, timeframe,
+                        history_start, history_end,
+                    )
+                )
+                strategy_oos_trades.extend(
+                    _out_of_sample_trades(
+                        trades, history_start, history_end
+                    )
                 )
                 print(
                     f"{asset} {timeframe}: n={metrics['trades']} "
@@ -414,6 +435,16 @@ def main():
             **portfolio["summary"],
         })
 
+        oos_portfolio = bt.simulate_portfolio(
+            strategy_oos_trades,
+            capital_usd=bt.INITIAL_CAPITAL_USD,
+        )
+        oos_portfolio_rows.append({
+            "strategy": strategy_name,
+            "sample": "OUT_OF_SAMPLE_ONLY",
+            **oos_portfolio["summary"],
+        })
+
     pd.DataFrame(all_summary).to_csv("strategy_research_summary.csv", index=False)
     pd.DataFrame(all_walk_forward).to_csv("strategy_research_walkforward.csv", index=False)
     pd.DataFrame(all_trades).to_csv("strategy_research_trades.csv", index=False)
@@ -422,6 +453,15 @@ def main():
 
     print("\n=== PORTFOLIO COMPARISON (GROSS, COSTS NOT INCLUDED) ===")
     for row in portfolio_rows:
+        print(
+            row["strategy"],
+            "PnL_USD=", round(row.get("net_pnl_usd", 0.0), 2),
+            "max_DD_USD=", round(row.get("max_drawdown_usd", 0.0), 2),
+            "accepted=", row.get("trades_accepted", 0),
+        )
+
+    print("\\n=== OUT-OF-SAMPLE PORTFOLIO ONLY (GROSS, COSTS NOT INCLUDED) ===")
+    for row in oos_portfolio_rows:
         print(
             row["strategy"],
             "PnL_USD=", round(row.get("net_pnl_usd", 0.0), 2),
