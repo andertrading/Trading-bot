@@ -2467,5 +2467,100 @@ class TestTwelveDataDateRangeFormatting(unittest.TestCase):
 
 
 
+class TestCoinbaseExactCryptoGapRepair(unittest.TestCase):
+
+    def test_coinbase_usd_candles_are_mapped_and_verified_exactly(self):
+        start = pd.Timestamp("2025-02-09T22:00:00Z")
+        end = pd.Timestamp("2025-02-09T23:15:00Z")
+        index = pd.date_range(start, end, freq="15min")
+        candles = [
+            [
+                int(stamp.timestamp()),
+                99.0,
+                102.0,
+                100.0,
+                101.0,
+                12.0,
+            ]
+            for stamp in reversed(index)
+        ]
+
+        class Response:
+            def __init__(self, payload):
+                self.payload = payload
+
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return self.payload
+
+        with patch.object(
+            engine.requests,
+            "get",
+            side_effect=[
+                Response({
+                    "base_currency": "SOL",
+                    "quote_currency": "USD",
+                }),
+                Response(candles),
+            ],
+        ) as request:
+            result = engine._download_coinbase_crypto_gap(
+                "SOL", start, end
+            )
+
+        self.assertIsNotNone(result)
+        self.assertTrue(result.index.equals(index))
+        self.assertAlmostEqual(result.iloc[0]["Open"], 100.0)
+        self.assertAlmostEqual(result.iloc[-1]["Close"], 101.0)
+        self.assertTrue(result.attrs["price_adjustment_verified"])
+        self.assertIn("Coinbase Exchange", result.attrs["price_source_detail"])
+        self.assertEqual(request.call_count, 2)
+
+    def test_coinbase_gap_repair_rejects_incomplete_candle_coverage(self):
+        start = pd.Timestamp("2025-02-09T22:00:00Z")
+        end = pd.Timestamp("2025-02-09T23:15:00Z")
+        index = pd.date_range(start, end, freq="15min").delete(2)
+        candles = [
+            [
+                int(stamp.timestamp()),
+                99.0,
+                102.0,
+                100.0,
+                101.0,
+                12.0,
+            ]
+            for stamp in reversed(index)
+        ]
+
+        class Response:
+            def __init__(self, payload):
+                self.payload = payload
+
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return self.payload
+
+        with patch.object(
+            engine.requests,
+            "get",
+            side_effect=[
+                Response({
+                    "base_currency": "SOL",
+                    "quote_currency": "USD",
+                }),
+                Response(candles),
+            ],
+        ):
+            result = engine._download_coinbase_crypto_gap(
+                "SOL", start, end
+            )
+
+        self.assertIsNone(result)
+
+
 if __name__ == "__main__":
     unittest.main()
