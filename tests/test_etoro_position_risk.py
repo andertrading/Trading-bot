@@ -75,6 +75,11 @@ class InstrumentBreakdownClientTests(unittest.TestCase):
         self.assertTrue(args[1].endswith("/api/v2/trading/info/instrument-breakdown"))
         self.assertEqual(kwargs["headers"]["CID"], "12345")
         self.assertEqual(kwargs["headers"]["x-api-key"], "app-key")
+        self.assertEqual(kwargs["params"], {
+            "positionLevel": "Normal",
+            "orderLevel": "Normal",
+            "mirrorLevel": "None",
+        })
         self.assertIsNone(kwargs["json"])
 
     def test_invalid_cid_is_rejected_without_request(self):
@@ -101,14 +106,36 @@ class InstrumentBreakdownNormalizationTests(unittest.TestCase):
             (breakdown(position_data=position(positionId=7002)), [7001]),
             (breakdown(position_data=position()), [7001, 7002]),
             ({"accountCurrency": "USD", "timestamp": NOW.isoformat(), "instruments": [
-                {"instrumentId": 101, "positions": [position(), position()]}
-            ]}, [7001]),
+                {"instrumentId": 101, "positions": [position(), position()], "orders": []}
+            ], "mirrors": []}, [7001]),
         ]
         for payload, expected in cases:
             with self.subTest(payload=payload), self.assertRaises(EtoroAPIError):
                 normalize_instrument_breakdown(
                     EtoroResponse(payload, 200, {}), 123, expected, NOW
                 )
+
+    def test_pending_orders_and_mirrors_in_breakdown_are_rejected(self):
+        payload = breakdown()
+        payload["instruments"][0]["orders"] = [{"orderId": 55}]
+        with self.assertRaises(EtoroAPIError):
+            normalize_instrument_breakdown(
+                EtoroResponse(payload, 200, {}), 123, [7001], NOW
+            )
+
+        payload = breakdown()
+        payload["mirrors"] = [{"mirrorId": 9}]
+        with self.assertRaises(EtoroAPIError):
+            normalize_instrument_breakdown(
+                EtoroResponse(payload, 200, {}), 123, [7001], NOW
+            )
+
+        payload = breakdown()
+        del payload["instruments"][0]["orders"]
+        with self.assertRaises(EtoroAPIError):
+            normalize_instrument_breakdown(
+                EtoroResponse(payload, 200, {}), 123, [7001], NOW
+            )
 
     def test_non_usd_or_stale_snapshot_is_rejected(self):
         payload = breakdown(accountCurrency="EUR")
