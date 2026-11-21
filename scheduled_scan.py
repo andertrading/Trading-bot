@@ -31,6 +31,7 @@ logging.basicConfig(
 def _send_signal_report(scan_result: dict, candidate: dict, signal: dict) -> bool:
     report_candidate = dict(candidate)
     report_candidate["expires_at"] = signal["expires_at"]
+    report_candidate["signal_id"] = signal["signal_id"]
     report_candidate["strategy_validated"] = STRATEGY_VALIDATED
 
     report_scan = dict(scan_result)
@@ -57,12 +58,15 @@ def _lifecycle_message(signal: dict, event: str) -> str:
     asset = signal.get("asset", "N/D")
     timeframe = signal.get("timeframe", "N/D")
     expiry = signal.get("expires_at", "N/D")
+    signal_id = str(signal.get("signal_id", "N/D"))[:12]
+    signal_id_line = f"ID: <code>{signal_id}</code>\n"
 
     messages = {
         "SIGNAL_EXPIRED": (
             "⌛ <b>SEÑAL CADUCADA — NO OPERAR</b>\n"
             "━━━━━━━━━━━━━━━━━━\n"
             f"📌 <b>{asset}</b> | {timeframe}\n"
+            f"{signal_id_line}"
             f"Caducidad: <code>{expiry}</code>\n"
             "Ha terminado la ventana de entrada de esta señal. "
             "No reutilices la alerta anterior."
@@ -71,6 +75,7 @@ def _lifecycle_message(signal: dict, event: str) -> str:
             "⚠️ <b>SEÑAL INVALIDADA</b>\n"
             "━━━━━━━━━━━━━━━━━━\n"
             f"📌 <b>{asset}</b> | {timeframe}\n"
+            f"{signal_id_line}"
             "Las condiciones técnicas que originaron la señal ya no se cumplen. "
             "No abrir una nueva operación basándose en esta alerta."
         ),
@@ -78,6 +83,7 @@ def _lifecycle_message(signal: dict, event: str) -> str:
             "🛑 <b>NIVEL DE INVALIDACIÓN ALCANZADO</b>\n"
             "━━━━━━━━━━━━━━━━━━\n"
             f"📌 <b>{asset}</b> | {timeframe}\n"
+            f"{signal_id_line}"
             "El precio ha alcanzado el stop técnico de referencia. "
             "La hipótesis queda invalidada. Esto no confirma si abriste "
             "una operación ni si tu stop se ejecutó."
@@ -86,6 +92,7 @@ def _lifecycle_message(signal: dict, event: str) -> str:
             "🎯 <b>OBJETIVO TÉCNICO ALCANZADO</b>\n"
             "━━━━━━━━━━━━━━━━━━\n"
             f"📌 <b>{asset}</b> | {timeframe}\n"
+            f"{signal_id_line}"
             "El mercado ha alcanzado el objetivo de referencia. "
             "La señal deja de ser una nueva entrada. No podemos saber "
             "si entraste ni calcular el resultado de una posición."
