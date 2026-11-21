@@ -708,6 +708,18 @@ def _update_signal_diagnostic(diagnostic, **values):
 def get_assets():
     result = []
 
+    requested = {
+        item.strip().upper()
+        for item in os.getenv("BACKTEST_ASSETS", "").split(",")
+        if item.strip()
+    }
+    unknown = requested.difference(ASSETS)
+    if unknown:
+        raise ValueError(
+            "BACKTEST_ASSETS contiene activos desconocidos: "
+            + ", ".join(sorted(unknown))
+        )
+
     for name, settings in ASSETS.items():
         if not isinstance(settings, dict):
             continue
@@ -715,12 +727,43 @@ def get_assets():
         if not settings.get("enabled", False):
             continue
 
+        if requested and name not in requested:
+            continue
+
         ticker = settings.get("yahoo") or settings.get("ticker")
 
         if ticker:
             result.append((name, ticker))
 
+    if requested and not result:
+        raise ValueError("BACKTEST_ASSETS no selecciona ningún activo habilitado")
+
     return result
+
+
+def get_timeframes():
+    requested = [
+        item.strip().lower()
+        for item in os.getenv("BACKTEST_TIMEFRAMES", "").split(",")
+        if item.strip()
+    ]
+    if not requested:
+        return tuple(PERIODS)
+
+    unknown = set(requested).difference(PERIODS)
+    if unknown:
+        raise ValueError(
+            "BACKTEST_TIMEFRAMES contiene temporalidades desconocidas: "
+            + ", ".join(sorted(unknown))
+        )
+
+    selected = tuple(
+        timeframe for timeframe in PERIODS
+        if timeframe in set(requested)
+    )
+    if not selected:
+        raise ValueError("BACKTEST_TIMEFRAMES no selecciona temporalidades válidas")
+    return selected
 
 
 def _get_asset_type(asset):
@@ -2271,9 +2314,12 @@ def main():
     SNAPSHOT_MANIFEST.clear()
 
     assets = get_assets()
+    timeframes = get_timeframes()
 
     print(f"Trading Bot {VERSION} - Backtest")
-    print(f"Activos habilitados: {len(assets)}")
+    print(f"Activos habilitados en esta ejecución: {len(assets)}")
+    print("Activos:", ", ".join(asset for asset, _ in assets))
+    print("Temporalidades:", ", ".join(timeframes))
     print("Modo: histórico, compras únicamente")
     print("Estrategia: sin cambios")
     print("Datos: mismo motor y proveedores que el escáner (snapshots guardados)")
@@ -2300,7 +2346,7 @@ def main():
     print("-" * 60)
 
     for asset, ticker in assets:
-        for interval in ("15m", "1d"):
+        for interval in timeframes:
             print(f"Analizando {asset} ({interval})...")
 
             try:

@@ -10,6 +10,41 @@ import backtest_v3
 
 class TestBacktestV3(unittest.TestCase):
 
+    def test_asset_filter_selects_only_requested_enabled_assets(self):
+        with patch.dict(
+            backtest_v3.os.environ,
+            {"BACKTEST_ASSETS": "AAPL,MSFT"},
+            clear=False,
+        ):
+            selected = backtest_v3.get_assets()
+        self.assertEqual([asset for asset, _ in selected], ["AAPL", "MSFT"])
+
+    def test_asset_filter_rejects_unknown_assets(self):
+        with patch.dict(
+            backtest_v3.os.environ,
+            {"BACKTEST_ASSETS": "NOT_A_REAL_ASSET"},
+            clear=False,
+        ):
+            with self.assertRaises(ValueError):
+                backtest_v3.get_assets()
+
+    def test_timeframe_filter_selects_only_requested_intervals(self):
+        with patch.dict(
+            backtest_v3.os.environ,
+            {"BACKTEST_TIMEFRAMES": "15m"},
+            clear=False,
+        ):
+            self.assertEqual(backtest_v3.get_timeframes(), ("15m",))
+
+    def test_timeframe_filter_rejects_unknown_intervals(self):
+        with patch.dict(
+            backtest_v3.os.environ,
+            {"BACKTEST_TIMEFRAMES": "5m"},
+            clear=False,
+        ):
+            with self.assertRaises(ValueError):
+                backtest_v3.get_timeframes()
+
     def make_data(self, rows=230):
         index = pd.date_range(
             "2025-01-01",
