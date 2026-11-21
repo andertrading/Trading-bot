@@ -310,26 +310,53 @@ def simulate_portfolio(
                 side_cost(
                     item,
                     requested_risk * factor / item["risk_per_unit"],
-                    item["exit_price"],
+                    item["stop"],
                 )
                 for item, requested_risk, _ in requests
             )
 
+        def risk_side_cost(item, quantity, price):
+            return side_cost(item, quantity, price) if costs_included else 0.0
+
         def risk_constraints_satisfied(factor):
-            post_entry_equity = max(
-                0.0,
-                equity_for_limits - batch_entry_costs(factor),
+            # The new trade's full stop loss includes entry fee, gross
+            # distance-to-stop loss and exit-side cost at the stop. Compare
+            # that complete amount with pre-entry equity. Once opened, the
+            # entry fee is deducted from equity and only remaining stop risk
+            # (gross loss plus stop-side exit cost) stays reserved.
+            batch_total_stop_risk = sum(
+                risk_side_cost(
+                    item,
+                    requested_risk * factor / item["risk_per_unit"],
+                    item["entry"],
+                )
+                + requested_risk * factor
+                + risk_side_cost(
+                    item,
+                    requested_risk * factor / item["risk_per_unit"],
+                    item["stop"],
+                )
+                for item, requested_risk, _ in requests
             )
-            allocated_risk_total = total_requested_risk * factor
             if (
-                open_risk + allocated_risk_total
-                > portfolio_limit_pct * post_entry_equity + 1e-10
+                open_risk + batch_total_stop_risk
+                > portfolio_limit_pct * equity_for_limits + 1e-10
             ):
                 return False
             return all(
-                requested_risk * factor
-                <= per_trade_limit_pct * post_entry_equity + 1e-10
-                for _, requested_risk, _ in requests
+                risk_side_cost(
+                    item,
+                    requested_risk * factor / item["risk_per_unit"],
+                    item["entry"],
+                )
+                + requested_risk * factor
+                + risk_side_cost(
+                    item,
+                    requested_risk * factor / item["risk_per_unit"],
+                    item["stop"],
+                )
+                <= per_trade_limit_pct * equity_for_limits + 1e-10
+                for item, requested_risk, _ in requests
             )
 
         # Solve the risk cap after entry costs; a fixed commission makes the
@@ -398,16 +425,20 @@ def simulate_portfolio(
                 entry_cost = entry_notional * crypto_rate_for_asset(item["asset"])
             entry_cost += entry_notional * spread_bps / 20000.0 if costs_included else 0.0
             total_entry_cost += entry_cost
-            reserved_exit_cost = (
-                side_cost(item, quantity, item["exit_price"])
+            stop_exit_cost = (
+                side_cost(item, quantity, item["stop"])
                 if costs_included else 0.0
             )
+            # Cash reservation uses entry notional plus entry and stop-side
+            # costs; it never uses the future realized exit price (look-ahead).
             position = {
                 **item,
                 "entry_cost_usd": entry_cost,
-                "reserved_exit_cost_usd": reserved_exit_cost,
+                "reserved_exit_cost_usd": stop_exit_cost,
+                "stop_exit_cost_usd": stop_exit_cost,
+                "gross_stop_risk_usd": allocated_risk,
                 "asset_type": asset_type,
-                "allocated_risk_usd": allocated_risk,
+                "allocated_risk_usd": allocated_risk + stop_exit_cost,
                 "notional_usd": notional,
                 "quantity": quantity,
                 "allocation_factor": allocation_factor,
@@ -514,6 +545,8 @@ def simulate_portfolio(
             "result_R": position["result_R"],
             "requested_risk_pct": position["requested_risk_pct"],
             "allocated_risk_usd": round(position["allocated_risk_usd"], 8),
+            "gross_stop_risk_usd": round(position.get("gross_stop_risk_usd", position["allocated_risk_usd"]), 8),
+            "stop_exit_cost_usd": round(position.get("stop_exit_cost_usd", 0.0), 8),
             "quantity": round(position["quantity"], 10),
             "notional_usd": round(position["notional_usd"], 8),
             "allocation_factor": round(position["allocation_factor"], 8),
