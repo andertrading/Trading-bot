@@ -58,6 +58,8 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
       - name: Recover missing SOL 15m snapshot from Coinbase USD history
+        env:
+          TWELVE_DATA_API_KEY: ${{ secrets.TWELVE_DATA_API_KEY }}
         run: |
           python - <<'PY'
           import json
@@ -94,7 +96,7 @@ jobs:
           if (
               not metadata
               or metadata.get("row_count", 0) < 60000
-              or metadata.get("provider") != "coinbase_exchange"
+              or not str(metadata.get("provider", "")).startswith("coinbase_exchange")
           ):
               raise SystemExit("SOL 15m snapshot metadata validation failed.")
           backtest_v3._write_snapshot_manifest()
