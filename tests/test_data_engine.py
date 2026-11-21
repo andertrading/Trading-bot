@@ -1,4 +1,5 @@
 
+import os
 import unittest
 from datetime import datetime, timezone, date, timedelta
 from unittest.mock import patch
@@ -2121,11 +2122,67 @@ class TestAutomatedScanSchedulingHelpers(unittest.TestCase):
             engine.signal_expiry_at("AAPL", "5m")
 
 
-if __name__ == "__main__":
-    unittest.main()
 
 
 
+class TestExtendedDailyHistoryIsBacktestOnly(unittest.TestCase):
+    def setUp(self):
+        engine._data_cache.clear()
+
+    @patch.dict(os.environ, {"BACKTEST_EXTENDED_DAILY_HISTORY": "true"})
+    @patch.object(engine, "_get_cached_data")
+    @patch.object(engine, "_download_yahoo")
+    @patch.object(engine, "download_eodhd_daily")
+    @patch.object(engine, "_save_cached_data")
+    def test_london_extended_daily_uses_yahoo_and_bypasses_cache(
+        self, save_cache, eodhd, yahoo, get_cache
+    ):
+        frame = make_ohlcv(pd.bdate_range("2025-01-01", periods=260, tz="UTC"))
+        yahoo.return_value = frame
+
+        with patch.object(engine, "_remove_incomplete_candle", side_effect=lambda frame, interval: frame), patch.object(engine, "_has_daily_gaps", return_value=None):
+            result = engine.download_data("CSPX", "1d")
+
+        get_cache.assert_not_called()
+        yahoo.assert_called_once()
+        eodhd.assert_not_called()
+        self.assertEqual(result.attrs["data_provider"], "yahoo")
+        self.assertTrue(result.attrs["price_adjustment_verified"])
+
+    @patch.dict(os.environ, {"BACKTEST_EXTENDED_DAILY_HISTORY": "false"})
+    @patch.object(engine, "_get_cached_data", return_value=None)
+    @patch.object(engine, "_download_yahoo")
+    @patch.object(engine, "download_eodhd_daily")
+    @patch.object(engine, "_save_cached_data")
+    def test_live_london_daily_keeps_eodhd(
+        self, save_cache, eodhd, yahoo, get_cache
+    ):
+        frame = make_ohlcv(pd.bdate_range("2025-01-01", periods=260, tz="UTC"))
+        eodhd.return_value = frame
+
+        with patch.object(engine, "_remove_incomplete_candle", side_effect=lambda frame, interval: frame), patch.object(engine, "_has_daily_gaps", return_value=None):
+            result = engine.download_data("CSPX", "1d")
+
+        eodhd.assert_called_once()
+        yahoo.assert_not_called()
+        self.assertEqual(result.attrs["data_provider"], "eodhd")
+
+    @patch.dict(os.environ, {"BACKTEST_EXTENDED_DAILY_HISTORY": "true"})
+    @patch.object(engine, "_get_cached_data")
+    @patch.object(engine, "_download_twelvedata")
+    @patch.object(engine, "_save_cached_data")
+    def test_extended_daily_twelvedata_bypasses_cache(
+        self, save_cache, twelvedata, get_cache
+    ):
+        frame = make_ohlcv(pd.bdate_range("2025-01-01", periods=260, tz="UTC"))
+        twelvedata.return_value = frame
+
+        with patch.object(engine, "_remove_incomplete_candle", side_effect=lambda frame, interval: frame), patch.object(engine, "_has_daily_gaps", return_value=None):
+            result = engine.download_data("BTC", "1d")
+
+        get_cache.assert_not_called()
+        twelvedata.assert_called_once()
+        self.assertEqual(result.attrs["data_provider"], "twelvedata")
 
 class TestExtendedHistoryIsBacktestOnly(unittest.TestCase):
 
@@ -2276,3 +2333,7 @@ class TestTwelveDataDateRangeFormatting(unittest.TestCase):
             "2026-11-21 00:00:00",
         )
 
+
+
+if __name__ == "__main__":
+    unittest.main()

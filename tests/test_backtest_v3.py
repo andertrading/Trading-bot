@@ -10,6 +10,21 @@ import backtest_v3
 
 class TestBacktestV3(unittest.TestCase):
 
+    def test_extended_daily_provider_uses_yahoo_for_london_assets_only(self):
+        with patch.dict("os.environ", {"BACKTEST_EXTENDED_DAILY_HISTORY": "true"}):
+            self.assertEqual(backtest_v3._provider_for_asset("CSPX", "1d"), "yahoo")
+            self.assertEqual(backtest_v3._provider_for_asset("CNDX", "1d"), "yahoo")
+            self.assertEqual(backtest_v3._provider_for_asset("AAPL", "1d"), "twelvedata")
+
+        with patch.dict("os.environ", {}, clear=True):
+            self.assertEqual(backtest_v3._provider_for_asset("CSPX", "1d"), "eodhd")
+
+    def test_daily_snapshot_period_label_tracks_configured_lookback(self):
+        with patch.object(backtest_v3, "BACKTEST_DAILY_LOOKBACK_DAYS", 730):
+            self.assertEqual(backtest_v3._daily_period_label(), "2y")
+        with patch.object(backtest_v3, "BACKTEST_DAILY_LOOKBACK_DAYS", 1825):
+            self.assertEqual(backtest_v3._daily_period_label(), "1825d")
+
     def test_asset_filter_selects_only_requested_enabled_assets(self):
         with patch.dict(
             backtest_v3.os.environ,

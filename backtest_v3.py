@@ -216,8 +216,20 @@ def _sha256_file(path):
 
 def _provider_for_asset(asset, interval):
     if asset in LONDON_ASSETS and interval == "1d":
+        if os.getenv(
+            "BACKTEST_EXTENDED_DAILY_HISTORY", "false"
+        ).strip().lower() in {"1", "true", "yes", "on"}:
+            return "yahoo"
         return "eodhd"
     return PROVIDER_MAP.get(asset)
+
+
+def _daily_period_label():
+    return (
+        "2y"
+        if BACKTEST_DAILY_LOOKBACK_DAYS == 730
+        else f"{BACKTEST_DAILY_LOOKBACK_DAYS}d"
+    )
 
 
 def _snapshot_metadata(
@@ -236,7 +248,9 @@ def _snapshot_metadata(
         "timeframe": interval,
         "provider": provider,
         "period_requested": (
-            "2y" if interval == "1d" else "provider_maximum_available"
+            _daily_period_label()
+            if interval == "1d"
+            else "provider_maximum_available"
         ),
         "interval_requested": interval,
         "auto_adjust": None,
@@ -404,7 +418,9 @@ def _load_snapshot(asset, ticker, interval):
         "timeframe": interval,
         "provider": _provider_for_asset(asset, interval),
         "period_requested": (
-            "2y" if interval == "1d" else "provider_maximum_available"
+            _daily_period_label()
+            if interval == "1d"
+            else "provider_maximum_available"
         ),
         "auto_adjust": None,
         "adjustment_policy": (

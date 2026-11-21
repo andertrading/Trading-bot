@@ -1840,10 +1840,20 @@ def _download_yahoo(asset, config, interval):
 
 def _attach_market_data_metadata(dataframe, asset, interval):
     """Attach explicit, provider-verified OHLC adjustment metadata."""
+    extended_daily_backtest = (
+        interval == "1d"
+        and os.getenv(
+            "BACKTEST_EXTENDED_DAILY_HISTORY", "false"
+        ).strip().lower() in {"1", "true", "yes", "on"}
+    )
     provider = (
-        "eodhd"
-        if asset in LONDON_ASSETS and interval == "1d"
-        else PROVIDER_MAP.get(asset)
+        "yahoo"
+        if asset in LONDON_ASSETS and interval == "1d" and extended_daily_backtest
+        else (
+            "eodhd"
+            if asset in LONDON_ASSETS and interval == "1d"
+            else PROVIDER_MAP.get(asset)
+        )
     )
     if interval == "15m":
         policy = "raw_unadjusted_intraday"
@@ -1882,8 +1892,18 @@ def download_data(asset, interval="15m"):
             "BACKTEST_EXTENDED_INTRADAY_HISTORY", "false"
         ).strip().lower() in {"1", "true", "yes", "on"}
     )
+    extended_daily_backtest = (
+        interval == "1d"
+        and os.getenv(
+            "BACKTEST_EXTENDED_DAILY_HISTORY", "false"
+        ).strip().lower() in {"1", "true", "yes", "on"}
+    )
 
-    cached = None if extended_backtest else _get_cached_data(asset, interval)
+    cached = (
+        None
+        if extended_backtest or extended_daily_backtest
+        else _get_cached_data(asset, interval)
+    )
 
     if cached is not None:
         validated = _normalise_dataframe(cached)
@@ -1909,12 +1929,21 @@ def download_data(asset, interval="15m"):
             _data_cache.pop((asset, interval), None)
 
     if asset in LONDON_ASSETS and interval == "1d":
-        dataframe = download_eodhd_daily(
-            asset,
-            config.get("currency"),
-            _remove_incomplete_candle,
-            _has_daily_gaps,
-        )
+        if extended_daily_backtest:
+            # Backtests only: Yahoo provides a longer daily history than
+            # the EODHD free tier's one-year window. Live scans keep EODHD.
+            dataframe = _download_yahoo(
+                asset,
+                config,
+                interval,
+            )
+        else:
+            dataframe = download_eodhd_daily(
+                asset,
+                config.get("currency"),
+                _remove_incomplete_candle,
+                _has_daily_gaps,
+            )
 
     elif provider == "twelvedata":
         if extended_backtest:
