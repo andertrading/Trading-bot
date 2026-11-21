@@ -10,6 +10,12 @@ from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from typing import Any, Mapping
 
+from config import (
+    CLOSE_FEES_CONFIRMED,
+    ETORO_FEE_SCHEDULE_CONFIRMED,
+    ETORO_STOCK_REAL_COMMISSION_USD_PER_SIDE,
+    ETORO_CRYPTO_REAL_FEE_PCT_PER_SIDE,
+)
 from etoro_read_only import EtoroAPIError, EtoroAccountSnapshot, EtoroQuote, EtoroResponse
 
 
@@ -211,19 +217,21 @@ def calculate_position_gross_stop_risk_usd(
 
     close_notional_usd = stop_rate * units
     if fee_class == "STOCK":
-        close_fee_usd = Decimal("2.00")
-        fee_assumption = "maximum published stock close commission: USD 2"
+        close_fee_usd = Decimal(str(ETORO_STOCK_REAL_COMMISSION_USD_PER_SIDE))
+        fee_assumption = f"configured conservative stock close fee: USD {close_fee_usd}"
     elif fee_class == "ETF":
         close_fee_usd = Decimal("0")
         fee_assumption = "published ETF commission: USD 0"
     else:
-        close_fee_usd = close_notional_usd * Decimal("0.01")
-        fee_assumption = "maximum published manual crypto close commission: 1%"
+        close_fee_rate = Decimal(str(ETORO_CRYPTO_REAL_FEE_PCT_PER_SIDE))
+        close_fee_usd = close_notional_usd * close_fee_rate
+        fee_assumption = f"configured conservative manual crypto close fee: {close_fee_rate:.2%}"
 
     modeled_risk = gross_risk + close_fee_usd
     if not modeled_risk.is_finite() or modeled_risk < 0:
         raise EtoroAPIError("El riesgo modelado al stop no es válido")
 
+    fee_schedule_confirmed = CLOSE_FEES_CONFIRMED and ETORO_FEE_SCHEDULE_CONFIRMED
     return {
         "position_id": position_id,
         "instrument_id": instrument_id,
@@ -232,10 +240,12 @@ def calculate_position_gross_stop_risk_usd(
         "fee_class": fee_class,
         "gross_stop_risk_usd": gross_risk,
         "estimated_close_fee_usd": close_fee_usd,
-        "risk_usd": modeled_risk,
-        "status": "MODELED_STOP_RISK",
-        "complete": True,
+        "modeled_risk_usd": modeled_risk,
+        "risk_usd": modeled_risk if fee_schedule_confirmed else None,
+        "status": "VALIDATED_STOP_RISK" if fee_schedule_confirmed else "MODELED_UNCONFIRMED",
+        "complete": fee_schedule_confirmed,
         "risk_model_scope": "stop-based; gaps and slippage beyond stop excluded",
+        "fee_schedule_confirmed": fee_schedule_confirmed,
         "fee_assumption": fee_assumption,
         "currency": "USD",
     }
@@ -276,19 +286,23 @@ def calculate_account_gross_stop_risk_usd(
         results.append(calculate_position_gross_stop_risk_usd(position, quote, fee_class))
 
     gross_total = sum((item["gross_stop_risk_usd"] for item in results), Decimal("0"))
-    modeled_total = sum((item["risk_usd"] for item in results), Decimal("0"))
+    modeled_total = sum((item["modeled_risk_usd"] for item in results), Decimal("0"))
     close_fee_total = sum((item["estimated_close_fee_usd"] for item in results), Decimal("0"))
+    fee_schedule_confirmed = CLOSE_FEES_CONFIRMED and ETORO_FEE_SCHEDULE_CONFIRMED
     return {
         "positions": results,
         "gross_stop_risk_usd": gross_total,
         "estimated_close_fees_usd": close_fee_total,
-        "risk_usd": modeled_total,
-        "status": "MODELED_STOP_RISK",
-        "complete": True,
+        "modeled_risk_usd": modeled_total,
+        "risk_usd": modeled_total if fee_schedule_confirmed else None,
+        "status": "VALIDATED_STOP_RISK" if fee_schedule_confirmed else "MODELED_UNCONFIRMED",
+        "complete": fee_schedule_confirmed,
+        "fee_schedule_confirmed": fee_schedule_confirmed,
         "risk_model_scope": "stop-based; gaps and slippage beyond stop excluded",
         "reason": (
-            "Riesgo al stop calculado con cotización ejecutable y máximos publicados "
-            "de comisión de cierre; gaps y deslizamiento pueden aumentar la pérdida real."
+            "Riesgo al stop con cotización ejecutable y máximos conservadores de comisión. "
+            "Las banderas de confirmación de costes deben estar activadas antes de usar risk_usd; "
+            "gaps y deslizamiento pueden aumentar la pérdida real."
         ),
         "currency": "USD",
     }
