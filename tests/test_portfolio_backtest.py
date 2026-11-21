@@ -239,7 +239,7 @@ class TestPortfolioBacktest(unittest.TestCase):
         self.assertEqual(result["summary"]["trades_accepted"], 1)
         position = result["trades"][0]
         self.assertLessEqual(
-            position["allocated_risk_usd"],
+            position["allocated_risk_usd"] + position["entry_cost_usd"],
             10.0 + 1e-8,
         )
         self.assertGreater(
