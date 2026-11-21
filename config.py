@@ -186,3 +186,9 @@ DATA_MAX_AGE_MINUTES = 30
 # Credenciales: únicamente mediante variables de entorno.
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
+
+# Las alertas de señales permanecen desactivadas hasta validar la estrategia.
+# Activar únicamente mediante variable de entorno tras superar el gate estadístico.
+SIGNAL_ALERTS_ENABLED = os.getenv(
+    "SIGNAL_ALERTS_ENABLED", "false"
+).strip().lower() in {"1", "true", "yes", "on"}
