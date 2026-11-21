@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from typing import Any, Mapping
 
-from etoro_read_only import EtoroAPIError, EtoroQuote, EtoroResponse
+from etoro_read_only import EtoroAPIError, EtoroAccountSnapshot, EtoroQuote, EtoroResponse
 
 
 def _decimal(value: Any, field: str) -> Decimal:
@@ -262,3 +262,55 @@ def calculate_account_gross_stop_risk_usd(
         ),
         "currency": "USD",
     }
+
+
+
+def calculate_account_gross_stop_risk_from_client(
+    client: Any,
+    account_snapshot: EtoroAccountSnapshot,
+    now_utc: datetime,
+) -> dict[str, Any]:
+    """Fetch and calculate gross stop risk for the exact validated PnL positions.
+
+    This is the read-only end-to-end path. It remains gross-only for non-empty
+    accounts because the broker's documented close-cost estimate is unsupported.
+    """
+    if not isinstance(account_snapshot, EtoroAccountSnapshot):
+        raise EtoroAPIError("Falta un snapshot de cuenta eToro validado")
+    if not account_snapshot.positions:
+        return calculate_account_gross_stop_risk_usd({}, {})
+    if account_snapshot.client_id is None:
+        raise EtoroAPIError("El snapshot no contiene CID para consultar el desglose")
+
+    expected_ids = []
+    expected_instruments: dict[int, int] = {}
+    for position in account_snapshot.positions:
+        if not isinstance(position, Mapping):
+            raise EtoroAPIError("El snapshot contiene una posición inválida")
+        position_id = position.get("positionId")
+        instrument_id = position.get("instrumentId")
+        if (
+            isinstance(position_id, bool) or not isinstance(position_id, int) or position_id <= 0
+            or isinstance(instrument_id, bool) or not isinstance(instrument_id, int) or instrument_id <= 0
+            or position_id in expected_instruments
+        ):
+            raise EtoroAPIError("El snapshot contiene IDs de posición/instrumento inválidos o duplicados")
+        expected_ids.append(position_id)
+        expected_instruments[position_id] = instrument_id
+
+    response = client.get_instrument_breakdown(account_snapshot.client_id)
+    details = normalize_instrument_breakdown(
+        response,
+        expected_client_id=account_snapshot.client_id,
+        expected_position_ids=expected_ids,
+        now_utc=now_utc,
+    )
+    for position_id, detail in details.items():
+        if detail.get("instrumentId") != expected_instruments[position_id]:
+            raise EtoroAPIError(
+                f"El instrumento de la posición {position_id} no coincide entre endpoints"
+            )
+
+    instrument_ids = sorted(set(expected_instruments.values()))
+    quotes = client.get_realtime_quotes(instrument_ids, now_utc)
+    return calculate_account_gross_stop_risk_usd(details, quotes)
