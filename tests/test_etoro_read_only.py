@@ -135,6 +135,23 @@ class EtoroReadOnlyClientTests(unittest.TestCase):
             self.client._request("POST", "/api/v1/trading/orders")
         self.session.request.assert_not_called()
 
+    def test_candle_path_traversal_is_rejected(self):
+        with self.assertRaises(EtoroAPIError):
+            self.client._request(
+                "GET",
+                "/api/v1/market-data/instruments/1/../../trading/orders/history/candles/desc/15m/10",
+            )
+        self.session.request.assert_not_called()
+
+    def test_private_cost_request_cannot_bypass_open_only_guard(self):
+        with self.assertRaises(EtoroAPIError):
+            self.client._request(
+                "POST",
+                "/api/v2/trading/info/costs",
+                json_body={"action": "close"},
+            )
+        self.session.request.assert_not_called()
+
 
 class AvailableCashTests(unittest.TestCase):
     def test_documented_available_cash_formula(self):
