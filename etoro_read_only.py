@@ -22,6 +22,28 @@ API_BASE_URL = "https://public-api.etoro.com"
 DEFAULT_TIMEOUT_SECONDS = 10
 MAX_ATTEMPTS = 3
 RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
+INSTRUMENT_SEARCH_FIELDS = (
+    "instrumentId",
+    "displayname",
+    "internalSymbolFull",
+    "instrumentType",
+    "isCurrentlyTradable",
+    "isActiveInPlatform",
+    "isBuyEnabled",
+    "isDelisted",
+)
+INSTRUMENT_FILTER_FIELDS = frozenset({
+    "instrumentId",
+    "displayname",
+    "internalSymbolFull",
+    "instrumentType",
+    "instrumentTypeID",
+    "exchangeID",
+    "isCurrentlyTradable",
+    "isActiveInPlatform",
+    "isBuyEnabled",
+    "isDelisted",
+})
 
 
 class EtoroAPIError(RuntimeError):
@@ -331,6 +353,54 @@ def normalize_realtime_quotes(
     return quotes
 
 
+def resolve_unique_instrument(
+    response: EtoroResponse,
+    identifier: str,
+) -> Mapping[str, Any]:
+    """Resolve one exact eToro symbol/display name; never choose fuzzy matches."""
+    if response.status_code != 200:
+        raise EtoroAPIError("La búsqueda de instrumentos no devolvió HTTP 200")
+    if not isinstance(identifier, str) or not identifier.strip():
+        raise EtoroAPIError("El identificador del instrumento está vacío")
+    if not isinstance(response.data, Mapping):
+        raise EtoroAPIError("La respuesta de búsqueda no es un objeto JSON")
+    items = response.data.get("items")
+    if not isinstance(items, list):
+        raise EtoroAPIError("Falta la lista de instrumentos en la búsqueda")
+
+    target = identifier.strip().casefold()
+    matches = []
+    for item in items:
+        if not isinstance(item, Mapping):
+            raise EtoroAPIError("La búsqueda contiene un instrumento inválido")
+        symbol = item.get("internalSymbolFull")
+        display_name = item.get("displayname")
+        if (
+            isinstance(symbol, str) and symbol.strip().casefold() == target
+        ) or (
+            isinstance(display_name, str) and display_name.strip().casefold() == target
+        ):
+            matches.append(item)
+
+    if len(matches) != 1:
+        raise EtoroAPIError(
+            f"Se esperaba un único instrumento exacto para '{identifier}', encontrados: {len(matches)}"
+        )
+
+    item = matches[0]
+    instrument_id = item.get("instrumentId")
+    if isinstance(instrument_id, bool) or not isinstance(instrument_id, int) or instrument_id <= 0:
+        raise EtoroAPIError("El instrumento encontrado no tiene un instrumentId válido")
+    for flag in ("isCurrentlyTradable", "isActiveInPlatform", "isBuyEnabled"):
+        if item.get(flag) is not True:
+            raise EtoroAPIError(f"El instrumento no supera el control {flag}")
+    if item.get("isDelisted") is not False:
+        raise EtoroAPIError("El instrumento está excluido o no se ha confirmado que esté activo")
+    if not isinstance(item.get("instrumentType"), str) or not item["instrumentType"].strip():
+        raise EtoroAPIError("El tipo de instrumento no está confirmado")
+    return dict(item)
+
+
 class EtoroReadOnlyClient:
     """Small eToro client with a deliberately restricted endpoint surface."""
 
@@ -371,6 +441,7 @@ class EtoroReadOnlyClient:
         allowed = {
             ("GET", "/api/v1/trading/info/real/pnl"),
             ("GET", "/api/v2/market-data/rates"),
+            ("GET", "/api/v1/market-data/search"),
             ("POST", "/api/v2/trading/info/costs"),
         }
         candle_pattern = (
@@ -438,6 +509,53 @@ class EtoroReadOnlyClient:
             return EtoroResponse(data=data, status_code=status, headers=dict(response.headers))
 
         raise EtoroAPIError("No se pudo completar la petición a eToro")
+
+    def search_instruments(
+        self,
+        filters: Mapping[str, str | int | bool],
+        *,
+        fields: tuple[str, ...] | list[str] = INSTRUMENT_SEARCH_FIELDS,
+        page_size: int = 100,
+        page_number: int = 1,
+    ) -> EtoroResponse:
+        if not isinstance(filters, Mapping):
+            raise ValueError("filters debe ser un objeto")
+        if not fields or any(
+            not isinstance(field, str) or field not in INSTRUMENT_FILTER_FIELDS
+            for field in fields
+        ):
+            raise ValueError("fields contiene un campo no permitido")
+        if len(set(fields)) != len(fields):
+            raise ValueError("fields no puede contener duplicados")
+        if not set(INSTRUMENT_SEARCH_FIELDS).issubset(set(fields)):
+            raise ValueError(
+                "fields debe incluir todos los campos necesarios para validar el instrumento"
+            )
+        if isinstance(page_size, bool) or not isinstance(page_size, int) or not 1 <= page_size <= 1000:
+            raise ValueError("page_size debe estar entre 1 y 1000")
+        if isinstance(page_number, bool) or not isinstance(page_number, int) or page_number < 1:
+            raise ValueError("page_number debe ser un entero positivo")
+
+        params: dict[str, Any] = {
+            "fields": ",".join(fields),
+            "pageSize": page_size,
+            "pageNumber": page_number,
+        }
+        for key, value in filters.items():
+            if key not in INSTRUMENT_FILTER_FIELDS:
+                raise ValueError(f"Filtro no permitido: {key}")
+            if isinstance(value, bool):
+                params[key] = "true" if value else "false"
+            elif isinstance(value, (str, int)) and str(value).strip():
+                params[key] = value
+            else:
+                raise ValueError(f"Valor de filtro inválido: {key}")
+
+        return self._request(
+            "GET",
+            "/api/v1/market-data/search",
+            params=params,
+        )
 
     def get_account_pnl(self) -> EtoroResponse:
         return self._request("GET", "/api/v1/trading/info/real/pnl")
