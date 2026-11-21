@@ -57,10 +57,14 @@ class TestCommonCalendarOutOfSampleSplit(unittest.TestCase):
 
     def test_synchronized_oos_trades_uses_shared_timeframe_midpoint_and_bounds(self):
         trades = [
-            {"timeframe": "15m", "entry_time": "2025-01-05T00:00:00Z", "result_R": 1.0},
-            {"timeframe": "15m", "entry_time": "2025-01-20T00:00:00Z", "result_R": 2.0},
-            {"timeframe": "1d", "entry_time": "2025-01-20T00:00:00Z", "result_R": 3.0},
-            {"timeframe": "15m", "entry_time": "2025-02-01T00:00:00Z", "result_R": 4.0},
+            {"timeframe": "15m", "entry_time": "2025-01-05T00:00:00Z",
+             "exit_time": "2025-01-06T00:00:00Z", "result_R": 1.0},
+            {"timeframe": "15m", "entry_time": "2025-01-20T00:00:00Z",
+             "exit_time": "2025-01-21T00:00:00Z", "result_R": 2.0},
+            {"timeframe": "1d", "entry_time": "2025-01-20T00:00:00Z",
+             "exit_time": "2025-01-22T00:00:00Z", "result_R": 3.0},
+            {"timeframe": "15m", "entry_time": "2025-02-01T00:00:00Z",
+             "exit_time": "2025-02-02T00:00:00Z", "result_R": 4.0},
         ]
         selected = _synchronized_oos_trades(
             trades, "15m", "2025-01-01T00:00:00Z", "2025-01-31T00:00:00Z"
