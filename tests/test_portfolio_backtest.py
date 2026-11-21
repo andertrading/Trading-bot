@@ -260,6 +260,32 @@ class TestPortfolioBacktest(unittest.TestCase):
             "limite_de_riesgo_o_capital_disponible",
         )
 
+    def test_entry_commission_is_reserved_against_available_cash(self):
+        trade = self.make_trade(
+            asset="BTC",
+            entry=100.0,
+            stop=99.9,
+            score=80,
+            result_R=0.0,
+        )
+        result = simulate_portfolio(
+            [trade],
+            capital_usd=100.0,
+            execution_costs={
+                "venue": "ETORO_REAL",
+                "crypto_rate_per_side": 0.10,
+                "spread_bps": 0,
+            },
+        )
+
+        position = result["trades"][0]
+        committed_cash = (
+            position["notional_usd"] + position["entry_cost_usd"]
+        )
+        self.assertLessEqual(committed_cash, 100.0 + 1e-8)
+        self.assertLess(position["notional_usd"], 100.0)
+        self.assertAlmostEqual(result["summary"]["ending_equity_usd"], 100.0, places=7)
+
     def test_invalid_capital_fails_closed(self):
         with self.assertRaises(ValueError):
             simulate_portfolio([], capital_usd=0)
