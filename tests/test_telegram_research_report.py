@@ -32,6 +32,28 @@ class TestTelegramResearchReport(unittest.TestCase):
             "results": [self.candidate],
         }
 
+    @unittest.mock.patch.object(Bot, "send_telegram_message", side_effect=[True, True])
+    @unittest.mock.patch.object(Bot, "send_telegram_photo", return_value=True)
+    @unittest.mock.patch.object(Bot, "generate_candidate_chart", return_value=b"chart")
+    def test_legacy_notification_sends_full_text_before_short_chart_caption(
+        self, generate_chart, send_photo, send_text
+    ):
+        self.candidate["generated_at"] = "2026-11-21T12:00:00+00:00"
+        self.candidate["expires_at"] = "2026-11-21T12:30:00+00:00"
+        with unittest.mock.patch.object(Bot, "TELEGRAM_ENABLED", True):
+            result = Bot.send_telegram_notifications(self.scan)
+
+        self.assertEqual(result, "sent:2")
+        self.assertEqual(send_text.call_count, 2)
+        full_report = send_text.call_args_list[1].args[0]
+        self.assertIn("Ventana para entrar: <b>30 min</b>", full_report)
+        send_photo.assert_called_once()
+        caption = send_photo.call_args.args[1]
+        self.assertLessEqual(len(caption), 1024)
+        self.assertIn("Gráfico técnico", caption)
+        self.assertIn("informe completo se ha enviado", caption)
+        self.assertNotEqual(caption, full_report)
+
     def test_report_contains_gross_reward_risk_and_reference_capital(self):
         messages = Bot.build_telegram_messages(self.scan)
         self.assertEqual(len(messages), 2)
