@@ -454,5 +454,195 @@ class ScheduledScanTests(unittest.TestCase):
             scheduled_scan.run_scheduled_scan("5m")
 
 
+    @patch.object(scheduled_scan.Bot, "send_telegram_message", return_value=False)
+    def test_new_lifecycle_event_does_not_overtake_an_older_failed_event(self, send):
+        store = MemoryStore("url", "token")
+        old = {
+            "schema_version": 1,
+            "signal_id": "ordered-signal",
+            "asset": "BTC",
+            "timeframe": "15m",
+            "status": "PENDING",
+            "monitor_status": "ACTIVE",
+            "generated_at": (self.now - timedelta(minutes=30)).isoformat(),
+            "expires_at": (self.now + timedelta(minutes=30)).isoformat(),
+            "monitoring_expires_at": (self.now + timedelta(hours=4)).isoformat(),
+            "direction": "LONG",
+            "entry_reference": 100.0,
+            "stop": 99.0,
+            "target": 102.0,
+            "alert_sent": True,
+            "pending_notification_event": "SIGNAL_INVALIDATED",
+            "pending_notification_events": ["SIGNAL_INVALIDATED"],
+            "data_timestamp": (self.now - timedelta(minutes=30)).isoformat(),
+        }
+        store.upsert(old)
+        current = {
+            "action": "NO TRADE",
+            "asset": "BTC",
+            "timeframe": "15m",
+            "data_valid": True,
+            "last_price": 98.8,
+            "last_high": 100.0,
+            "last_low": 98.7,
+            "data_timestamp": (self.now - timedelta(minutes=15)).isoformat(),
+        }
+        scan = {
+            "timeframes": ["15m"],
+            "analyses_completed": 1,
+            "technical_candidates_found": 0,
+            "candidates_blocked": 0,
+            "validated_candidates": 0,
+            "no_trade_count": 1,
+            "results": [current],
+        }
+
+        with patch.object(
+            scheduled_scan, "UpstashSignalStateStore", return_value=store
+        ), patch.object(
+            scheduled_scan.Bot, "run_scan", return_value=scan
+        ), patch.object(
+            scheduled_scan, "SIGNAL_ALERTS_ENABLED", True
+        ), patch.object(
+            scheduled_scan, "STRATEGY_VALIDATED", True
+        ), patch.object(
+            scheduled_scan.Bot, "TELEGRAM_ENABLED", True
+        ):
+            scheduled_scan.run_scheduled_scan("15m")
+
+        updated = store.state["signals"]["ordered-signal"]
+        self.assertEqual(send.call_count, 1)
+        self.assertEqual(
+            updated["pending_notification_events"],
+            ["SIGNAL_INVALIDATED", "SIGNAL_INVALIDATED_STOP_LEVEL"],
+        )
+        self.assertEqual(
+            updated["pending_notification_event"], "SIGNAL_INVALIDATED"
+        )
+        self.assertEqual(updated["monitor_status"], "STOP_TOUCHED")
+
+    @patch.object(scheduled_scan.Bot, "send_telegram_message", side_effect=[False, False, True, True])
+    def test_multiple_failed_lifecycle_events_are_queued_and_retried_in_order(self, send):
+        """Previously failed lifecycle alerts must never be overwritten."""
+        store = MemoryStore("url", "token")
+        signal = {
+            "signal_id": "queued-events",
+            "asset": "BTC",
+            "timeframe": "15m",
+            "expires_at": "2026-11-21T12:30:00+00:00",
+            "alert_sent": True,
+            "pending_notification_event": None,
+        }
+
+        first = scheduled_scan._notify_lifecycle_event(
+            store, signal, "SIGNAL_INVALIDATED", alerts_enabled=True
+        )
+        second = scheduled_scan._notify_lifecycle_event(
+            store, first, "SIGNAL_INVALIDATED_STOP_LEVEL", alerts_enabled=True
+        )
+
+        self.assertEqual(
+            second["pending_notification_events"],
+            ["SIGNAL_INVALIDATED", "SIGNAL_INVALIDATED_STOP_LEVEL"],
+        )
+        self.assertEqual(
+            second["pending_notification_event"], "SIGNAL_INVALIDATED"
+        )
+
+        state = store.load()
+        refreshed = scheduled_scan._retry_pending_notifications(
+            store, state, "15m", alerts_enabled=True
+        )
+        updated = refreshed["signals"]["queued-events"]
+
+        self.assertEqual(send.call_count, 4)
+        self.assertEqual(updated["pending_notification_events"], [])
+        self.assertIsNone(updated["pending_notification_event"])
+        self.assertEqual(
+            updated["last_notification_event"], "SIGNAL_INVALIDATED_STOP_LEVEL"
+        )
+
+    @patch.object(scheduled_scan.Bot, "send_telegram_message", side_effect=[False, False, False])
+    def test_retry_failure_keeps_entire_notification_queue_in_order(self, send):
+        store = MemoryStore("url", "token")
+        signal = {
+            "signal_id": "queued-failure",
+            "asset": "BTC",
+            "timeframe": "15m",
+            "expires_at": "2026-11-21T12:30:00+00:00",
+            "alert_sent": True,
+            "pending_notification_event": "SIGNAL_INVALIDATED",
+            "pending_notification_events": [
+                "SIGNAL_INVALIDATED",
+                "SIGNAL_INVALIDATED_STOP_LEVEL",
+            ],
+        }
+        store.upsert(signal)
+        refreshed = scheduled_scan._retry_pending_notifications(
+            store, store.load(), "15m", alerts_enabled=True
+        )
+        updated = refreshed["signals"]["queued-failure"]
+
+        self.assertEqual(send.call_count, 1)
+        self.assertEqual(
+            updated["pending_notification_events"],
+            ["SIGNAL_INVALIDATED", "SIGNAL_INVALIDATED_STOP_LEVEL"],
+        )
+        self.assertEqual(
+            store.state["signals"]["queued-failure"]["pending_notification_events"],
+            ["SIGNAL_INVALIDATED", "SIGNAL_INVALIDATED_STOP_LEVEL"],
+        )
+
+    @patch.object(scheduled_scan.Bot, "send_telegram_message", return_value=True)
+    def test_scan_summary_counts_successful_lifecycle_notification_retries(self, send):
+        """Successful lifecycle retries must be visible in scan telemetry."""
+        store = MemoryStore("url", "token")
+        signal = {
+            "signal_id": "retry-metric",
+            "asset": "BTC",
+            "timeframe": "15m",
+            "status": "EXPIRED",
+            "monitor_status": "ENDED",
+            "expires_at": "2026-11-21T12:30:00+00:00",
+            "alert_sent": True,
+            "pending_notification_event": "SIGNAL_EXPIRED",
+            "pending_notification_events": ["SIGNAL_EXPIRED"],
+        }
+        store.upsert(signal)
+        scan = {
+            "timeframes": ["15m"],
+            "analyses_completed": 1,
+            "technical_candidates_found": 0,
+            "candidates_blocked": 0,
+            "validated_candidates": 0,
+            "no_trade_count": 1,
+            "results": [{
+                "action": "NO TRADE",
+                "asset": "BTC",
+                "timeframe": "15m",
+                "data_valid": False,
+            }],
+        }
+
+        with patch.object(
+            scheduled_scan, "UpstashSignalStateStore", return_value=store
+        ), patch.object(
+            scheduled_scan.Bot, "run_scan", return_value=scan
+        ), patch.object(
+            scheduled_scan, "SIGNAL_ALERTS_ENABLED", True
+        ), patch.object(
+            scheduled_scan, "STRATEGY_VALIDATED", True
+        ), patch.object(
+            scheduled_scan.Bot, "TELEGRAM_ENABLED", True
+        ):
+            result = scheduled_scan.run_scheduled_scan("15m")
+
+        self.assertEqual(result["lifecycle_notifications_retried"], 1)
+        self.assertEqual(send.call_count, 1)
+        self.assertIsNone(
+            store.state["signals"]["retry-metric"]["pending_notification_event"]
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
