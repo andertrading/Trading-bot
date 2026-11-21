@@ -46,6 +46,13 @@ def _positive_number(value: Any, field: str) -> float:
         raise ValueError(f"{field} must be a finite positive number")
     return number
 
+def _policy_number(value: Any, field: str, *, maximum: float | None = None) -> float:
+    """Parse a finite positive policy value without accepting booleans."""
+    number = _positive_number(value, field)
+    if maximum is not None and number > maximum:
+        raise ValueError(f"{field} must be in (0, {maximum}]")
+    return number
+
 
 def make_signal_id(asset: str, timeframe: str, candle_timestamp: str,
                    direction: str = "LONG") -> str:
@@ -110,18 +117,14 @@ def build_signal_record(result: dict, generated_at: datetime | str,
     )
     risk_pct = abs(entry - stop) / entry * 100
     reward_pct = abs(target - entry) / entry * 100
-    minimum_rr = float(result.get("minimum_risk_reward", 2.0))
-    minimum_remaining = float(
-        result.get("minimum_remaining_risk_fraction", 0.5)
+    minimum_rr = _policy_number(
+        result.get("minimum_risk_reward", 2.0), "minimum_risk_reward"
     )
-    if not math.isfinite(minimum_rr) or minimum_rr <= 0:
-        raise ValueError("minimum_risk_reward must be positive")
-    if (
-        not math.isfinite(minimum_remaining)
-        or minimum_remaining <= 0
-        or minimum_remaining > 1
-    ):
-        raise ValueError("minimum_remaining_risk_fraction must be in (0, 1]")
+    minimum_remaining = _policy_number(
+        result.get("minimum_remaining_risk_fraction", 0.5),
+        "minimum_remaining_risk_fraction",
+        maximum=1.0,
+    )
 
     record = {
         "schema_version": SCHEMA_VERSION,
@@ -175,19 +178,14 @@ def _entry_zone_is_valid(signal: dict, price: float) -> bool:
     entry = _positive_number(signal.get("entry_reference"), "entry_reference")
     stop = _positive_number(signal.get("stop"), "stop")
     target = _positive_number(signal.get("target"), "target")
-    minimum_rr = float(signal.get("minimum_risk_reward", 2.0))
-    minimum_remaining = float(
-        signal.get("minimum_remaining_risk_fraction", 0.5)
+    minimum_rr = _policy_number(
+        signal.get("minimum_risk_reward", 2.0), "minimum_risk_reward"
     )
-
-    if not math.isfinite(minimum_rr) or minimum_rr <= 0:
-        raise ValueError("minimum_risk_reward must be positive")
-    if (
-        not math.isfinite(minimum_remaining)
-        or minimum_remaining <= 0
-        or minimum_remaining > 1
-    ):
-        raise ValueError("minimum_remaining_risk_fraction must be in (0, 1]")
+    minimum_remaining = _policy_number(
+        signal.get("minimum_remaining_risk_fraction", 0.5),
+        "minimum_remaining_risk_fraction",
+        maximum=1.0,
+    )
 
     if direction == "LONG":
         planned_risk = entry - stop
