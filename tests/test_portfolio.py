@@ -214,5 +214,113 @@ class TestPortfolio(unittest.TestCase):
         self.assertEqual(result["status"], "BLOCKED")
 
 
+    def test_sized_trade_admission_uses_total_reserved_risk_including_fees(self):
+        from portfolio import can_add_sized_trade
+
+        sizing = {
+            "status": "SIMULACION_NO_VALIDADA",
+            "validated": False,
+            "risk_amount_usd": 10.0,
+            "position_risk_usd": 8.0,
+            "fixed_costs_usd": 2.0,
+            "total_reserved_risk_usd": 10.0,
+        }
+        result = can_add_sized_trade(
+            sizing,
+            open_positions=[{"risk_usd": 20.0}],
+            positions_confirmed=True,
+            capital_usd=1000,
+        )
+        self.assertTrue(result["allowed"])
+        self.assertAlmostEqual(result["proposed_risk_usd"], 10.0)
+        self.assertFalse(result["live_execution_authorized"])
+
+    def test_sized_trade_admission_blocks_when_fees_push_over_aggregate_limit(self):
+        from portfolio import can_add_sized_trade
+
+        sizing = {
+            "status": "SIMULACION_NO_VALIDADA",
+            "validated": False,
+            "risk_amount_usd": 10.0,
+            "position_risk_usd": 9.0,
+            "fixed_costs_usd": 1.0,
+            "total_reserved_risk_usd": 10.0,
+        }
+        result = can_add_sized_trade(
+            sizing,
+            open_positions=[{"risk_usd": 21.0}],
+            positions_confirmed=True,
+            capital_usd=1000,
+        )
+        self.assertFalse(result["allowed"])
+
+    def test_sized_trade_admission_blocks_unknown_open_positions(self):
+        from portfolio import can_add_sized_trade
+
+        sizing = {
+            "status": "SIMULACION_NO_VALIDADA",
+            "validated": False,
+            "risk_amount_usd": 5.0,
+            "position_risk_usd": 5.0,
+            "fixed_costs_usd": 0.0,
+            "total_reserved_risk_usd": 5.0,
+        }
+        result = can_add_sized_trade(
+            sizing,
+            positions_confirmed=False,
+            capital_usd=1000,
+        )
+        self.assertFalse(result["allowed"])
+
+    def test_sized_trade_admission_blocks_open_position_without_known_stop_risk(self):
+        from portfolio import can_add_sized_trade
+
+        sizing = {
+            "status": "SIMULACION_NO_VALIDADA",
+            "validated": False,
+            "risk_amount_usd": 5.0,
+            "position_risk_usd": 5.0,
+            "fixed_costs_usd": 0.0,
+            "total_reserved_risk_usd": 5.0,
+        }
+        result = can_add_sized_trade(
+            sizing,
+            open_positions=[{"position_id": 123}],
+            positions_confirmed=True,
+            capital_usd=1000,
+        )
+        self.assertFalse(result["allowed"])
+
+    def test_sized_trade_admission_rejects_inconsistent_reserved_risk(self):
+        from portfolio import can_add_sized_trade
+
+        sizing = {
+            "status": "SIMULACION_NO_VALIDADA",
+            "validated": False,
+            "risk_amount_usd": 5.0,
+            "position_risk_usd": 5.0,
+            "fixed_costs_usd": 2.0,
+            "total_reserved_risk_usd": 7.0,
+        }
+        result = can_add_sized_trade(
+            sizing,
+            open_positions=[],
+            positions_confirmed=True,
+            capital_usd=1000,
+        )
+        self.assertFalse(result["allowed"])
+
+    def test_sized_trade_admission_rejects_blocked_sizing_result(self):
+        from portfolio import can_add_sized_trade
+
+        result = can_add_sized_trade(
+            {"status": "BLOCKED", "total_reserved_risk_usd": 5.0},
+            open_positions=[],
+            positions_confirmed=True,
+            capital_usd=1000,
+        )
+        self.assertFalse(result["allowed"])
+
+
 if __name__ == "__main__":
     unittest.main()
