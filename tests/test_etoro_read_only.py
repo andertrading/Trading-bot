@@ -134,6 +134,7 @@ class EtoroReadOnlyClientTests(unittest.TestCase):
         }
         invalid = [
             dict(base, symbol="AAPL"),
+            dict(base, instrumentId=None),
             dict(base, units=2),
             dict(base, unknown="field"),
             dict(base, orderCurrency="eur"),
