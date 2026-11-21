@@ -70,6 +70,7 @@ class TestTelegramResearchReport(unittest.TestCase):
         report = Bot.build_telegram_messages(self.scan)[1]
         self.assertIn("Probabilidad histórica: <b>NO VALIDADA</b>", report)
         self.assertIn("Caducidad de la señal: <b>NO CONFIGURADA</b>", report)
+        self.assertIn("Ventana para entrar: <b>NO CONFIGURADA</b>", report)
         self.assertIn("Duración estimada de operación: <b>NO VALIDADA</b>", report)
         self.assertIn("Noticias y costes: <b>NO INCORPORADOS AÚN</b>", report)
 
@@ -103,11 +104,13 @@ class TestTelegramResearchReport(unittest.TestCase):
         self.assertIn("No se han detectado candidatas técnicas", messages[1])
 
 
-    def test_report_displays_calendar_aware_signal_expiry(self):
+    def test_report_displays_calendar_aware_signal_expiry_and_entry_window(self):
+        self.candidate["generated_at"] = "2026-11-21T12:00:00+00:00"
         self.candidate["expires_at"] = "2026-11-21T12:30:00+00:00"
         report = Bot.build_telegram_messages(self.scan)[1]
         self.assertIn("Caducidad de la señal:", report)
         self.assertNotIn("Caducidad de la señal: <b>NO CONFIGURADA</b>", report)
+        self.assertIn("Ventana para entrar: <b>30 min</b>", report)
 
     def test_report_recomputes_rr_instead_of_trusting_candidate_field(self):
         self.candidate["risk_reward"] = 999
