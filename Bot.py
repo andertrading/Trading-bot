@@ -658,7 +658,28 @@ def build_telegram_messages(scan_result):
         entry = format_number(entry_value, 4)
         stop = format_number(stop_value, 4)
         target = format_number(target_value, 4)
-        rr = format_number(candidate.get("risk_reward"), 2)
+        # El RR mostrado debe derivarse de los niveles reales, no de un
+        # campo auxiliar que podría estar desactualizado o ser inconsistente.
+        try:
+            entry_numeric = float(entry_value)
+            stop_numeric = float(stop_value)
+            target_numeric = float(target_value)
+            if not all(
+                math.isfinite(value)
+                for value in (entry_numeric, stop_numeric, target_numeric)
+            ):
+                raise ValueError("non-finite signal levels")
+            reward_distance = target_numeric - entry_numeric
+            risk_distance = entry_numeric - stop_numeric
+            if reward_distance <= 0 or risk_distance <= 0:
+                raise ValueError("invalid LONG signal levels")
+            rr_numeric = reward_distance / risk_distance
+            if not math.isfinite(rr_numeric) or rr_numeric <= 0:
+                raise ValueError("invalid risk/reward")
+        except (TypeError, ValueError, OverflowError):
+            rr_numeric = None
+
+        rr = format_number(rr_numeric, 2)
 
         potential_reward = _percentage_between(
             entry_value, target_value
@@ -688,22 +709,16 @@ def build_telegram_messages(scan_result):
             risk_amount_text = "N/D"
             risk_amount = None
 
-        try:
-            rr_numeric = float(candidate.get("risk_reward"))
-            reward_amount = (
-                risk_amount * rr_numeric
-                if risk_amount is not None
-                and math.isfinite(rr_numeric)
-                and rr_numeric > 0
-                else None
-            )
-            reward_amount_text = (
-                f"{reward_amount:.2f} USD"
-                if reward_amount is not None and math.isfinite(reward_amount)
-                else "N/D"
-            )
-        except (TypeError, ValueError, OverflowError):
-            reward_amount_text = "N/D"
+        reward_amount = (
+            risk_amount * rr_numeric
+            if risk_amount is not None and rr_numeric is not None
+            else None
+        )
+        reward_amount_text = (
+            f"{reward_amount:.2f} USD"
+            if reward_amount is not None and math.isfinite(reward_amount)
+            else "N/D"
+        )
 
         data_timestamp = candidate.get("data_timestamp")
         data_age = candidate.get("data_age_minutes")
