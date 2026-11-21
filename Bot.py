@@ -910,9 +910,9 @@ def build_telegram_messages(scan_result):
             f"Movimiento adverso hasta stop: <b>{risk_text}</b>\n"
             f"Ratio riesgo/beneficio teórico: <b>{rr}</b>\n"
             "<i>Porcentajes sobre niveles OHLC; antes de costes y slippage.</i>\n\n"
-            "💸 <b>COMPROBACIÓN DE COSTES</b>\\n"
-            + "\\n".join(escape_html(line) for line in _format_cost_readiness(candidate))
-            + "\\n\\n"
+            "💸 <b>COMPROBACIÓN DE COSTES</b>\n"
+            + "\n".join(escape_html(line) for line in _format_cost_readiness(candidate))
+            + "\n\n"
             "🧮 <b>RIESGO DE REFERENCIA</b>\n"
             f"Tier provisional: <b>{risk}</b>\n"
             f"Pérdida teórica al SL sobre {INITIAL_CAPITAL_USD:.0f} USD: "
