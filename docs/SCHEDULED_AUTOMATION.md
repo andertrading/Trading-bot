@@ -19,6 +19,18 @@ All cron times are UTC.
 
 GitHub scheduled workflows have a five-minute minimum interval, but GitHub documents that scheduled runs can be delayed or dropped under high load. This is periodic polling, not a guaranteed real-time feed.
 
+## Indicative data-provider budget
+
+With the current routing (five crypto assets and five US equities through Twelve Data; CSPX/CNDX intraday through Yahoo; CSPX/CNDX daily through EODHD), the planned cadence estimates approximately:
+
+- Crypto M15: 5 symbols × 96 scans/day = 480 Twelve Data credits.
+- US equities M15: 5 symbols × about 26 completed session bars = 130 credits on a normal trading day.
+- Daily swing: about 10 Twelve Data symbols = 10 credits/day.
+- Estimated Twelve Data total: about 620 credits/day, before retries or manual use of the same key.
+- EODHD daily ETF history: about 2 requests/day.
+
+Twelve Data currently lists Basic at 8 credits/minute and 800 credits/day. The scanner's 8.5-second request spacing is designed to stay below the per-minute cap. The estimated daily budget leaves limited headroom, so do not use the same key for heavy manual downloads while automation is running. Confirm actual usage in the provider dashboard before enabling the schedule. Yahoo ETF intraday remains subject to provider rate limits and may be rejected as stale.
+
 ## Safety defaults
 
 The workflow is opt-in and does nothing until the repository Actions variable `SIGNAL_AUTOMATION_ENABLED` is exactly `true`.
