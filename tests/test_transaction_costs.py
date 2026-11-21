@@ -14,7 +14,7 @@ class TestEtoroTransactionCosts(unittest.TestCase):
 
     def test_real_stock_uses_conservative_two_dollar_fee_each_side(self):
         result = costs.estimate_etoro_trade_costs(
-            "AAPL", 100.0, 110.0, 1.0, market_spread_bps=0
+            "AAPL", 100.0, 110.0, 1.0
         )
         self.assertTrue(result["valid"])
         self.assertEqual(result["commission_cost"], 4.0)
