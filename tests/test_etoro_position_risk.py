@@ -3,8 +3,9 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from unittest.mock import Mock
 
-from etoro_read_only import EtoroAPIError, EtoroQuote, EtoroReadOnlyClient, EtoroResponse
+from etoro_read_only import EtoroAPIError, EtoroAccountSnapshot, EtoroQuote, EtoroReadOnlyClient, EtoroResponse
 from etoro_position_risk import (
+    calculate_account_gross_stop_risk_from_client,
     calculate_account_gross_stop_risk_usd,
     calculate_position_gross_stop_risk_usd,
     normalize_instrument_breakdown,
@@ -179,6 +180,47 @@ class PositionGrossStopRiskTests(unittest.TestCase):
     def test_position_mapping_key_must_match_position_id(self):
         with self.assertRaises(EtoroAPIError):
             calculate_account_gross_stop_risk_usd({9999: position()}, {101: quote()})
+
+    def test_end_to_end_read_only_path_fetches_breakdown_and_quotes(self):
+        pnl_position = {
+            "positionId": 7001,
+            "instrumentId": 101,
+            "cid": 123,
+        }
+        snapshot = EtoroAccountSnapshot(
+            account_currency="USD",
+            account_currency_source="bot_configuration",
+            client_id=123,
+            available_cash=Decimal("500"),
+            unrealized_pnl=Decimal("0"),
+            positions=(pnl_position,),
+            has_unbounded_stop_risk=False,
+        )
+        client = Mock()
+        client.get_instrument_breakdown.return_value = EtoroResponse(breakdown(), 200, {})
+        client.get_realtime_quotes.return_value = {101: quote()}
+        result = calculate_account_gross_stop_risk_from_client(client, snapshot, NOW)
+        self.assertEqual(result["gross_stop_risk_usd"], Decimal("8"))
+        self.assertIsNone(result["risk_usd"])
+        client.get_instrument_breakdown.assert_called_once_with(123)
+        client.get_realtime_quotes.assert_called_once_with([101], NOW)
+
+    def test_end_to_end_path_rejects_instrument_mismatch(self):
+        pnl_position = {"positionId": 7001, "instrumentId": 999, "cid": 123}
+        snapshot = EtoroAccountSnapshot(
+            account_currency="USD",
+            account_currency_source="bot_configuration",
+            client_id=123,
+            available_cash=Decimal("500"),
+            unrealized_pnl=Decimal("0"),
+            positions=(pnl_position,),
+            has_unbounded_stop_risk=False,
+        )
+        client = Mock()
+        client.get_instrument_breakdown.return_value = EtoroResponse(breakdown(), 200, {})
+        with self.assertRaises(EtoroAPIError):
+            calculate_account_gross_stop_risk_from_client(client, snapshot, NOW)
+        client.get_realtime_quotes.assert_not_called()
 
     def test_missing_quote_blocks_aggregate(self):
         with self.assertRaises(EtoroAPIError):
