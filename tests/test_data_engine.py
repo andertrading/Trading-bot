@@ -2390,10 +2390,10 @@ class TestTwelveDataHistoricalWindows(unittest.TestCase):
         windows = engine.twelvedata_history_windows(
             "BTC", end=end, lookback_days=700
         )
-        self.assertEqual(len(windows), 14)
+        self.assertEqual(len(windows), 28)
         self.assertEqual(windows[-1][1], datetime(2026, 11, 21, 3, 15, tzinfo=timezone.utc))
         for start, finish in windows:
-            self.assertEqual(finish - start, timedelta(days=50))
+            self.assertEqual(finish - start, timedelta(days=25))
 
     def test_equity_history_uses_larger_contiguous_windows(self):
         end = datetime(2026, 11, 21, 3, 23, tzinfo=timezone.utc)
