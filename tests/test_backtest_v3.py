@@ -195,6 +195,45 @@ class TestBacktestV3(unittest.TestCase):
         self.assertEqual(backtest_v3._provider_for_asset("CSPX", "15m"), "yahoo")
         self.assertEqual(backtest_v3._provider_for_asset("CSPX", "1d"), "eodhd")
         self.assertEqual(backtest_v3._provider_for_asset("CNDX", "1d"), "eodhd")
+    def test_backtest_cost_model_applies_known_stock_fees_and_flags_unknown_spread(self):
+        fields = backtest_v3._estimate_backtest_cost_fields(
+            "AAPL",
+            {
+                "entry": 100.0,
+                "exit": 110.0,
+                "stop": 95.0,
+                "score": 90,
+                "entry_time": "2026-11-20T10:00:00",
+                "exit_time": "2026-11-20T11:00:00",
+            },
+        )
+        self.assertAlmostEqual(fields["commission_cost_usd"], 4.0)
+        self.assertAlmostEqual(fields["hypothetical_risk_budget_usd"], 2.5)
+        self.assertAlmostEqual(fields["result_R_after_known_fees"], 0.4)
+        self.assertFalse(fields["costs_complete"])
+        self.assertIn("live_market_bid_ask_spread_missing", fields["unpriced_costs"])
+
+    def test_metrics_report_known_fee_adjusted_results_separately(self):
+        metrics = backtest_v3.calculate_metrics([
+            {
+                "result_R": 2.0,
+                "result_R_after_known_fees": 1.5,
+                "duration_bars": 2,
+                "costs_complete": False,
+            },
+            {
+                "result_R": -1.0,
+                "result_R_after_known_fees": -1.2,
+                "duration_bars": 3,
+                "costs_complete": False,
+            },
+        ])
+        self.assertAlmostEqual(metrics["total_R"], 1.0)
+        self.assertAlmostEqual(metrics["known_fee_adjusted_total_R"], 0.3)
+        self.assertAlmostEqual(metrics["known_fee_adjusted_average_R"], 0.15)
+        self.assertEqual(metrics["trades_with_complete_costs"], 0)
+        self.assertEqual(metrics["trades_with_unpriced_costs"], 2)
+
     def test_run_backtest_rejects_invalid_history_before_indicators(self):
         data = self.make_execution_data()
         data.iloc[6, data.columns.get_loc("High")] = 1.0
