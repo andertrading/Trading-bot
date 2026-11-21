@@ -2129,6 +2129,33 @@ class TestAutomatedScanSchedulingHelpers(unittest.TestCase):
         )
         self.assertEqual(expiry, datetime(2026, 11, 21, 12, 30, tzinfo=timezone.utc))
 
+    def test_equity_intraday_expiry_counts_only_session_bars(self):
+        expiry = engine.signal_expiry_at(
+            "AAPL", "15m",
+            generated_at="2026-11-20T16:50:00Z",
+            data_timestamp="2026-11-20T16:45:00Z",
+            validity_bars=2,
+        )
+        self.assertEqual(expiry, datetime(2026, 11, 20, 17, 30, tzinfo=timezone.utc))
+
+    def test_equity_intraday_expiry_skips_weekend_after_market_close(self):
+        expiry = engine.signal_expiry_at(
+            "AAPL", "15m",
+            generated_at="2026-11-20T20:50:00Z",
+            data_timestamp="2026-11-20T20:45:00Z",
+            validity_bars=2,
+        )
+        self.assertEqual(expiry, datetime(2026, 11, 23, 15, 0, tzinfo=timezone.utc))
+
+    def test_equity_intraday_expiry_skips_exchange_holiday(self):
+        expiry = engine.signal_expiry_at(
+            "AAPL", "15m",
+            generated_at="2026-11-25T20:50:00Z",
+            data_timestamp="2026-11-25T20:45:00Z",
+            validity_bars=2,
+        )
+        self.assertEqual(expiry, datetime(2026, 11, 27, 15, 0, tzinfo=timezone.utc))
+
     def test_crypto_daily_expiry_uses_utc_day_boundaries(self):
         expiry = engine.signal_expiry_at(
             "BTC",
