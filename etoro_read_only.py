@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import os
 import re
 import time
@@ -391,8 +391,13 @@ def normalize_realtime_quotes(
             )
         except ValueError:
             raise EtoroAPIError(f"Fecha inválida en cotización {instrument_id}") from None
-        if quote_time.tzinfo is None or quote_time.utcoffset() != timedelta(0):
-            raise EtoroAPIError(f"La fecha de cotización {instrument_id} no está en UTC")
+        if quote_time.tzinfo is None or quote_time.utcoffset() is None:
+            raise EtoroAPIError(
+                f"La fecha de cotización {instrument_id} no incluye zona horaria"
+            )
+        # Any explicit UTC offset identifies an unambiguous instant. Normalize
+        # it to UTC instead of rejecting equivalent timestamps such as +01:00.
+        quote_time = quote_time.astimezone(timezone.utc)
 
         age_seconds = (now_utc - quote_time).total_seconds()
         if age_seconds < -5 or age_seconds > max_age_seconds:
@@ -768,7 +773,12 @@ def normalize_instrument_eligibility(
         raise EtoroAPIError("Los instrumentIds esperados contienen duplicados")
     if "currency" not in response.data:
         raise EtoroAPIError("La respuesta de elegibilidad no incluye el campo currency")
-    if response.data.get("currency") != "USD":
+    response_currency = response.data.get("currency")
+    if not isinstance(response_currency, str) or not response_currency.strip():
+        raise EtoroAPIError("La divisa de la respuesta de elegibilidad no es válida")
+    # Currency codes are case-insensitive; tolerate harmless surrounding
+    # whitespace while continuing to reject any currency other than USD.
+    if response_currency.strip().upper() != "USD":
         raise EtoroAPIError("La respuesta de elegibilidad no está en USD")
 
     not_found_ids = response.data.get("notFoundInstrumentIds")
