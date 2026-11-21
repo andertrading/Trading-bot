@@ -221,6 +221,7 @@ def run_audit(
 
     gross_position_risk_validated = False
     complete_position_risk_validated = False
+    position_risk_diagnostic_status = "NOT_CHECKED"
     if account_valid:
         try:
             risk_diagnostic = calculate_account_stop_risk_from_client(
@@ -235,12 +236,16 @@ def run_audit(
                 "COMPLETE_NO_OPEN_POSITIONS",
             }
             complete_position_risk_validated = risk_diagnostic["complete"]
-        except Exception:
+            position_risk_diagnostic_status = risk_diagnostic["status"]
+        except Exception as exc:
             gross_position_risk_validated = False
             complete_position_risk_validated = False
+            position_risk_diagnostic_status = _resolution_error_status(exc)
 
     eligibility_valid = False
+    eligibility_status = "NOT_CHECKED"
     quotes_valid = False
+    quotes_status = "NOT_CHECKED"
     if resolved and len(resolved) == len(enabled_assets):
         instrument_ids = [item["instrumentId"] for item in resolved.values()]
         try:
@@ -252,8 +257,12 @@ def run_audit(
                 set(eligibility) == set(instrument_ids)
                 and all(item.supports_long for item in eligibility.values())
             )
-        except Exception:
+            eligibility_status = (
+                "VALIDATED" if eligibility_valid else "LONG_NOT_SUPPORTED_OR_INCOMPLETE"
+            )
+        except Exception as exc:
             eligibility_valid = False
+            eligibility_status = _resolution_error_status(exc)
         try:
             client.get_realtime_quotes(
                 instrument_ids,
@@ -261,8 +270,10 @@ def run_audit(
                 max_age_seconds=30,
             )
             quotes_valid = True
-        except Exception:
+            quotes_status = "VALIDATED"
+        except Exception as exc:
             quotes_valid = False
+            quotes_status = _resolution_error_status(exc)
 
     instrument_report = [
         {
@@ -296,8 +307,11 @@ def run_audit(
         "account_snapshot_missing_fields": account_snapshot_missing_fields,
         "instrument_resolution": instrument_report,
         "instrument_eligibility_validated": eligibility_valid,
+        "instrument_eligibility_status": eligibility_status,
         "complete_realtime_quotes_validated": quotes_valid,
+        "realtime_quotes_status": quotes_status,
         "gross_position_stop_risk_diagnostic_validated": gross_position_risk_validated,
+        "position_risk_diagnostic_status": position_risk_diagnostic_status,
         "complete_position_risk_validated": complete_position_risk_validated,
         "portfolio_risk_admission_ready": False,
         "overall_pass": overall,
