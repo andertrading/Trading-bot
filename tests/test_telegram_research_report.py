@@ -34,14 +34,14 @@ class TestTelegramResearchReport(unittest.TestCase):
         }
 
     @patch.object(Bot, "send_telegram_message", side_effect=[True, True])
-    @unittest.mock.patch.object(Bot, "send_telegram_photo", return_value=True)
-    @unittest.mock.patch.object(Bot, "generate_candidate_chart", return_value=b"chart")
+    @patch.object(Bot, "send_telegram_photo", return_value=True)
+    @patch.object(Bot, "generate_candidate_chart", return_value=b"chart")
     def test_legacy_notification_sends_full_text_before_short_chart_caption(
         self, generate_chart, send_photo, send_text
     ):
         self.candidate["generated_at"] = "2026-11-21T12:00:00+00:00"
         self.candidate["expires_at"] = "2026-11-21T12:30:00+00:00"
-        with unittest.mock.patch.object(Bot, "TELEGRAM_ENABLED", True):
+        with patch.object(Bot, "TELEGRAM_ENABLED", True):
             result = Bot.send_telegram_notifications(self.scan)
 
         self.assertEqual(result, "sent:2")
