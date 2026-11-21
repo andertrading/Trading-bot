@@ -2125,6 +2125,33 @@ class TestAutomatedScanSchedulingHelpers(unittest.TestCase):
 
 
 
+class TestYahooRepairDownload(unittest.TestCase):
+    @patch.object(engine.yf, "Ticker")
+    def test_repaired_daily_download_uses_yfinance_repair_and_utc_dates(self, ticker):
+        index = pd.DatetimeIndex(
+            ["2025-01-02 00:00:00", "2025-01-03 00:00:00"],
+            tz="Europe/London",
+        )
+        frame = make_ohlcv(index)
+        ticker.return_value.history.return_value = frame
+
+        result = engine._download_yahoo_repaired_daily(
+            "CSPX.L",
+            datetime(2025, 1, 1, tzinfo=timezone.utc),
+            datetime(2025, 1, 5, tzinfo=timezone.utc),
+        )
+
+        ticker.return_value.history.assert_called_once()
+        self.assertTrue(
+            ticker.return_value.history.call_args.kwargs["repair"]
+        )
+        self.assertEqual(str(result.index.tz), "UTC")
+        self.assertEqual(
+            result.index[0],
+            pd.Timestamp("2025-01-02 00:00:00", tz="UTC"),
+        )
+        self.assertEqual(list(result.columns), ["Open", "High", "Low", "Close", "Volume"])
+
 class TestExtendedDailyYahooCleaning(unittest.TestCase):
     def setUp(self):
         self.frame = make_ohlcv(
