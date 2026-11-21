@@ -291,6 +291,7 @@ def advance_signal(
 
     # Use the completed candle's high/low so intrabar stop/target touches
     # are not missed merely because the candle later closed back inside.
+    # Validate the OHLC envelope before accepting its timestamp as processed.
     high = None
     low = None
     if price_data_is_new and (latest_high is not None or latest_low is not None):
@@ -311,10 +312,23 @@ def advance_signal(
         )
         if high is not None and low is not None and high < low:
             raise ValueError("latest_high must be greater than or equal to latest_low")
+        if latest_price is not None:
+            close = _positive_number(latest_price, "latest_price")
+            if high is not None and close > high:
+                raise ValueError("latest_price must not exceed latest_high")
+            if low is not None and close < low:
+                raise ValueError("latest_price must not be below latest_low")
     elif price_data_is_new and latest_price is not None:
         price = _positive_number(latest_price, "latest_price")
         high = price
         low = price
+
+    if price_data_is_new and latest_data_timestamp is not None and (
+        latest_price is not None or latest_high is not None or latest_low is not None
+    ):
+        updated["last_market_data_timestamp"] = _as_utc(
+            latest_data_timestamp
+        ).isoformat()
 
     direction = str(updated.get("direction", "LONG")).upper()
     stop = _positive_number(updated.get("stop"), "stop")
