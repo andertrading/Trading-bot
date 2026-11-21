@@ -683,6 +683,10 @@ def build_telegram_messages(scan_result):
 
         data_timestamp = candidate.get("data_timestamp")
         data_age = candidate.get("data_age_minutes")
+        data_provider = escape_html(candidate.get("data_provider", "N/D"))
+        adjustment_policy = escape_html(
+            candidate.get("price_adjustment_policy", "N/D")
+        )
         signal_expiry = candidate.get("expires_at")
         if data_timestamp:
             data_time_text = escape_html(format_timestamp(data_timestamp))
@@ -768,7 +772,9 @@ def build_telegram_messages(scan_result):
             f"{technical_text}\n\n"
             "🕒 <b>CALIDAD DEL DATO</b>\n"
             f"Última vela: {data_time_text}\n"
-            f"Antigüedad al analizar: <b>{age_text}</b>\n\n"
+            f"Antigüedad al analizar: <b>{age_text}</b>\n"
+            f"Proveedor: <b>{data_provider}</b>\n"
+            f"Ajuste OHLC: <code>{adjustment_policy}</code>\n\n"
             "🔒 <b>VALIDACIONES PENDIENTES</b>\n"
             f"{blocker_text}\n\n"
             "━━━━━━━━━━━━━━━━━━\n"
