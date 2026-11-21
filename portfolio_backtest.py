@@ -55,6 +55,8 @@ def _empty_result(capital):
             "max_drawdown_usd": 0.0,
             "max_drawdown_pct": 0.0,
             "peak_open_risk_usd": 0.0,
+            "peak_open_risk_pct_of_equity": 0.0,
+            "risk_limit_breach_events": 0,
             "peak_open_notional_usd": 0.0,
             "portfolio_risk_limit_pct": 0.0,
             "costs_included": False,
@@ -183,6 +185,8 @@ def simulate_portfolio(
     max_drawdown = 0.0
     max_drawdown_pct = 0.0
     peak_open_risk = 0.0
+    peak_open_risk_pct = 0.0
+    risk_limit_breach_events = 0
     peak_open_notional = 0.0
 
     for event_time in timeline:
@@ -249,6 +253,13 @@ def simulate_portfolio(
         open_notional = sum(p["notional_usd"] for p in open_positions.values())
         peak_open_risk = max(peak_open_risk, open_risk)
         peak_open_notional = max(peak_open_notional, open_notional)
+        event_risk_breach = False
+        if equity > 0:
+            current_open_risk_pct = open_risk / equity * 100
+            peak_open_risk_pct = max(peak_open_risk_pct, current_open_risk_pct)
+            event_risk_breach = current_open_risk_pct > portfolio_limit_pct * 100 + 1e-10
+        elif open_risk > 0:
+            event_risk_breach = True
 
         # Realize exits only after allocating entries at this timestamp.
         closed_at_timestamp = []
@@ -281,8 +292,24 @@ def simulate_portfolio(
                 max_drawdown_pct,
                 current_drawdown_pct,
             )
+            # A realized loss can increase the percentage risk of positions
+            # that remain open, even though their USD stop risk is unchanged.
+            remaining_open_risk = sum(
+                p["allocated_risk_usd"] for p in open_positions.values()
+            )
+            if equity > 0:
+                current_open_risk_pct = remaining_open_risk / equity * 100
+                peak_open_risk_pct = max(peak_open_risk_pct, current_open_risk_pct)
+                event_risk_breach = event_risk_breach or (
+                    current_open_risk_pct > portfolio_limit_pct * 100 + 1e-10
+                )
+            elif remaining_open_risk > 0:
+                event_risk_breach = True
             for position in closed_at_timestamp:
                 position["equity_after_exit_usd"] = equity
+
+        if event_risk_breach:
+            risk_limit_breach_events += 1
 
     accepted_rows = []
     for position in accepted:
@@ -323,6 +350,8 @@ def simulate_portfolio(
         "max_drawdown_usd": round(max_drawdown, 8),
         "max_drawdown_pct": round(max_drawdown_pct, 6),
         "peak_open_risk_usd": round(peak_open_risk, 8),
+        "peak_open_risk_pct_of_equity": round(peak_open_risk_pct, 6),
+        "risk_limit_breach_events": risk_limit_breach_events,
         "peak_open_notional_usd": round(peak_open_notional, 8),
         "costs_included": False,
     })
