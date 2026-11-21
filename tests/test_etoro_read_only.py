@@ -729,6 +729,7 @@ class AccountSnapshotTests(unittest.TestCase):
                 "positions": [{
                     "positionId": 10,
                     "instrumentId": 20,
+                    "mirrorId": 0,
                     "isBuy": True,
                     "openRate": "100",
                     "stopLossRate": "95",
@@ -795,6 +796,11 @@ class AccountSnapshotTests(unittest.TestCase):
     def test_non_usd_configuration_fails_closed(self):
         with self.assertRaises(EtoroAPIError):
             normalize_account_snapshot(self.payload, "EUR")
+
+    def test_mirrored_position_is_rejected_even_if_mirror_list_is_empty(self):
+        self.payload["clientPortfolio"]["positions"][0]["mirrorId"] = 7
+        with self.assertRaises(EtoroAPIError):
+            normalize_account_snapshot(self.payload, "USD")
 
     def test_no_stop_position_is_preserved_and_flagged_as_unbounded(self):
         self.payload["clientPortfolio"]["positions"][0]["isNoStopLoss"] = True
