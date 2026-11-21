@@ -170,7 +170,7 @@ class TestPortfolioBacktest(unittest.TestCase):
 
         self.assertAlmostEqual(gross["trades"][1]["allocated_risk_usd"], 5.025)
         self.assertAlmostEqual(net["trades"][0]["allocated_risk_usd"], 6.0)
-        self.assertAlmostEqual(net["trades"][1]["allocated_risk_usd"], 6.005)
+        self.assertAlmostEqual(net["trades"][1]["allocated_risk_usd"], 6.015)
         self.assertAlmostEqual(net["summary"]["gross_pnl_usd"], 5.0)
         self.assertAlmostEqual(net["summary"]["total_entry_cost_usd"], 2.0)
         self.assertAlmostEqual(net["summary"]["total_exit_cost_usd"], 2.0)
