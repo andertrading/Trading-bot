@@ -44,6 +44,7 @@ from data_engine import (
     download_data,
     get_data_timestamp,
     is_data_fresh,
+    is_intraday_market_open,
 )
 
 from strategies import evaluate_signal
@@ -845,6 +846,7 @@ def no_trade(asset, timeframe, reason):
         "mode": "PAPER_ONLY",
         "tradable": False,
         "validated": False,
+        "data_valid": False,
     }
 
 
@@ -1072,6 +1074,8 @@ def analyze_asset(asset, timeframe):
         result["timeframe"] = timeframe
         result["data_timestamp"] = timestamp.isoformat()
         result["data_age_minutes"] = round(age_minutes, 2)
+        result["data_valid"] = True
+        result["last_price"] = float(df["Close"].iloc[-1])
         result["mode"] = "PAPER_ONLY"
         result["currency"] = ACCOUNT_CURRENCY
 
@@ -1106,10 +1110,24 @@ def analyze_asset(asset, timeframe):
         )
 
 
-def run_scan():
+def run_scan(timeframes=None):
+    """Analyze selected timeframes without requiring broker/account access."""
     results = []
 
-    logger.info("SCAN LOOP START")
+    if timeframes is None:
+        selected_timeframes = (INTRADAY_INTERVAL, SWING_INTERVAL)
+    else:
+        selected_timeframes = tuple(dict.fromkeys(timeframes))
+        if not selected_timeframes or any(
+            timeframe not in (INTRADAY_INTERVAL, SWING_INTERVAL)
+            for timeframe in selected_timeframes
+        ):
+            raise ValueError("Temporalidades de escaneo no válidas")
+
+    logger.info(
+        "SCAN LOOP START | timeframes=%s",
+        selected_timeframes,
+    )
 
     # No existe conexión ni confirmación automática
     # de las posiciones abiertas en eToro.
@@ -1145,15 +1163,29 @@ def run_scan():
         portfolio_status.get("status"),
     )
 
-    for asset, settings in ASSETS.items():
-        if not settings.get("enabled", False):
-            continue
+    enabled_assets = [
+        asset for asset, settings in ASSETS.items()
+        if settings.get("enabled", False)
+    ]
+    total_analyses = len(enabled_assets) * len(selected_timeframes)
 
-        for timeframe in (
-            INTRADAY_INTERVAL,
-            SWING_INTERVAL,
-        ):
-            result = analyze_asset(asset, timeframe)
+    with state_lock:
+        scan_state["total_analyses"] = total_analyses
+
+    for asset in enabled_assets:
+        for timeframe in selected_timeframes:
+            if (
+                timeframe == INTRADAY_INTERVAL
+                and not is_intraday_market_open(asset)
+            ):
+                result = no_trade(
+                    asset,
+                    timeframe,
+                    "Mercado cerrado o aún sin vela intradía completa",
+                )
+                result["market_closed"] = True
+            else:
+                result = analyze_asset(asset, timeframe)
 
             result = apply_validation_gate(
                 result,
@@ -1169,7 +1201,7 @@ def run_scan():
             logger.info(
                 "SCAN PROGRESS | %s/%s",
                 len(results),
-                scan_state["total_analyses"],
+                total_analyses,
             )
 
     technical_candidates = [
@@ -1201,6 +1233,7 @@ def run_scan():
         "status": "analysis_completed",
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "analyses_completed": len(results),
+        "timeframes": list(selected_timeframes),
         "technical_candidates_found": len(technical_candidates),
         "candidates_blocked": len(blocked_candidates),
         "validated_candidates": len(validated_candidates),
