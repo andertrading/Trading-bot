@@ -327,11 +327,60 @@ def _synchronized_oos_trades(trades, timeframe, history_start, history_end):
             continue
         try:
             entry_time = _utc_timestamp(trade["entry_time"])
+            exit_time = _utc_timestamp(trade["exit_time"])
         except (KeyError, TypeError, ValueError, OverflowError):
             continue
-        if oos_start < entry_time <= window_end:
+        # Do not include outcomes that resolve after the shared calendar window.
+        if oos_start < entry_time and entry_time <= exit_time <= window_end:
             selected.append(dict(trade))
     return selected
+
+
+def _portfolio_allocated_cost_trades(trades, accepted_positions):
+    """Rebase fee inputs to the exact quantity/risk actually allocated by portfolio simulation."""
+    def key(row):
+        return (
+            str(row.get("asset", "")).upper(),
+            str(row.get("timeframe", "")).lower(),
+            _utc_timestamp(row["entry_time"]),
+            _utc_timestamp(row["exit_time"]),
+        )
+
+    candidates = {}
+    for trade in trades or []:
+        try:
+            candidates.setdefault(key(trade), []).append(dict(trade))
+        except (KeyError, TypeError, ValueError, OverflowError):
+            continue
+
+    allocated = []
+    for position in accepted_positions or []:
+        try:
+            position_key = key(position)
+            matches = candidates.get(position_key) or []
+            if not matches:
+                continue
+            trade = matches.pop(0)
+            quantity = float(position["quantity"])
+            risk_budget = float(position["allocated_risk_usd"])
+            gross_pnl = float(position["realized_pnl_usd"])
+            if min(quantity, risk_budget) <= 0 or not all(
+                math.isfinite(value) for value in (quantity, risk_budget, gross_pnl)
+            ):
+                continue
+            trade["hypothetical_quantity"] = quantity
+            trade["hypothetical_risk_budget_usd"] = risk_budget
+            trade["hypothetical_gross_pnl_usd"] = gross_pnl
+            trade["portfolio_allocated_notional_usd"] = float(
+                position["notional_usd"]
+            )
+            trade["portfolio_allocation_factor"] = float(
+                position["allocation_factor"]
+            )
+            allocated.append(trade)
+        except (KeyError, TypeError, ValueError, OverflowError):
+            continue
+    return allocated
 
 
 def _metrics_row(strategy_name, asset, timeframe, period, trades):
@@ -771,8 +820,11 @@ def main():
                     "separate sensitivity report."
                 ),
             })
+            allocated_cost_trades = _portfolio_allocated_cost_trades(
+                selected, portfolio.get("trades", [])
+            )
             synchronized_cost_rows.extend(
-                _broker_cost_sensitivity_rows(selected)
+                _broker_cost_sensitivity_rows(allocated_cost_trades)
             )
 
     pd.DataFrame(synchronized_rows).to_csv(
