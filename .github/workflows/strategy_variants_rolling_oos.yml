@@ -6,6 +6,7 @@ on:
       - research/fixed-common-calendar-oos-20261121
       - research/explicit-universe-coverage-20261121
       - research/broker-cost-sensitivity-20261121
+      - research/history-calendar-audit-20261121
 
 permissions:
   contents: read
