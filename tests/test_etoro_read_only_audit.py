@@ -80,7 +80,7 @@ class ReadOnlyAuditTests(unittest.TestCase):
         self.assertFalse(report["portfolio_risk_admission_ready"])
         self.assertEqual(
             report["position_risk_scope"],
-            "eToro real-account positions only; separate from the bot's virtual paper portfolio",
+            "eToro real-account risk only; separate from the bot's virtual paper portfolio",
         )
         self.assertTrue(report["overall_pass"])
         self.assertEqual(report["instrument_resolution"][0]["instrument_id"], 123)
