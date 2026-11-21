@@ -156,30 +156,31 @@ def advance_signal(signal: dict, now: datetime | str,
     if current >= expires:
         updated["status"] = "EXPIRED"
         event = "SIGNAL_EXPIRED"
-    elif not conditions_valid:
-        updated["status"] = "INVALIDATED"
-        event = "SIGNAL_INVALIDATED"
-    elif latest_price is not None:
-        price = _positive_number(latest_price, "latest_price")
-        direction = updated.get("direction", "LONG")
-        stop = float(updated["stop"])
-        target = float(updated["target"])
-        if direction == "LONG" and price <= stop:
-            updated["status"] = "INVALIDATED"
-            event = "SIGNAL_INVALIDATED_STOP_LEVEL"
-        elif direction == "SHORT" and price >= stop:
-            updated["status"] = "INVALIDATED"
-            event = "SIGNAL_INVALIDATED_STOP_LEVEL"
-        elif direction == "LONG" and price >= target:
-            updated["status"] = "TARGET_REACHED"
-            event = "TARGET_LEVEL_REACHED"
-        elif direction == "SHORT" and price <= target:
-            updated["status"] = "TARGET_REACHED"
-            event = "TARGET_LEVEL_REACHED"
-        else:
-            return updated, None
     else:
-        return updated, None
+        event = None
+        if latest_price is not None:
+            price = _positive_number(latest_price, "latest_price")
+            direction = updated.get("direction", "LONG")
+            stop = float(updated["stop"])
+            target = float(updated["target"])
+            if direction == "LONG" and price <= stop:
+                updated["status"] = "INVALIDATED"
+                event = "SIGNAL_INVALIDATED_STOP_LEVEL"
+            elif direction == "SHORT" and price >= stop:
+                updated["status"] = "INVALIDATED"
+                event = "SIGNAL_INVALIDATED_STOP_LEVEL"
+            elif direction == "LONG" and price >= target:
+                updated["status"] = "TARGET_REACHED"
+                event = "TARGET_LEVEL_REACHED"
+            elif direction == "SHORT" and price <= target:
+                updated["status"] = "TARGET_REACHED"
+                event = "TARGET_LEVEL_REACHED"
+
+        if event is None and not conditions_valid:
+            updated["status"] = "INVALIDATED"
+            event = "SIGNAL_INVALIDATED"
+        elif event is None:
+            return updated, None
 
     updated["last_event"] = event
     updated["last_checked_at"] = current.isoformat()
