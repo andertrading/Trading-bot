@@ -21,12 +21,17 @@ from etoro_position_risk import calculate_account_stop_risk_from_client
 
 
 def _resolution_error_status(exc: Exception) -> str:
+    """Return a stable, non-sensitive code for a failed read-only validation."""
     message = str(exc)
     if "HTTP " in message:
         suffix = message.split("HTTP ", 1)[1][:3]
         if suffix.isdigit():
             return f"HTTP_{suffix}"
+
+    # Exact, generic markers emitted by the strict response normalizers.
+    # Never include exception text, payload fragments, symbols, or account data.
     known = (
+        # Instrument search
         ("Falta la lista results", "SEARCH_RESULTS_MISSING"),
         ("Falta el estado de paginación", "SEARCH_PAGINATION_MISSING"),
         ("requiere páginas adicionales", "SEARCH_PAGINATION_INCOMPLETE"),
@@ -37,12 +42,55 @@ def _resolution_error_status(exc: Exception) -> str:
         ("contiene un instrumento inválido", "INVALID_SEARCH_ITEM"),
         ("no es un objeto JSON", "INVALID_SEARCH_RESPONSE"),
         ("no devolvió HTTP 200", "SEARCH_HTTP_ERROR"),
+        # Instrument eligibility
+        ("La elegibilidad no es una respuesta HTTP 200 válida", "ELIGIBILITY_RESPONSE_INVALID"),
+        ("Los instrumentIds esperados no son válidos", "ELIGIBILITY_EXPECTED_IDS_INVALID"),
+        ("Los instrumentIds esperados contienen duplicados", "ELIGIBILITY_EXPECTED_IDS_DUPLICATED"),
+        ("no está en USD", "ELIGIBILITY_CURRENCY_MISMATCH"),
+        ("respuesta de elegibilidad está incompleta", "ELIGIBILITY_RESULTS_INCOMPLETE"),
+        ("Elegibilidad inválida", "ELIGIBILITY_ITEM_INVALID"),
+        ("Campo ", "ELIGIBILITY_FIELD_INVALID"),
+        ("Falta la configuración de apalancamiento", "ELIGIBILITY_LEVERAGE_CONFIG_MISSING"),
+        ("leverage config", "ELIGIBILITY_LEVERAGE_CONFIG_INVALID"),
+        ("Faltan límites de exposición", "ELIGIBILITY_EXPOSURE_LIMITS_MISSING"),
+        ("no cubre todos los instrumentos", "ELIGIBILITY_INSTRUMENTS_INCOMPLETE"),
+        # Realtime quotes
+        ("Las cotizaciones no son una respuesta HTTP 200 completa", "QUOTES_RESPONSE_INVALID"),
+        ("lista de instrumentos esperados no es válida", "QUOTES_EXPECTED_IDS_INVALID"),
+        ("lista de instrumentos esperados contiene duplicados", "QUOTES_EXPECTED_IDS_DUPLICATED"),
+        ("Falta la lista de resultados de cotizaciones", "QUOTES_RESULTS_MISSING"),
+        ("cotización retrasada", "QUOTES_NOT_REALTIME"),
+        ("Faltan cotizaciones para instrumentos", "QUOTES_INSTRUMENTS_INCOMPLETE"),
+        ("Cotización obsoleta o futura", "QUOTES_STALE_OR_FUTURE"),
+        ("Bid/ask inválido o cruzado", "QUOTES_BID_ASK_INVALID"),
+        ("Cotización duplicada", "QUOTES_DUPLICATED"),
+        ("Cotización inválida", "QUOTES_ITEM_INVALID"),
+        # Position breakdown / stop-risk diagnostics
+        ("El desglose de posiciones no es una respuesta HTTP 200 válida", "RISK_BREAKDOWN_RESPONSE_INVALID"),
+        ("CID esperado inválido", "RISK_CID_INVALID"),
+        ("El desglose no confirma la divisa", "RISK_CURRENCY_UNCONFIRMED"),
+        ("timestamp", "RISK_TIMESTAMP_INVALID"),
+        ("desglose de posiciones está obsoleto", "RISK_BREAKDOWN_STALE"),
+        ("contiene mirrors", "RISK_MIRRORS_UNSUPPORTED"),
+        ("Falta la lista de instrumentos del desglose", "RISK_BREAKDOWN_INSTRUMENTS_MISSING"),
+        ("Posición ", "RISK_POSITION_SCHEMA_INVALID"),
+        ("Falta positions para instrumento", "RISK_POSITION_LIST_MISSING"),
+        ("El desglose no contiene todas las posiciones esperadas", "RISK_POSITIONS_INCOMPLETE"),
+        ("no coincide entre endpoints", "RISK_ENDPOINT_INSTRUMENT_MISMATCH"),
+        ("no tiene stop-loss confirmado", "RISK_UNBOUNDED_STOP"),
+        ("no contiene CID", "RISK_CID_MISSING"),
+        ("Solo se puede valorar settlementType=real", "RISK_UNSUPPORTED_SETTLEMENT"),
+        ("apalancada", "RISK_LEVERAGE_UNSUPPORTED"),
+        ("El stop no es fijo", "RISK_STOP_TYPE_UNSUPPORTED"),
+        ("no está en USD", "RISK_CURRENCY_UNSUPPORTED"),
+        ("no es válida o no está sincronizada", "RISK_QUOTE_INVALID"),
+        ("no es válido", "RISK_CALCULATION_INVALID"),
     )
     for marker, code in known:
         if marker in message:
             return code
     if type(exc).__name__ == "EtoroAPIError":
-        return "ETORO_SEARCH_VALIDATION_ERROR"
+        return "ETORO_API_VALIDATION_ERROR"
     return type(exc).__name__.upper()
 
 
