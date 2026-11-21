@@ -38,6 +38,7 @@ from config import (
     TELEGRAM_TOKEN,
     TELEGRAM_CHAT_ID,
     TIMEZONE,
+    STRATEGY_VALIDATED,
 )
 
 from data_engine import (
@@ -49,7 +50,7 @@ from data_engine import (
 
 from strategies import evaluate_signal
 from risk_manager import risk_pct_for_score
-from portfolio import get_portfolio_status
+from portfolio import get_portfolio_status, can_add_sized_trade
 from transaction_costs import estimate_etoro_trade_costs
 
 
@@ -705,7 +706,7 @@ def build_telegram_messages(scan_result):
         if (
             isinstance(item, dict)
             and item.get("action") == "BUY CANDIDATE"
-            and item.get("validation_status") == "BLOCKED"
+            and item.get("validation_status") in {"BLOCKED", "APPROVED"}
         )
     ]
 
@@ -963,7 +964,7 @@ def send_telegram_notifications(scan_result):
             for item in scan_result.get("results", [])
             if (
                 item.get("action") == "BUY CANDIDATE"
-                and item.get("validation_status") == "BLOCKED"
+                and item.get("validation_status") in {"BLOCKED", "APPROVED"}
             )
         ]
 
@@ -1119,6 +1120,11 @@ def get_validation_blockers(portfolio_status):
             "Cartera no confirmada o riesgo de cartera bloqueado"
         )
 
+    if not STRATEGY_VALIDATED:
+        blockers.append(
+            "La estrategia no ha superado la validación histórica y walk-forward"
+        )
+
     return blockers
 
 
@@ -1165,18 +1171,60 @@ def apply_validation_gate(result, portfolio_status):
             "Nivel de riesgo provisional no válido"
         )
 
-    # El cálculo de tamaño y la validación integral
-    # todavía no están conectados a este flujo.
-    # Por tanto, ninguna candidata puede aprobarse.
-    blockers.append(
-        "Validación integral y cálculo de posición pendientes"
-    )
+    sizing_result = result.get("sizing_result")
+    if sizing_result is None:
+        blockers.append(
+            "Validación integral y cálculo de posición pendientes"
+        )
+        blockers.append(
+            "No existe un resultado completo de cálculo de tamaño para esta candidata"
+        )
+    else:
+        try:
+            admission = can_add_sized_trade(
+                sizing_result,
+                open_positions=(
+                    portfolio_status.get("open_positions")
+                    if isinstance(portfolio_status, dict)
+                    else None
+                ),
+                positions_confirmed=(
+                    isinstance(portfolio_status, dict)
+                    and portfolio_status.get("positions_confirmed") is True
+                ),
+                capital_usd=INITIAL_CAPITAL_USD,
+            )
+        except Exception:
+            logger.exception("SIZED PORTFOLIO ADMISSION ERROR")
+            admission = {
+                "allowed": False,
+                "reason": "Falló la comprobación independiente de riesgo de cartera.",
+            }
 
-    result["validation_status"] = "BLOCKED"
-    result["status"] = "BLOCKED_VALIDATION"
-    result["tradable"] = False
-    result["validated"] = False
-    result["validation_reasons"] = blockers
+        result["portfolio_admission"] = admission
+        if not isinstance(admission, dict) or admission.get("allowed") is not True:
+            reason = (
+                admission.get("reason", "La comprobación de riesgo de cartera no ha sido superada.")
+                if isinstance(admission, dict)
+                else "La comprobación de riesgo de cartera devolvió un resultado no válido."
+            )
+            blockers.append(reason)
+
+    if blockers:
+        result["validation_status"] = "BLOCKED"
+        result["status"] = "BLOCKED_VALIDATION"
+        result["tradable"] = False
+        result["validated"] = False
+        result["validation_reasons"] = blockers
+    else:
+        result["validation_status"] = "APPROVED"
+        result["status"] = "APPROVED_MANUAL_REVIEW"
+        result["tradable"] = True
+        result["validated"] = True
+        result["validation_reasons"] = []
+
+    # Even an approved candidate is a manual-review signal only. This gate
+    # never places orders or authorizes broker execution.
 
     logger.warning(
         "CANDIDATE BLOCKED | %s | %s | reasons=%s",

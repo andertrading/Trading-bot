@@ -69,6 +69,10 @@ class TestBotValidation(unittest.TestCase):
             "Validación integral y cálculo de posición pendientes",
             result["validation_reasons"],
         )
+        self.assertIn(
+            "No existe un resultado completo de cálculo de tamaño para esta candidata",
+            result["validation_reasons"],
+        )
         self.assertFalse(result["validated"])
         self.assertFalse(result["tradable"])
 
@@ -410,6 +414,119 @@ class TestBotValidation(unittest.TestCase):
         self.assertIn("unidad de referencia", report)
         self.assertIn("No se calcula beneficio neto", report)
 
+
+
+    def test_sized_admission_gate_is_called_with_confirmed_open_positions(self):
+        sizing_result = {
+            "status": "SIMULACION_NO_VALIDADA",
+            "validated": False,
+            "risk_amount_usd": 5.0,
+            "position_risk_usd": 4.0,
+            "fixed_costs_usd": 1.0,
+            "total_reserved_risk_usd": 5.0,
+        }
+        portfolio = {
+            "status": "OK",
+            "open_positions": [],
+            "positions_confirmed": True,
+        }
+        candidate = {**self.candidate, "sizing_result": sizing_result}
+
+        with patch.object(Bot, "ALLOW_POSITION_SIZING", True), \
+             patch.object(Bot, "CLOSE_FEES_CONFIRMED", True), \
+             patch.object(Bot, "SPREADS_CONFIRMED", True), \
+             patch.object(Bot, "FX_CONVERSION_CONFIRMED", True), \
+             patch.object(Bot, "ETORO_EXECUTION_TYPES_CONFIRMED", True), \
+             patch.object(Bot, "ETORO_FEE_SCHEDULE_CONFIRMED", True), \
+             patch.object(Bot, "ETORO_ACCOUNT_CURRENCY_CONFIRMED", True), \
+             patch.object(Bot, "ETORO_EXECUTION_PRICE_BASIS_CONFIRMED", True), \
+             patch.object(Bot, "STRATEGY_VALIDATED", True):
+            result = Bot.apply_validation_gate(candidate, portfolio)
+
+        self.assertEqual(result["validation_status"], "APPROVED")
+        self.assertTrue(result["validated"])
+        self.assertTrue(result["tradable"])
+        self.assertTrue(result["portfolio_admission"]["allowed"])
+        self.assertFalse(result["portfolio_admission"]["live_execution_authorized"])
+
+    def test_sized_admission_gate_blocks_unconfirmed_open_positions(self):
+        sizing_result = {
+            "status": "SIMULACION_NO_VALIDADA",
+            "validated": False,
+            "risk_amount_usd": 5.0,
+            "position_risk_usd": 4.0,
+            "fixed_costs_usd": 1.0,
+            "total_reserved_risk_usd": 5.0,
+        }
+        candidate = {**self.candidate, "sizing_result": sizing_result}
+        portfolio = {
+            "status": "OK",
+            "open_positions": None,
+            "positions_confirmed": False,
+        }
+
+        with patch.object(Bot, "ALLOW_POSITION_SIZING", True), \
+             patch.object(Bot, "CLOSE_FEES_CONFIRMED", True), \
+             patch.object(Bot, "SPREADS_CONFIRMED", True), \
+             patch.object(Bot, "FX_CONVERSION_CONFIRMED", True), \
+             patch.object(Bot, "ETORO_EXECUTION_TYPES_CONFIRMED", True), \
+             patch.object(Bot, "ETORO_FEE_SCHEDULE_CONFIRMED", True), \
+             patch.object(Bot, "ETORO_ACCOUNT_CURRENCY_CONFIRMED", True), \
+             patch.object(Bot, "ETORO_EXECUTION_PRICE_BASIS_CONFIRMED", True), \
+             patch.object(Bot, "STRATEGY_VALIDATED", True):
+            result = Bot.apply_validation_gate(candidate, portfolio)
+
+        self.assertEqual(result["validation_status"], "BLOCKED")
+        self.assertFalse(result["tradable"])
+        self.assertFalse(result["portfolio_admission"]["allowed"])
+        self.assertIn("posiciones abiertas no están confirmadas", result["portfolio_admission"]["reason"])
+
+
+    def test_approved_candidate_is_included_in_telegram_report(self):
+        candidate = {
+            "action": "BUY CANDIDATE",
+            "validation_status": "APPROVED",
+            "asset": "AAPL",
+            "timeframe": "1d",
+            "score": 90,
+            "entry": 100.0,
+            "stop": 95.0,
+            "target": 110.0,
+            "provisional_risk_pct": 0.005,
+            "generated_at": "2026-11-21T10:00:00+00:00",
+            "expires_at": "2026-11-21T12:00:00+00:00",
+            "strategy_validated": True,
+            "data_timestamp": "2026-11-21T10:00:00+00:00",
+            "data_age_minutes": 1,
+            "data_provider": "test",
+            "price_adjustment_policy": "none",
+            "reasons": ["test reason"],
+            "validation_reasons": [],
+        }
+        scan = {
+            "timestamp": "2026-11-21T10:00:00+00:00",
+            "analyses_completed": 1,
+            "technical_candidates_found": 1,
+            "candidates_blocked": 0,
+            "validated_candidates": 1,
+            "no_trade_count": 0,
+            "portfolio_status": {"status": "OK"},
+            "results": [candidate],
+        }
+        with patch.object(
+            Bot,
+            "estimate_etoro_trade_costs",
+            return_value={
+                "valid": True,
+                "complete": False,
+                "unpriced_costs": ["live_market_bid_ask_spread_missing"],
+            },
+        ):
+            messages = Bot.build_telegram_messages(scan)
+
+        self.assertEqual(len(messages), 2)
+        self.assertIn("SEÑAL TÉCNICA", messages[1])
+        self.assertIn("CONFIRMA COSTES", messages[1])
 
 
 if __name__ == "__main__":
