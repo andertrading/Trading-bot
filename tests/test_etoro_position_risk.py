@@ -43,7 +43,9 @@ def breakdown(position_data=None, **overrides):
         "instruments": [{
             "instrumentId": item["instrumentId"],
             "positions": [item],
+            "orders": [],
         }],
+        "mirrors": [],
     }
     data.update(overrides)
     return data
