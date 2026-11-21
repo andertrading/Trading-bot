@@ -1092,6 +1092,14 @@ class TestDailyGaps(unittest.TestCase):
         ])
         self.assertTrue(engine._has_daily_gaps(df, "TSLA"))
 
+    def test_accepts_us_carter_state_funeral_closure(self):
+        df = self.make_daily([
+            "2025-01-08",
+            "2025-01-10",
+        ])
+        self.assertFalse(engine._has_daily_gaps(df, "TSLA"))
+
+
     def test_accepts_london_weekend_gap(self):
         df = self.make_daily([
             "2026-11-20",
