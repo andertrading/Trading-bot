@@ -261,6 +261,8 @@ class TestPortfolio(unittest.TestCase):
             "status": "SIMULACION_NO_VALIDADA",
             "validated": False,
             "risk_amount_usd": 5.0,
+            "position_risk_usd": 5.0,
+            "fixed_costs_usd": 0.0,
             "total_reserved_risk_usd": 5.0,
         }
         result = can_add_sized_trade(
@@ -277,6 +279,8 @@ class TestPortfolio(unittest.TestCase):
             "status": "SIMULACION_NO_VALIDADA",
             "validated": False,
             "risk_amount_usd": 5.0,
+            "position_risk_usd": 5.0,
+            "fixed_costs_usd": 0.0,
             "total_reserved_risk_usd": 5.0,
         }
         result = can_add_sized_trade(
