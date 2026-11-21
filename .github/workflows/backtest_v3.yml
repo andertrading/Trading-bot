@@ -9,6 +9,8 @@ on:
       - main
     paths:
       - "backtest_v3.py"
+      - "data_engine.py"
+      - "eodhd_provider.py"
       - "strategies.py"
       - "indicators.py"
       - "config.py"
@@ -195,8 +197,8 @@ jobs:
               "",
               f"- Modo de datos: **{os.getenv('BACKTEST_DATA_MODE', 'unknown')}**",
               f"- Directorio de snapshots: **{os.getenv('BACKTEST_SNAPSHOT_DIR', 'unknown')}**",
-              "- Proveedor histórico: Yahoo Finance.",
-              "- Ajuste de precios: auto_adjust=True.",
+              "- Proveedores históricos: según el enrutamiento del motor live (Twelve Data, Yahoo Finance o EODHD).",
+              "- Ajuste de precios: política nativa de cada proveedor; equivalencia entre fuentes no verificada.",
               "- Costes y sizing: no incluidos.",
               "",
           ]
