@@ -163,7 +163,8 @@ def simulate_portfolio(
                 stop = float(trade["stop"])
                 score = float(trade["score"])
                 result_r = float(trade["result_R"])
-                if not all(_finite(v) for v in (entry, stop, score, result_r)):
+                exit_price = float(trade.get("exit", entry + result_r * (entry - stop)))
+                if not all(_finite(v) for v in (entry, stop, score, result_r, exit_price)):
                     raise ValueError("valor no finito")
                 if entry <= 0 or stop <= 0 or stop >= entry or exit_price <= 0:
                     raise ValueError("niveles long inválidos")
@@ -186,7 +187,7 @@ def simulate_portfolio(
                     "stop": stop,
                     "score": score,
                     "result_R": result_r,
-                    "exit_price": float(trade.get("exit", entry + result_r * (entry - stop))),
+                    "exit_price": exit_price,
                     "requested_risk_pct": requested_pct,
                     "risk_per_unit": entry - stop,
                 })
