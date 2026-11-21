@@ -294,6 +294,29 @@ class TestBacktestV3(unittest.TestCase):
         )
         self.assertEqual(daily_metadata["period_requested"], "2y")
 
+        daily_data.attrs.update({
+            "price_source_detail": "LSE primary; SIX alternate OHLC repair",
+            "ohlc_repair_count": 9,
+            "ohlc_repair_source_ticker": "CSNDX.SW",
+            "ohlc_repair_max_close_deviation_pct": 0.2293,
+        })
+        repaired_metadata = backtest_v3._snapshot_metadata(
+            "CNDX",
+            "CNDX.L",
+            "1d",
+            daily_data,
+            backtest_v3.Path("repaired_daily_snapshot.csv"),
+            "sha256",
+            "yahoo",
+        )
+        self.assertEqual(repaired_metadata["ohlc_repair_count"], 9)
+        self.assertEqual(
+            repaired_metadata["ohlc_repair_source_ticker"], "CSNDX.SW"
+        )
+        self.assertAlmostEqual(
+            repaired_metadata["ohlc_repair_max_close_deviation_pct"], 0.2293
+        )
+
     def test_backtest_rejects_duplicate_timestamps_from_provider(self):
         data = self.make_data()
         duplicated = pd.concat([data, data.iloc[[-1]]])
