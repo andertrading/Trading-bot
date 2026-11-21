@@ -142,8 +142,19 @@ def run_scheduled_scan(timeframe: str) -> dict:
     transitions = 0
     retried_alerts = 0
 
-    # First advance all existing pending signals. Stale or missing market data
-    # never invalidates a signal; it simply postpones the next reliable check.
+    # Retry pending terminal-event notifications first. A failed Telegram
+    # request must not make an already-detected lifecycle event disappear.
+    for stored_signal in list(state["signals"].values()):
+        if stored_signal.get("timeframe") != timeframe:
+            continue
+        pending_event = stored_signal.get("pending_notification_event")
+        if pending_event and stored_signal.get("alert_sent") and alerts_enabled:
+            _notify_lifecycle_event(
+                store, stored_signal, pending_event, alerts_enabled
+            )
+
+    # Advance pending signals. Missing/stale market data never invalidates an
+    # opportunity, but clock-based expiry is still evaluated on every scan.
     for stored_signal in list(state["signals"].values()):
         if (
             stored_signal.get("timeframe") != timeframe
@@ -152,27 +163,35 @@ def run_scheduled_scan(timeframe: str) -> dict:
             continue
 
         current = by_asset.get(stored_signal.get("asset"))
-        if not current or current.get("data_valid") is not True:
-            continue
+        data_is_valid = bool(current and current.get("data_valid") is True)
 
         updated, event = advance_signal(
             stored_signal,
             now,
-            latest_price=current.get("last_price"),
-            conditions_valid=current.get("action") == "BUY CANDIDATE",
+            latest_price=current.get("last_price") if data_is_valid else None,
+            conditions_valid=(
+                current.get("action") == "BUY CANDIDATE"
+                if data_is_valid
+                else True
+            ),
         )
 
         if event:
             updated["pending_notification_event"] = event
             store.update(updated)
             transitions += 1
-            _notify_lifecycle_event(store, updated, event, alerts_enabled)
+            if updated.get("alert_sent"):
+                _notify_lifecycle_event(store, updated, event, alerts_enabled)
+            else:
+                updated["pending_notification_event"] = None
+                store.update(updated)
             continue
 
         # Retry an unsent initial alert only while the same opportunity remains
         # valid. A later scan never invents whether the user entered.
         if (
             alerts_enabled
+            and data_is_valid
             and not updated.get("alert_sent")
             and current.get("action") == "BUY CANDIDATE"
         ):
