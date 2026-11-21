@@ -129,6 +129,35 @@ jobs:
           print(f"Snapshots verificados: {len(snapshots)}")
           PY
 
+      - name: Reproducir snapshots y validar metadatos
+        env:
+          BACKTEST_DATA_MODE: replay
+        run: |
+          python - <<'PY'
+          import backtest_v3
+
+          expected = len(backtest_v3.get_assets()) * 2
+          verified = 0
+          for asset, ticker in backtest_v3.get_assets():
+              for interval in ("15m", "1d"):
+                  frame = backtest_v3.download_history(
+                      ticker, interval, asset=asset
+                  )
+                  if frame is None or frame.empty:
+                      reason = backtest_v3.DOWNLOAD_ERRORS.get(
+                          (ticker, interval), "snapshot no disponible"
+                      )
+                      raise SystemExit(
+                          f"Replay rechazado: {asset} {interval}: {reason}"
+                      )
+                  verified += 1
+          if verified != expected:
+              raise SystemExit(
+                  f"Snapshots reproducidos {verified}/{expected}"
+              )
+          print(f"Replay reproducible: {verified}/{expected} históricos")
+          PY
+
       - name: Generar informe técnico ampliado
         if: always()
         run: |
