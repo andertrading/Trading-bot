@@ -1576,7 +1576,12 @@ def _download_coinbase_crypto_history(
     end_utc = end_utc.tz_convert("UTC")
     # End at the most recent fully closed 15m candle, not the live candle.
     end_utc = end_utc.floor("15min") - pd.Timedelta(minutes=15)
-    start_utc = end_utc - pd.Timedelta(days=lookback_days)
+    # Match the completed-candle convention used by the other crypto
+    # snapshots: first timestamp is one interval after the lookback boundary.
+    start_utc = (
+        end_utc - pd.Timedelta(days=lookback_days)
+        + pd.Timedelta(minutes=15)
+    )
 
     product_id = f"{asset}-USD"
     base_url = "https://api.exchange.coinbase.com"
