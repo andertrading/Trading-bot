@@ -220,7 +220,6 @@ def estimate_etoro_trade_costs(
         if (
             benchmark is None
             or not _finite(benchmark)
-            or float(benchmark) < 0
         ):
             result["unpriced_costs"].append("cfd_benchmark_rate_missing")
         else:
