@@ -1330,6 +1330,24 @@ def _download_yahoo(asset, config, interval):
             timeout=25,
         )
 
+        # Yahoo puede rechazar con HTTP 422 el límite exacto de 60 días
+        # para intervalos intradía. Reintenta una sola vez con 55 días.
+        if response.status_code == 422 and interval == "15m":
+            logger.warning(
+                "Yahoo HTTP 422 para %s; reintentando con ventana intradía de 55 días",
+                ticker,
+            )
+            retry_params = dict(params)
+            retry_params["period1"] = int(
+                (now - timedelta(days=55)).timestamp()
+            )
+            response = requests.get(
+                f"{YAHOO_CHART_URL}/{ticker}",
+                params=retry_params,
+                headers=headers,
+                timeout=25,
+            )
+
         if response.status_code == 429:
             logger.error(
                 "Yahoo limitó las peticiones para %s (HTTP 429)",
