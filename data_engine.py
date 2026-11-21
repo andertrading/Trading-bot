@@ -310,9 +310,13 @@ def _market_close_time(asset, session_date):
     if asset in CRYPTO_ASSETS:
         return regular_close
 
-    if asset not in LONDON_ASSETS:
-        if session_date in _us_early_close_dates(session_date.year):
-            return datetime_time(13, 0)
+    if asset in LONDON_ASSETS:
+        # LSE on-exchange trading closes early on Christmas Eve and New Year's
+        # Eve (12:30 London time), when those dates are trading days.
+        if (session_date.month, session_date.day) in {(12, 24), (12, 31)}:
+            return datetime_time(12, 30)
+    elif session_date in _us_early_close_dates(session_date.year):
+        return datetime_time(13, 0)
 
     return regular_close
 
