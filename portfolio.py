@@ -248,3 +248,77 @@ def can_add_trade(
         "portfolio": portfolio,
         "currency": "USD",
     }
+
+def can_add_sized_trade(
+    sizing_result,
+    open_positions=None,
+    positions_confirmed=False,
+    capital_usd=None,
+):
+    """Apply portfolio admission to the complete risk returned by sizing.
+
+    The sizing result is only a theoretical calculation. This function is a
+    second, independent gate and never authorizes live execution.
+    """
+    if not isinstance(sizing_result, dict):
+        return {
+            "allowed": False,
+            "reason": "Falta un resultado válido del cálculo de posición.",
+            "currency": "USD",
+        }
+
+    if sizing_result.get("status") != "SIMULACION_NO_VALIDADA":
+        return {
+            "allowed": False,
+            "reason": "El cálculo de posición está bloqueado o no validado.",
+            "currency": "USD",
+        }
+
+    if sizing_result.get("validated") is not False:
+        return {
+            "allowed": False,
+            "reason": "El cálculo no tiene el estado de simulación esperado.",
+            "currency": "USD",
+        }
+
+    total_reserved_risk_usd = sizing_result.get("total_reserved_risk_usd")
+    if not _is_finite_number(total_reserved_risk_usd):
+        return {
+            "allowed": False,
+            "reason": "Falta el riesgo total reservado de la nueva posición.",
+            "currency": "USD",
+        }
+
+    total_reserved_risk_usd = float(total_reserved_risk_usd)
+    if total_reserved_risk_usd <= 0:
+        return {
+            "allowed": False,
+            "reason": "El riesgo total reservado debe ser positivo.",
+            "currency": "USD",
+        }
+
+    reported_risk = sizing_result.get("risk_amount_usd")
+    if (
+        not _is_finite_number(reported_risk)
+        or float(reported_risk) <= 0
+        or total_reserved_risk_usd > float(reported_risk) + 1e-8
+    ):
+        return {
+            "allowed": False,
+            "reason": "El riesgo total reservado no cuadra con el presupuesto calculado.",
+            "currency": "USD",
+        }
+
+    admission = can_add_trade(
+        proposed_risk_usd=total_reserved_risk_usd,
+        open_positions=open_positions,
+        positions_confirmed=positions_confirmed,
+        capital_usd=capital_usd,
+    )
+    return {
+        **admission,
+        "proposed_total_reserved_risk_usd": total_reserved_risk_usd,
+        "admission_scope": "SIMULACION_NO_VALIDADA",
+        "live_execution_authorized": False,
+    }
+
