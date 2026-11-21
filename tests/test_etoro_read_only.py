@@ -77,6 +77,10 @@ class EtoroReadOnlyClientTests(unittest.TestCase):
     def test_invalid_instrument_ids_are_rejected_without_request(self):
         with self.assertRaises(ValueError):
             self.client.get_rates([1, 0])
+        with self.assertRaises(ValueError):
+            self.client.get_rates([1, 1])
+        with self.assertRaises(ValueError):
+            self.client.get_rates(list(range(1, 1002)))
         self.session.request.assert_not_called()
 
     def test_candle_request_is_bounded_and_uses_documented_path(self):
