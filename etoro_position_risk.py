@@ -135,7 +135,7 @@ def normalize_instrument_breakdown(
     return normalized
 
 
-def calculate_position_gross_stop_risk_usd(
+def calculate_position_stop_risk_usd(
     position: Mapping[str, Any],
     quote: EtoroQuote,
     fee_class: str,
@@ -251,7 +251,7 @@ def calculate_position_gross_stop_risk_usd(
     }
 
 
-def calculate_account_gross_stop_risk_usd(
+def calculate_account_stop_risk_usd(
     positions: Mapping[int, Mapping[str, Any]],
     quotes: Mapping[int, EtoroQuote],
     fee_classes_by_instrument_id: Mapping[int, str],
@@ -283,7 +283,7 @@ def calculate_account_gross_stop_risk_usd(
         if quote is None:
             raise EtoroAPIError(f"Falta cotización para la posición {position_id}")
         fee_class = fee_classes_by_instrument_id.get(instrument_id)
-        results.append(calculate_position_gross_stop_risk_usd(position, quote, fee_class))
+        results.append(calculate_position_stop_risk_usd(position, quote, fee_class))
 
     gross_total = sum((item["gross_stop_risk_usd"] for item in results), Decimal("0"))
     modeled_total = sum((item["modeled_risk_usd"] for item in results), Decimal("0"))
@@ -309,7 +309,7 @@ def calculate_account_gross_stop_risk_usd(
 
 
 
-def calculate_account_gross_stop_risk_from_client(
+def calculate_account_stop_risk_from_client(
     client: Any,
     account_snapshot: EtoroAccountSnapshot,
     now_utc: datetime,
@@ -319,7 +319,7 @@ def calculate_account_gross_stop_risk_from_client(
     if not isinstance(account_snapshot, EtoroAccountSnapshot):
         raise EtoroAPIError("Falta un snapshot de cuenta eToro validado")
     if not account_snapshot.positions:
-        return calculate_account_gross_stop_risk_usd({}, {}, {})
+        return calculate_account_stop_risk_usd({}, {}, {})
     if account_snapshot.has_unbounded_stop_risk:
         raise EtoroAPIError("Al menos una posición del snapshot no tiene stop-loss confirmado")
     if account_snapshot.client_id is None:
@@ -356,7 +356,7 @@ def calculate_account_gross_stop_risk_from_client(
 
     instrument_ids = sorted(set(expected_instruments.values()))
     quotes = client.get_realtime_quotes(instrument_ids, now_utc)
-    return calculate_account_gross_stop_risk_usd(
+    return calculate_account_stop_risk_usd(
         details,
         quotes,
         fee_classes_by_instrument_id,
