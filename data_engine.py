@@ -1152,7 +1152,9 @@ def _twelvedata_request(params):
         )
 
 
-def _download_twelvedata(asset, config, interval):
+def _download_twelvedata(
+    asset, config, interval, start_date=None, end_date=None
+):
     api_key = os.getenv("TWELVE_DATA_API_KEY")
 
     if not api_key:
@@ -1167,13 +1169,20 @@ def _download_twelvedata(asset, config, interval):
     params = {
         "symbol": symbol,
         "interval": INTERVAL_MAP[interval],
-        "outputsize": 5000,
         "timezone": "UTC",
         # Explicitly pin the documented corporate-action policy:
         # daily bars are split-adjusted; intraday bars remain raw.
         "adjust": "splits" if interval == "1d" else "none",
         "apikey": api_key,
     }
+
+    if start_date is None and end_date is None:
+        params["outputsize"] = 5000
+    elif start_date is not None and end_date is not None:
+        params["start_date"] = start_date
+        params["end_date"] = end_date
+    else:
+        raise ValueError("start_date and end_date must be supplied together")
 
     try:
         response = _twelvedata_request(params)
@@ -1389,6 +1398,120 @@ def _download_twelvedata(asset, config, interval):
             asset,
         )
         return None
+
+
+def twelvedata_history_windows(asset, end=None, lookback_days=700):
+    """Return contiguous date windows that stay below Twelve Data's 5,000-bar cap."""
+    if isinstance(lookback_days, bool) or not isinstance(lookback_days, int):
+        raise ValueError("lookback_days must be a positive integer")
+    if lookback_days <= 0:
+        raise ValueError("lookback_days must be a positive integer")
+
+    if end is None:
+        end_utc = datetime.now(timezone.utc)
+    elif isinstance(end, str):
+        end_utc = datetime.fromisoformat(end.replace("Z", "+00:00"))
+    else:
+        end_utc = end
+
+    if end_utc.tzinfo is None:
+        raise ValueError("end must include a timezone")
+    end_utc = end_utc.astimezone(timezone.utc)
+    # Align the endpoint to a completed 15-minute boundary.
+    end_utc = end_utc.replace(
+        minute=(end_utc.minute // 15) * 15,
+        second=0,
+        microsecond=0,
+    )
+    start_utc = end_utc - timedelta(days=lookback_days)
+
+    # 50 calendar days produce at most 4,800 crypto 15m bars.
+    # 180 calendar days stay comfortably below 5,000 US-equity session bars.
+    chunk_days = 50 if asset in CRYPTO_ASSETS else 180
+    windows = []
+    cursor = start_utc
+
+    while cursor < end_utc:
+        chunk_end = min(cursor + timedelta(days=chunk_days), end_utc)
+        windows.append((cursor, chunk_end))
+        cursor = chunk_end
+
+    return windows
+
+
+def _download_twelvedata_extended(asset, config, interval):
+    """Backtest-only historical backfill using contiguous date-range requests."""
+    if interval != "15m":
+        return _download_twelvedata(asset, config, interval)
+
+    try:
+        lookback_days = int(
+            os.getenv("BACKTEST_INTRADAY_LOOKBACK_DAYS", "700")
+        )
+    except (TypeError, ValueError):
+        logger.error("BACKTEST_INTRADAY_LOOKBACK_DAYS no es válido")
+        return None
+
+    try:
+        windows = twelvedata_history_windows(
+            asset,
+            lookback_days=lookback_days,
+        )
+    except ValueError:
+        logger.exception("No se pudieron construir ventanas históricas | %s", asset)
+        return None
+
+    frames = []
+    for index, (start, end) in enumerate(windows, start=1):
+        logger.info(
+            "TWELVE DATA BACKFILL | %s | %s/%s | %s -> %s",
+            asset,
+            index,
+            len(windows),
+            start.isoformat(),
+            end.isoformat(),
+        )
+        chunk = _download_twelvedata(
+            asset,
+            config,
+            interval,
+            start_date=start.strftime("%Y-%m-%dT%H:%M:%S"),
+            end_date=end.strftime("%Y-%m-%dT%H:%M:%S"),
+        )
+        if chunk is None or chunk.empty:
+            logger.error(
+                "BACKFILL INCOMPLETO | %s | ventana %s/%s",
+                asset,
+                index,
+                len(windows),
+            )
+            return None
+        frames.append(chunk)
+
+    combined = pd.concat(frames).sort_index()
+    combined = combined.loc[~combined.index.duplicated(keep="last")]
+    combined = _normalise_dataframe(combined)
+
+    if combined is None or len(combined) < 220:
+        logger.error("BACKFILL INSUFICIENTE | %s", asset)
+        return None
+
+    if _has_intraday_gaps(combined, asset):
+        logger.error(
+            "BACKFILL RECHAZADO POR HUECOS | %s | %s velas",
+            asset,
+            len(combined),
+        )
+        return None
+
+    logger.info(
+        "TWELVE DATA EXTENDED HISTORY OK | %s | %s velas | %s -> %s",
+        asset,
+        len(combined),
+        combined.index[0].isoformat(),
+        combined.index[-1].isoformat(),
+    )
+    return combined
 
 
 # ---------------------------------------------------------------------
@@ -1692,7 +1815,16 @@ def download_data(asset, interval="15m"):
         )
         return None
 
-    cached = _get_cached_data(asset, interval)
+    provider = PROVIDER_MAP.get(asset)
+    extended_backtest = (
+        provider == "twelvedata"
+        and interval == "15m"
+        and os.getenv(
+            "BACKTEST_EXTENDED_INTRADAY_HISTORY", "false"
+        ).strip().lower() in {"1", "true", "yes", "on"}
+    )
+
+    cached = None if extended_backtest else _get_cached_data(asset, interval)
 
     if cached is not None:
         validated = _normalise_dataframe(cached)
@@ -1717,8 +1849,6 @@ def download_data(asset, interval="15m"):
         with _cache_lock:
             _data_cache.pop((asset, interval), None)
 
-    provider = PROVIDER_MAP.get(asset)
-
     if asset in LONDON_ASSETS and interval == "1d":
         dataframe = download_eodhd_daily(
             asset,
@@ -1728,11 +1858,18 @@ def download_data(asset, interval="15m"):
         )
 
     elif provider == "twelvedata":
-        dataframe = _download_twelvedata(
-            asset,
-            config,
-            interval,
-        )
+        if extended_backtest:
+            dataframe = _download_twelvedata_extended(
+                asset,
+                config,
+                interval,
+            )
+        else:
+            dataframe = _download_twelvedata(
+                asset,
+                config,
+                interval,
+            )
 
     elif provider == "yahoo":
         dataframe = _download_yahoo(

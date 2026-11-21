@@ -2056,3 +2056,118 @@ class TestAutomatedScanSchedulingHelpers(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+
+
+class TestExtendedHistoryIsBacktestOnly(unittest.TestCase):
+
+    def setUp(self):
+        self.frame = make_ohlcv(
+            pd.date_range(
+                "2026-11-18T00:00:00Z",
+                periods=220,
+                freq="15min",
+            )
+        )
+
+    def test_extended_backfill_requires_explicit_backtest_flag(self):
+        with (
+            patch.dict("os.environ", {}, clear=True),
+            patch.object(engine, "_get_cached_data", return_value=None),
+            patch.object(engine, "_download_twelvedata", return_value=self.frame) as normal,
+            patch.object(engine, "_download_twelvedata_extended") as extended,
+            patch.object(engine, "_save_cached_data"),
+        ):
+            result = engine.download_data("BTC", "15m")
+
+        self.assertIsNotNone(result)
+        normal.assert_called_once()
+        extended.assert_not_called()
+
+
+    def test_extended_backfill_bypasses_normal_five_thousand_bar_cache(self):
+        with (
+            patch.dict(
+                "os.environ",
+                {
+                    "BACKTEST_EXTENDED_INTRADAY_HISTORY": "true",
+                },
+            ),
+            patch.object(engine, "_get_cached_data", return_value=self.frame) as cache,
+            patch.object(
+                engine, "_download_twelvedata_extended", return_value=self.frame
+            ) as extended,
+            patch.object(engine, "_save_cached_data"),
+        ):
+            result = engine.download_data("BTC", "15m")
+
+        self.assertIsNotNone(result)
+        cache.assert_not_called()
+        extended.assert_called_once()
+
+    def test_extended_backfill_is_used_only_when_flag_is_true(self):
+        with (
+            patch.dict(
+                "os.environ",
+                {
+                    "BACKTEST_EXTENDED_INTRADAY_HISTORY": "true",
+                },
+            ),
+            patch.object(engine, "_get_cached_data", return_value=None),
+            patch.object(engine, "_download_twelvedata") as normal,
+            patch.object(
+                engine, "_download_twelvedata_extended", return_value=self.frame
+            ) as extended,
+            patch.object(engine, "_save_cached_data"),
+        ):
+            result = engine.download_data("BTC", "15m")
+
+        self.assertIsNotNone(result)
+        extended.assert_called_once()
+        normal.assert_not_called()
+
+class TestTwelveDataHistoricalWindows(unittest.TestCase):
+
+    def test_crypto_history_is_chunked_below_five_thousand_bars(self):
+        end = datetime(2026, 11, 21, 3, 23, tzinfo=timezone.utc)
+        windows = engine.twelvedata_history_windows(
+            "BTC", end=end, lookback_days=700
+        )
+        self.assertEqual(len(windows), 14)
+        self.assertEqual(windows[-1][1], datetime(2026, 11, 21, 3, 15, tzinfo=timezone.utc))
+        for start, finish in windows:
+            self.assertEqual(finish - start, timedelta(days=50))
+
+    def test_equity_history_uses_larger_contiguous_windows(self):
+        end = datetime(2026, 11, 21, 3, 23, tzinfo=timezone.utc)
+        windows = engine.twelvedata_history_windows(
+            "AAPL", end=end, lookback_days=700
+        )
+        self.assertEqual(len(windows), 4)
+        self.assertEqual(windows[0][0], windows[0][1] - timedelta(days=180))
+        self.assertTrue(all(
+            timedelta(0) < finish - start <= timedelta(days=180)
+            for start, finish in windows
+        ))
+        for previous, current in zip(windows, windows[1:]):
+            self.assertEqual(previous[1], current[0])
+
+    def test_historical_windows_reject_invalid_lookback(self):
+        for days in (0, -1, True, 1.5):
+            with self.subTest(days=days):
+                with self.assertRaises(ValueError):
+                    engine.twelvedata_history_windows(
+                        "BTC",
+                        end=datetime(2026, 11, 21, tzinfo=timezone.utc),
+                        lookback_days=days,
+                    )
+
+    def test_historical_windows_require_timezone_aware_end(self):
+        with self.assertRaises(ValueError):
+            engine.twelvedata_history_windows(
+                "BTC",
+                end=datetime(2026, 11, 21),
+                lookback_days=50,
+            )
+
