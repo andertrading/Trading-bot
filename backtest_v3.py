@@ -1887,7 +1887,7 @@ def _calculate_drawdown(results):
 
 def _is_finite_metric(value):
     try:
-        return math.isfinite(float(value))
+        return bool(np.isfinite(float(value)))
     except (TypeError, ValueError, OverflowError):
         return False
 
