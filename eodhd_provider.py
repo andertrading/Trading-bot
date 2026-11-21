@@ -85,6 +85,8 @@ def _download_split_events(asset, symbol, start_date, end_date, api_key):
             return None
         try:
             event_date = pd.Timestamp(item["date"])
+            if pd.isna(event_date):
+                raise ValueError("invalid split date")
             ratio = str(item["split"]).strip()
             numerator_text, denominator_text = ratio.split("/", 1)
             numerator = float(numerator_text)
