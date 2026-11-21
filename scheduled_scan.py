@@ -154,6 +154,25 @@ def _notify_lifecycle_event(store, signal: dict, event: str, alerts_enabled: boo
     return updated
 
 
+def _retry_pending_notifications(store, state: dict, timeframe: str, alerts_enabled: bool):
+    """Retry pending Telegram events and refresh the in-memory snapshot.
+
+    The scan loop below consumes this same state snapshot. Keeping it in sync
+    with successful retries prevents an old pending event from being written
+    back to storage when the signal is updated later in the same scan.
+    """
+    for stored_signal in list(state["signals"].values()):
+        if stored_signal.get("timeframe") != timeframe:
+            continue
+        pending_event = stored_signal.get("pending_notification_event")
+        if pending_event and stored_signal.get("alert_sent") and alerts_enabled:
+            updated = _notify_lifecycle_event(
+                store, stored_signal, pending_event, alerts_enabled
+            )
+            state["signals"][stored_signal["signal_id"]] = updated
+    return state
+
+
 def run_scheduled_scan(timeframe: str) -> dict:
     if timeframe not in {"15m", "1d"}:
         raise ValueError("Temporalidad no admitida: use 15m o 1d")
@@ -186,16 +205,9 @@ def run_scheduled_scan(timeframe: str) -> dict:
     transitions = 0
     retried_alerts = 0
 
-    # Retry pending terminal-event notifications first. A failed Telegram
-    # request must not make an already-detected lifecycle event disappear.
-    for stored_signal in list(state["signals"].values()):
-        if stored_signal.get("timeframe") != timeframe:
-            continue
-        pending_event = stored_signal.get("pending_notification_event")
-        if pending_event and stored_signal.get("alert_sent") and alerts_enabled:
-            _notify_lifecycle_event(
-                store, stored_signal, pending_event, alerts_enabled
-            )
+    # Retry pending events first and refresh the in-memory snapshot so a
+    # successful retry cannot be overwritten by stale state later this scan.
+    state = _retry_pending_notifications(store, state, timeframe, alerts_enabled)
 
     # Continue monitoring price levels even after the entry window expires
     # or technical conditions invalidate the setup. The bot cannot know
