@@ -644,6 +644,12 @@ def build_telegram_messages(scan_result):
         asset = escape_html(candidate.get("asset", "N/D"))
         timeframe = escape_html(candidate.get("timeframe", "N/D"))
         score = escape_html(candidate.get("score", "N/D"))
+        signal_id = candidate.get("signal_id")
+        signal_id_text = (
+            f"ID: <code>{escape_html(str(signal_id)[:12])}</code>\n"
+            if signal_id
+            else ""
+        )
 
         entry_value = get_candidate_entry(candidate)
         stop_value = candidate.get("stop")
@@ -778,6 +784,7 @@ def build_telegram_messages(scan_result):
             "━━━━━━━━━━━━━━━━━━\n"
             f"{report_status}\n\n"
             f"📌 <b>{asset}</b>  |  {timeframe}  |  Score <b>{score}/100</b>\n"
+            f"{signal_id_text}"
             "🟢 Dirección: <b>LONG</b>\n\n"
             "💰 <b>NIVELES Y MOVIMIENTO POTENCIAL</b>\n"
             f"Entrada de referencia: <code>{entry}</code>\n"
