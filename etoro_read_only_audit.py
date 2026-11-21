@@ -17,7 +17,7 @@ from etoro_read_only import (
     EtoroReadOnlyClient,
     resolve_unique_instrument,
 )
-from etoro_position_risk import calculate_account_gross_stop_risk_from_client
+from etoro_position_risk import calculate_account_stop_risk_from_client
 
 
 def _asset_candidates(symbol: str, asset: Mapping[str, Any]) -> list[tuple[str, str]]:
@@ -102,7 +102,7 @@ def run_audit(
     complete_position_risk_validated = False
     if account_valid:
         try:
-            risk_diagnostic = calculate_account_gross_stop_risk_from_client(
+            risk_diagnostic = calculate_account_stop_risk_from_client(
                 client,
                 snapshot,
                 now_utc,
