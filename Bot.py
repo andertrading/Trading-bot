@@ -149,6 +149,36 @@ def format_number(value, decimals=4):
         return "N/D"
 
 
+def _format_entry_window(generated_at, expires_at):
+    """Format the original entry window without assuming a timezone."""
+    try:
+        start = datetime.fromisoformat(
+            str(generated_at).strip().replace("Z", "+00:00")
+        )
+        end = datetime.fromisoformat(
+            str(expires_at).strip().replace("Z", "+00:00")
+        )
+        if start.tzinfo is None or end.tzinfo is None:
+            return "NO CONFIGURADA"
+        total_minutes = math.ceil((end - start).total_seconds() / 60)
+        if total_minutes <= 0:
+            return "NO CONFIGURADA"
+    except (TypeError, ValueError, OverflowError):
+        return "NO CONFIGURADA"
+
+    days, remainder = divmod(total_minutes, 1440)
+    hours, minutes = divmod(remainder, 60)
+    parts = []
+    if days:
+        parts.append(f"{days} día" if days == 1 else f"{days} días")
+    if hours:
+        parts.append(f"{hours} h")
+    if minutes:
+        parts.append(f"{minutes} min")
+    return " ".join(parts) or "1 min"
+
+
+
 def format_risk(value):
     try:
         number = float(value)
@@ -741,6 +771,9 @@ def build_telegram_messages(scan_result):
             expiry_text = escape_html(format_timestamp(signal_expiry))
         else:
             expiry_text = "NO CONFIGURADA"
+        entry_window_text = _format_entry_window(
+            candidate.get("generated_at"), signal_expiry
+        )
         try:
             age_value = float(data_age)
             age_text = f"{age_value:.1f} min" if math.isfinite(age_value) else "N/D"
@@ -828,6 +861,7 @@ def build_telegram_messages(scan_result):
             "━━━━━━━━━━━━━━━━━━\n"
             "Probabilidad histórica: <b>NO VALIDADA</b>\n"
             f"Caducidad de la señal: <b>{expiry_text}</b>\n"
+            f"Ventana para entrar: <b>{escape_html(entry_window_text)}</b>\\n"
             f"Duración estimada de operación: <b>{escape_html(duration_text)}</b>\n"
             "Noticias y costes: <b>NO INCORPORADOS AÚN</b>\n"
             f"{escape_html(report_closing)}\n"
