@@ -6,7 +6,7 @@ from unittest.mock import Mock, patch
 
 from config import ASSETS
 from etoro_read_only import EtoroAPIError, EtoroAccountSnapshot, EtoroResponse
-from etoro_read_only_audit import run_audit
+from etoro_read_only_audit import _resolution_error_status, run_audit
 
 
 class FakeAuditClient:
@@ -266,6 +266,26 @@ class ReadOnlyAuditTests(unittest.TestCase):
         self.assertEqual(report["position_risk_diagnostic_status"], "COMPLETE_NO_OPEN_POSITIONS")
         self.assertEqual(report["instrument_eligibility_status"], "VALIDATED")
         self.assertEqual(report["realtime_quotes_status"], "VALIDATED")
+
+
+    def test_validation_errors_have_specific_safe_diagnostic_codes(self):
+        cases = (
+            (EtoroAPIError("Falta la lista de resultados de cotizaciones"), "QUOTES_RESULTS_MISSING"),
+            (EtoroAPIError("El instrumento tiene cotización retrasada"), "QUOTES_NOT_REALTIME"),
+            (EtoroAPIError("La respuesta de elegibilidad está incompleta o contiene activos no encontrados"), "ELIGIBILITY_RESULTS_INCOMPLETE"),
+            (EtoroAPIError("El desglose no confirma la divisa de cuenta USD"), "RISK_CURRENCY_UNCONFIRMED"),
+            (EtoroAPIError("Al menos una posición del snapshot no tiene stop-loss confirmado"), "RISK_UNBOUNDED_STOP"),
+            (EtoroAPIError("eToro devolvió HTTP 403: private payload"), "HTTP_403"),
+        )
+        for error, expected in cases:
+            with self.subTest(expected=expected):
+                self.assertEqual(_resolution_error_status(error), expected)
+                self.assertNotIn("private", _resolution_error_status(error))
+
+    def test_unknown_etoro_validation_error_is_not_mislabeled_as_search(self):
+        code = _resolution_error_status(EtoroAPIError("private response detail"))
+        self.assertEqual(code, "ETORO_API_VALIDATION_ERROR")
+        self.assertNotIn("private", code)
 
 
 if __name__ == "__main__":
