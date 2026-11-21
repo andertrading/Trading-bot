@@ -64,6 +64,7 @@ class TestTelegramResearchReport(unittest.TestCase):
         report = Bot.build_telegram_messages(self.scan)[1]
         self.assertIn("Probabilidad histórica: <b>NO VALIDADA</b>", report)
         self.assertIn("Caducidad de la señal: <b>NO CONFIGURADA</b>", report)
+        self.assertIn("Duración estimada de operación: <b>NO VALIDADA</b>", report)
         self.assertIn("Noticias y costes: <b>NO INCORPORADOS AÚN</b>", report)
 
 
