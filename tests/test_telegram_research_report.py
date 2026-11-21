@@ -105,6 +105,7 @@ class TestTelegramResearchReport(unittest.TestCase):
 
 
     def test_report_displays_calendar_aware_signal_expiry_and_entry_window(self):
+        """The alert states how long the entry remains valid."""
         self.candidate["generated_at"] = "2026-11-21T12:00:00+00:00"
         self.candidate["expires_at"] = "2026-11-21T12:30:00+00:00"
         report = Bot.build_telegram_messages(self.scan)[1]
