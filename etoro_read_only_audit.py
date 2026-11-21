@@ -17,7 +17,7 @@ from etoro_read_only import (
     EtoroReadOnlyClient,
     resolve_unique_instrument,
 )
-from etoro_position_risk import calculate_account_gross_stop_risk_from_client
+from etoro_position_risk import calculate_account_stop_risk_from_client
 
 
 def _asset_candidates(symbol: str, asset: Mapping[str, Any]) -> list[tuple[str, str]]:
@@ -48,6 +48,19 @@ def _resolve_asset(client: EtoroReadOnlyClient, symbol: str, asset: Mapping[str,
     return None
 
 
+def _fee_class(instrument_type: Any) -> str | None:
+    if not isinstance(instrument_type, str):
+        return None
+    normalized = instrument_type.strip().casefold().replace(" ", "")
+    if normalized in {"stock", "stocks"}:
+        return "STOCK"
+    if normalized in {"etf", "exchange-tradedfund", "exchangetradedfund"}:
+        return "ETF"
+    if normalized in {"crypto", "cryptocurrency", "cryptocurrencies"}:
+        return "CRYPTO"
+    return None
+
+
 def run_audit(
     client: EtoroReadOnlyClient,
     assets: Mapping[str, Mapping[str, Any]],
@@ -62,24 +75,6 @@ def run_audit(
     except Exception:
         account_valid = False
 
-    gross_position_risk_validated = False
-    complete_position_risk_validated = False
-    if account_valid:
-        try:
-            risk_diagnostic = calculate_account_gross_stop_risk_from_client(
-                client,
-                snapshot,
-                now_utc,
-            )
-            gross_position_risk_validated = risk_diagnostic["status"] in {
-                "GROSS_ONLY_UNVALIDATED",
-                "COMPLETE_NO_OPEN_POSITIONS",
-            }
-            complete_position_risk_validated = risk_diagnostic["complete"]
-        except Exception:
-            gross_position_risk_validated = False
-            complete_position_risk_validated = False
-
     enabled_assets = {
         symbol: asset
         for symbol, asset in assets.items()
@@ -91,6 +86,37 @@ def run_audit(
         item = _resolve_asset(client, symbol, asset)
         if item is not None:
             resolved[symbol] = item
+
+    fee_classes_by_instrument_id: dict[int, str] = {}
+    for symbol, item in resolved.items():
+        actual_fee_class = _fee_class(item.get("instrumentType"))
+        expected_fee_class = enabled_assets[symbol].get("type")
+        if (
+            actual_fee_class is not None
+            and isinstance(expected_fee_class, str)
+            and actual_fee_class == expected_fee_class.strip().upper()
+        ):
+            fee_classes_by_instrument_id[item["instrumentId"]] = actual_fee_class
+
+    gross_position_risk_validated = False
+    complete_position_risk_validated = False
+    if account_valid:
+        try:
+            risk_diagnostic = calculate_account_stop_risk_from_client(
+                client,
+                snapshot,
+                now_utc,
+                fee_classes_by_instrument_id,
+            )
+            gross_position_risk_validated = risk_diagnostic["status"] in {
+                "MODELED_UNCONFIRMED",
+                "VALIDATED_STOP_RISK",
+                "COMPLETE_NO_OPEN_POSITIONS",
+            }
+            complete_position_risk_validated = risk_diagnostic["complete"]
+        except Exception:
+            gross_position_risk_validated = False
+            complete_position_risk_validated = False
 
     eligibility_valid = False
     quotes_valid = False

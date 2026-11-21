@@ -10,6 +10,12 @@ from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from typing import Any, Mapping
 
+from config import (
+    CLOSE_FEES_CONFIRMED,
+    ETORO_FEE_SCHEDULE_CONFIRMED,
+    ETORO_STOCK_REAL_COMMISSION_USD_PER_SIDE,
+    ETORO_CRYPTO_REAL_FEE_PCT_PER_SIDE,
+)
 from etoro_read_only import EtoroAPIError, EtoroAccountSnapshot, EtoroQuote, EtoroResponse
 
 
@@ -80,6 +86,9 @@ def normalize_instrument_breakdown(
     if snapshot_age < -5 or snapshot_age > max_age_seconds:
         raise EtoroAPIError("El desglose de posiciones está obsoleto o tiene fecha futura")
 
+    mirrors = data.get("mirrors")
+    if not isinstance(mirrors, list) or mirrors:
+        raise EtoroAPIError("El desglose contiene mirrors o no confirma su ausencia")
     instruments = data.get("instruments")
     if not isinstance(instruments, list):
         raise EtoroAPIError("Falta la lista de instrumentos del desglose")
@@ -92,6 +101,11 @@ def normalize_instrument_breakdown(
         instrument_id = instrument.get("instrumentId")
         if isinstance(instrument_id, bool) or not isinstance(instrument_id, int) or instrument_id <= 0:
             raise EtoroAPIError("instrumentId inválido en desglose")
+        orders = instrument.get("orders")
+        if not isinstance(orders, list) or orders:
+            raise EtoroAPIError(
+                f"El instrumento {instrument_id} contiene órdenes o no confirma que estén vacías"
+            )
         positions = instrument.get("positions")
         if not isinstance(positions, list):
             raise EtoroAPIError(f"Falta positions para instrumento {instrument_id}")
@@ -129,14 +143,16 @@ def normalize_instrument_breakdown(
     return normalized
 
 
-def calculate_position_gross_stop_risk_usd(
+def calculate_position_stop_risk_usd(
     position: Mapping[str, Any],
     quote: EtoroQuote,
+    fee_class: str,
 ) -> dict[str, Any]:
-    """Calculate gross mark-to-stop loss for a strictly supported spot position.
+    """Calculate stop-based USD risk using conservative published close fees.
 
-    This is a diagnostic, not a complete monetary-risk value. It excludes
-    closing fees/taxes, future funding and gap/slippage beyond the stop.
+    Supported fee classes are STOCK (maximum $2 close commission), ETF ($0
+    commission), and CRYPTO (maximum 1% close commission). The model excludes
+    gaps/slippage beyond the stop; those can make realized losses larger.
     """
     if not isinstance(position, Mapping) or not isinstance(quote, EtoroQuote):
         raise EtoroAPIError("Faltan datos válidos de posición o cotización")
@@ -159,6 +175,9 @@ def calculate_position_gross_stop_risk_usd(
         raise EtoroAPIError("La posición está apalancada; cálculo spot no aplicable")
     if position.get("stopLossType") != "fixed":
         raise EtoroAPIError("El stop no es fijo; se requiere validar la semántica del trailing stop")
+    if not isinstance(fee_class, str) or fee_class.strip().upper() not in {"STOCK", "ETF", "CRYPTO"}:
+        raise EtoroAPIError("Tipo de activo sin tarifa de cierre conservadora validada")
+    fee_class = fee_class.strip().upper()
 
     rate_time = _utc_datetime(position.get("rateTimestamp"), f"position[{position_id}].rateTimestamp")
     if (
@@ -204,30 +223,54 @@ def calculate_position_gross_stop_risk_usd(
     if gross_risk < 0 or not gross_risk.is_finite():
         raise EtoroAPIError("El riesgo bruto al stop calculado no es válido")
 
+    close_notional_usd = stop_rate * units
+    if fee_class == "STOCK":
+        close_fee_usd = Decimal(str(ETORO_STOCK_REAL_COMMISSION_USD_PER_SIDE))
+        fee_assumption = f"configured conservative stock close fee: USD {close_fee_usd}"
+    elif fee_class == "ETF":
+        close_fee_usd = Decimal("0")
+        fee_assumption = "published ETF commission: USD 0"
+    else:
+        close_fee_rate = Decimal(str(ETORO_CRYPTO_REAL_FEE_PCT_PER_SIDE))
+        close_fee_usd = close_notional_usd * close_fee_rate
+        fee_assumption = f"configured conservative manual crypto close fee: {close_fee_rate:.2%}"
+
+    modeled_risk = gross_risk + close_fee_usd
+    if not modeled_risk.is_finite() or modeled_risk < 0:
+        raise EtoroAPIError("El riesgo modelado al stop no es válido")
+
+    fee_schedule_confirmed = CLOSE_FEES_CONFIRMED and ETORO_FEE_SCHEDULE_CONFIRMED
     return {
         "position_id": position_id,
         "instrument_id": instrument_id,
         "direction": direction,
         "settlement_type": "real",
+        "fee_class": fee_class,
         "gross_stop_risk_usd": gross_risk,
-        "risk_usd": None,
-        "status": "GROSS_ONLY_UNVALIDATED",
-        "complete": False,
-        "reason": (
-            "Faltan costes de cierre confirmados; el cálculo tampoco cubre "
-            "gaps ni deslizamiento más allá del stop."
-        ),
+        "estimated_close_fee_usd": close_fee_usd,
+        "modeled_risk_usd": modeled_risk,
+        "risk_usd": modeled_risk if fee_schedule_confirmed else None,
+        "status": "VALIDATED_STOP_RISK" if fee_schedule_confirmed else "MODELED_UNCONFIRMED",
+        "complete": fee_schedule_confirmed,
+        "risk_model_scope": "stop-based; gaps and slippage beyond stop excluded",
+        "fee_schedule_confirmed": fee_schedule_confirmed,
+        "fee_assumption": fee_assumption,
         "currency": "USD",
     }
 
 
-def calculate_account_gross_stop_risk_usd(
+def calculate_account_stop_risk_usd(
     positions: Mapping[int, Mapping[str, Any]],
     quotes: Mapping[int, EtoroQuote],
+    fee_classes_by_instrument_id: Mapping[int, str],
 ) -> dict[str, Any]:
     """Aggregate gross stop risk only when every position has a valid quote."""
-    if not isinstance(positions, Mapping) or not isinstance(quotes, Mapping):
-        raise EtoroAPIError("Posiciones y cotizaciones deben ser mapas")
+    if (
+        not isinstance(positions, Mapping)
+        or not isinstance(quotes, Mapping)
+        or not isinstance(fee_classes_by_instrument_id, Mapping)
+    ):
+        raise EtoroAPIError("Posiciones, cotizaciones y clases de comisión deben ser mapas")
     if not positions:
         return {
             "positions": [],
@@ -247,38 +290,44 @@ def calculate_account_gross_stop_risk_usd(
         quote = quotes.get(instrument_id)
         if quote is None:
             raise EtoroAPIError(f"Falta cotización para la posición {position_id}")
-        results.append(calculate_position_gross_stop_risk_usd(position, quote))
+        fee_class = fee_classes_by_instrument_id.get(instrument_id)
+        results.append(calculate_position_stop_risk_usd(position, quote, fee_class))
 
-    total = sum((item["gross_stop_risk_usd"] for item in results), Decimal("0"))
+    gross_total = sum((item["gross_stop_risk_usd"] for item in results), Decimal("0"))
+    modeled_total = sum((item["modeled_risk_usd"] for item in results), Decimal("0"))
+    close_fee_total = sum((item["estimated_close_fee_usd"] for item in results), Decimal("0"))
+    fee_schedule_confirmed = CLOSE_FEES_CONFIRMED and ETORO_FEE_SCHEDULE_CONFIRMED
     return {
         "positions": results,
-        "gross_stop_risk_usd": total,
-        "risk_usd": None,
-        "status": "GROSS_ONLY_UNVALIDATED",
-        "complete": False,
+        "gross_stop_risk_usd": gross_total,
+        "estimated_close_fees_usd": close_fee_total,
+        "modeled_risk_usd": modeled_total,
+        "risk_usd": modeled_total if fee_schedule_confirmed else None,
+        "status": "VALIDATED_STOP_RISK" if fee_schedule_confirmed else "MODELED_UNCONFIRMED",
+        "complete": fee_schedule_confirmed,
+        "fee_schedule_confirmed": fee_schedule_confirmed,
+        "risk_model_scope": "stop-based; gaps and slippage beyond stop excluded",
         "reason": (
-            "No se puede reservar riesgo total: eToro documenta que el cálculo "
-            "hipotético de costes de cierre aún no está soportado."
+            "Riesgo al stop con cotización ejecutable y máximos conservadores de comisión. "
+            "Las banderas de confirmación de costes deben estar activadas antes de usar risk_usd; "
+            "gaps y deslizamiento pueden aumentar la pérdida real."
         ),
         "currency": "USD",
     }
 
 
 
-def calculate_account_gross_stop_risk_from_client(
+def calculate_account_stop_risk_from_client(
     client: Any,
     account_snapshot: EtoroAccountSnapshot,
     now_utc: datetime,
+    fee_classes_by_instrument_id: Mapping[int, str],
 ) -> dict[str, Any]:
-    """Fetch and calculate gross stop risk for the exact validated PnL positions.
-
-    This is the read-only end-to-end path. It remains gross-only for non-empty
-    accounts because the broker's documented close-cost estimate is unsupported.
-    """
+    """Fetch and calculate stop risk with conservative published close fees."""
     if not isinstance(account_snapshot, EtoroAccountSnapshot):
         raise EtoroAPIError("Falta un snapshot de cuenta eToro validado")
     if not account_snapshot.positions:
-        return calculate_account_gross_stop_risk_usd({}, {})
+        return calculate_account_stop_risk_usd({}, {}, {})
     if account_snapshot.has_unbounded_stop_risk:
         raise EtoroAPIError("Al menos una posición del snapshot no tiene stop-loss confirmado")
     if account_snapshot.client_id is None:
@@ -315,4 +364,8 @@ def calculate_account_gross_stop_risk_from_client(
 
     instrument_ids = sorted(set(expected_instruments.values()))
     quotes = client.get_realtime_quotes(instrument_ids, now_utc)
-    return calculate_account_gross_stop_risk_usd(details, quotes)
+    return calculate_account_stop_risk_usd(
+        details,
+        quotes,
+        fee_classes_by_instrument_id,
+    )
