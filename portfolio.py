@@ -4,9 +4,11 @@ import math
 from config import (
     INITIAL_CAPITAL_USD,
     MAX_PORTFOLIO_RISK,
+    MAX_RISK_PER_TRADE,
 )
 
 HARD_MAX_PORTFOLIO_RISK = 0.03
+HARD_MAX_RISK_PER_TRADE = 0.01
 
 
 def _is_finite_number(value):
@@ -169,6 +171,47 @@ def can_add_trade(
         return {
             "allowed": False,
             "reason": "El riesgo propuesto debe ser positivo.",
+            "currency": "USD",
+        }
+
+    if not _is_finite_number(capital_usd if capital_usd is not None else INITIAL_CAPITAL_USD):
+        return {
+            "allowed": False,
+            "reason": "El capital USD no es válido para comprobar el límite por operación.",
+            "currency": "USD",
+        }
+
+    effective_capital = float(
+        INITIAL_CAPITAL_USD if capital_usd is None else capital_usd
+    )
+    if effective_capital <= 0:
+        return {
+            "allowed": False,
+            "reason": "El capital USD debe ser positivo.",
+            "currency": "USD",
+        }
+
+    if not _is_finite_number(MAX_RISK_PER_TRADE) or float(MAX_RISK_PER_TRADE) <= 0:
+        return {
+            "allowed": False,
+            "reason": "El límite configurado de riesgo por operación no es válido.",
+            "currency": "USD",
+        }
+
+    per_trade_limit_pct = min(
+        float(MAX_RISK_PER_TRADE),
+        HARD_MAX_RISK_PER_TRADE,
+    )
+    max_single_trade_risk_usd = effective_capital * per_trade_limit_pct
+    if proposed_risk_usd > max_single_trade_risk_usd + 1e-10:
+        return {
+            "allowed": False,
+            "reason": (
+                "La operación supera el límite absoluto del 1 % "
+                "de riesgo por operación."
+            ),
+            "proposed_risk_usd": proposed_risk_usd,
+            "max_single_trade_risk_usd": max_single_trade_risk_usd,
             "currency": "USD",
         }
 
