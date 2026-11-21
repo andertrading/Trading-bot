@@ -11,7 +11,12 @@ import numpy as np
 import pandas as pd
 import yfinance as yf
 
-from config import ASSETS
+from config import (
+    ASSETS,
+    INITIAL_CAPITAL_USD,
+    ETORO_EXECUTION_TYPES,
+    ETORO_MARKET_SPREAD_BPS,
+)
 from data_engine import (
     _is_trading_day,
     _market_for_asset,
@@ -21,9 +26,11 @@ from data_engine import (
 )
 from indicators import add_indicators
 from strategies import evaluate_signal_at
+from risk_manager import risk_pct_for_score
+from transaction_costs import estimate_etoro_trade_costs
 
 
-VERSION = "3.17"
+VERSION = "3.18"
 
 PERIODS = {
     "15m": {"period": "60d", "max_bars": 32},
@@ -1340,6 +1347,99 @@ def _prepare_candidate(
     return candidate, None
 
 
+def _estimate_backtest_cost_fields(asset, trade):
+    """Adds a per-trade cost scenario using the configured reference capital."""
+    try:
+        entry = float(trade["entry"])
+        exit_price = float(trade["exit"])
+        stop = float(trade["stop"])
+        score = float(trade["score"])
+        risk_per_unit = entry - stop
+        risk_pct = float(risk_pct_for_score(score))
+        capital = float(INITIAL_CAPITAL_USD)
+        if (
+            not np.isfinite(risk_per_unit)
+            or risk_per_unit <= 0
+            or not np.isfinite(risk_pct)
+            or risk_pct <= 0
+            or not np.isfinite(capital)
+            or capital <= 0
+        ):
+            raise ValueError("No se puede estimar el tamaño hipotético")
+        risk_budget_target = capital * risk_pct
+        quantity = min(
+            risk_budget_target / risk_per_unit,
+            capital / entry,
+        )
+        actual_risk_budget = quantity * risk_per_unit
+        if quantity <= 0 or actual_risk_budget <= 0:
+            raise ValueError("Tamaño o riesgo hipotético no válido")
+
+        entry_time = pd.Timestamp(trade["entry_time"])
+        exit_time = pd.Timestamp(trade["exit_time"])
+        held_days = max(
+            0.0,
+            (exit_time - entry_time).total_seconds() / 86400.0,
+        )
+        execution_type = ETORO_EXECUTION_TYPES.get(asset, "UNKNOWN")
+        overnight_units = None if execution_type == "CFD" and held_days > 0 else 0.0
+
+        costs = estimate_etoro_trade_costs(
+            asset,
+            entry,
+            exit_price,
+            quantity,
+            execution_type=execution_type,
+            market_spread_bps=ETORO_MARKET_SPREAD_BPS.get(asset),
+            overnight_charge_units=overnight_units,
+        )
+        gross_pnl = (exit_price - entry) * quantity
+        known_costs = float(costs.get("known_costs_total", 0.0))
+        known_fee_adjusted_pnl = gross_pnl - known_costs
+
+        return {
+            "hypothetical_quantity": round(quantity, 10),
+            "hypothetical_risk_budget_usd": round(actual_risk_budget, 6),
+            "hypothetical_gross_pnl_usd": round(gross_pnl, 6),
+            "commission_cost_usd": round(float(costs.get("commission_cost", 0.0)), 6),
+            "market_spread_cost_usd": (
+                round(float(costs["market_spread_cost"]), 6)
+                if costs.get("market_spread_cost") is not None else None
+            ),
+            "fx_conversion_cost_usd": round(float(costs.get("fx_conversion_cost", 0.0)), 6),
+            "overnight_cost_usd": (
+                round(float(costs["overnight_cost"]), 6)
+                if costs.get("overnight_cost") is not None else None
+            ),
+            "known_costs_total_usd": round(known_costs, 6),
+            "known_fee_adjusted_pnl_usd": round(known_fee_adjusted_pnl, 6),
+            "result_R_after_known_fees": round(
+                known_fee_adjusted_pnl / actual_risk_budget, 4
+            ),
+            "costs_complete": bool(costs.get("complete", False)),
+            "unpriced_costs": ";".join(costs.get("unpriced_costs", [])),
+            "cost_model_execution_type": execution_type,
+            "cost_model_assumptions": "; ".join(costs.get("assumptions", [])),
+        }
+    except (KeyError, TypeError, ValueError, OverflowError, ZeroDivisionError):
+        return {
+            "hypothetical_quantity": None,
+            "hypothetical_risk_budget_usd": None,
+            "hypothetical_gross_pnl_usd": None,
+            "commission_cost_usd": None,
+            "market_spread_cost_usd": None,
+            "fx_conversion_cost_usd": None,
+            "overnight_cost_usd": None,
+            "known_costs_total_usd": None,
+            "known_fee_adjusted_pnl_usd": None,
+            "result_R_after_known_fees": None,
+            "costs_complete": False,
+            "unpriced_costs": "cost_model_calculation_failed",
+            "cost_model_execution_type": ETORO_EXECUTION_TYPES.get(asset, "UNKNOWN"),
+            "cost_model_assumptions": "",
+        }
+
+
 # ---------------------------------------------------------
 # SIMULACIÓN DE UNA OPERACIÓN
 # ---------------------------------------------------------
@@ -1551,8 +1651,11 @@ def _simulate_candidate(
             else "split_adjusted_ohlc_no_dividend_adjustment"
         ),
         "costs_included": False,
+        "known_fee_cost_model_applied": True,
         "position_sizing_included": False,
     }
+
+    trade.update(_estimate_backtest_cost_fields(asset, trade))
 
     _update_signal_diagnostic(
         diagnostic,
@@ -1760,6 +1863,10 @@ def _empty_metrics():
         "profit_factor_R": None,
         "max_drawdown_R": 0,
         "average_duration_bars": 0,
+        "known_fee_adjusted_total_R": 0,
+        "known_fee_adjusted_average_R": 0,
+        "trades_with_complete_costs": 0,
+        "trades_with_unpriced_costs": 0,
     }
 
 
@@ -1776,6 +1883,13 @@ def _calculate_drawdown(results):
     drawdown = peaks - equity
 
     return float(drawdown.max())
+
+
+def _is_finite_metric(value):
+    try:
+        return math.isfinite(float(value))
+    except (TypeError, ValueError, OverflowError):
+        return False
 
 
 def calculate_metrics(trades):
@@ -1865,6 +1979,40 @@ def calculate_metrics(trades):
         "average_duration_bars": round(
             float(durations.mean()),
             2,
+        ),
+        "known_fee_adjusted_total_R": round(
+            sum(
+                float(trade["result_R_after_known_fees"])
+                for trade in records
+                if isinstance(trade, dict)
+                and _is_finite_metric(trade.get("result_R_after_known_fees"))
+            ),
+            4,
+        ),
+        "known_fee_adjusted_average_R": (
+            round(
+                np.mean([
+                    float(trade["result_R_after_known_fees"])
+                    for trade in records
+                    if isinstance(trade, dict)
+                    and _is_finite_metric(trade.get("result_R_after_known_fees"))
+                ]),
+                4,
+            )
+            if any(
+                isinstance(trade, dict)
+                and _is_finite_metric(trade.get("result_R_after_known_fees"))
+                for trade in records
+            )
+            else 0
+        ),
+        "trades_with_complete_costs": sum(
+            1 for trade in records
+            if isinstance(trade, dict) and trade.get("costs_complete") is True
+        ),
+        "trades_with_unpriced_costs": sum(
+            1 for trade in records
+            if isinstance(trade, dict) and trade.get("costs_complete") is False
         ),
     }
 
@@ -2106,8 +2254,8 @@ def main():
     print("Datos: mismo motor y proveedores que el escáner (snapshots guardados)")
     print(f"Modo de datos: {BACKTEST_DATA_MODE}")
     print(f"Directorio de históricos: {SNAPSHOT_DIR}")
-    print("Costes: no incluidos ni verificados")
-    print("Sizing: desactivado")
+    print("Costes: comisiones públicas modeladas parcialmente; spread real/financiación sin confirmar")
+    print("Sizing: solo tamaño hipotético por operación para estimar costes; no es simulación de cartera")
     print("Entrada: apertura de la vela siguiente")
     print("Stop y objetivo: niveles originales")
     print(f"RR mínimo: {MIN_EXECUTION_RR:.2f}:1")
@@ -2333,8 +2481,9 @@ def main():
     )
     print("Archivos CSV generados.")
     print(
-        "IMPORTANTE: resultados brutos, sin costes, "
-        "sin sizing y sin simulación de cartera."
+        "IMPORTANTE: result_R es bruto. result_R_after_known_fees "
+        "solo resta comisiones conocidas estimadas; no incluye spread "
+        "de mercado ni costes no verificados. No es una simulación de cartera."
     )
 
     if BACKTEST_DATA_MODE == "replay":
