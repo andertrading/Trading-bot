@@ -1,4 +1,6 @@
+import json
 import os
+import tempfile
 import unittest
 from unittest.mock import patch
 from contextlib import redirect_stdout
@@ -261,6 +263,57 @@ class TestBacktestV3(unittest.TestCase):
             result = backtest_v3.download_history("AAPL", "15m", asset="AAPL")
         self.assertIsNone(result)
         self.assertIn("ajuste de precios no está verificado", backtest_v3.DOWNLOAD_ERRORS[("AAPL", "15m")])
+
+    def test_load_snapshot_accepts_verified_coinbase_crypto_research_source(self):
+        data = self.make_data(rows=230)
+        data.index = data.index.tz_localize("UTC")
+        data.attrs["provider"] = "coinbase_exchange+twelvedata_gap_repair"
+        data.attrs["price_source_detail"] = (
+            "Coinbase Exchange public USD spot candles; "
+            "missing timestamps repaired from Twelve Data USD candles"
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with patch.object(
+                backtest_v3, "SNAPSHOT_DIR", backtest_v3.Path(temp_dir)
+            ):
+                csv_path, metadata_path = backtest_v3._snapshot_paths(
+                    "SOL", "15m"
+                )
+                export = data.copy()
+                export.index.name = "timestamp"
+                export.to_csv(
+                    csv_path,
+                    index=True,
+                    index_label="timestamp",
+                    float_format="%.12g",
+                )
+                metadata = {
+                    "asset": "SOL",
+                    "ticker": "SOL-USD",
+                    "timeframe": "15m",
+                    "provider": data.attrs["provider"],
+                    "period_requested": "provider_maximum_available",
+                    "auto_adjust": None,
+                    "adjustment_policy": "raw_unadjusted_intraday",
+                    "price_adjustment_verified": True,
+                    "price_source_detail": data.attrs["price_source_detail"],
+                    "row_count": len(data),
+                    "first_timestamp": str(data.index[0]),
+                    "last_timestamp": str(data.index[-1]),
+                    "sha256": backtest_v3._sha256_file(csv_path),
+                }
+                metadata_path.write_text(
+                    json.dumps(metadata),
+                    encoding="utf-8",
+                )
+
+                loaded = backtest_v3._load_snapshot(
+                    "SOL", "SOL-USD", "15m"
+                )
+
+        self.assertEqual(len(loaded), len(data))
+        self.assertTrue(loaded.index.equals(data.index))
 
     def test_snapshot_metadata_records_provider_and_adjustment_policy(self):
         data = self.make_data()
