@@ -1,5 +1,6 @@
 import unittest
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from unittest.mock import Mock
 
 from etoro_read_only import EtoroResponse
@@ -51,7 +52,10 @@ class FakeAuditClient:
         return EtoroResponse({"items": items, "totalItems": len(items)}, 200, {})
 
     def get_validated_instrument_eligibility(self, instrument_ids, currency="USD"):
-        return {instrument_id: object() for instrument_id in instrument_ids}
+        return {
+            instrument_id: SimpleNamespace(supports_long=True)
+            for instrument_id in instrument_ids
+        }
 
     def get_realtime_quotes(self, instrument_ids, now_utc, max_age_seconds):
         self.quote_calls.append((list(instrument_ids), now_utc, max_age_seconds))
@@ -104,6 +108,15 @@ class ReadOnlyAuditTests(unittest.TestCase):
         self.assertFalse(report["complete_realtime_quotes_validated"])
         self.assertFalse(report["overall_pass"])
         self.assertNotIn("sensitive quote payload", str(report))
+
+    def test_long_ineligible_instrument_blocks_overall_pass(self):
+        client = FakeAuditClient()
+        client.get_validated_instrument_eligibility = Mock(return_value={
+            123: SimpleNamespace(supports_long=False)
+        })
+        report = run_audit(client, self.assets, "USD", self.now)
+        self.assertFalse(report["instrument_eligibility_validated"])
+        self.assertFalse(report["overall_pass"])
 
     def test_eligibility_failure_blocks_overall_pass_without_leaking_details(self):
         client = FakeAuditClient()
