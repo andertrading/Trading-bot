@@ -15,6 +15,9 @@ from config import ASSETS
 from data_engine import (
     _is_trading_day,
     _market_for_asset,
+    download_data,
+    PROVIDER_MAP,
+    LONDON_ASSETS,
 )
 from indicators import add_indicators
 from strategies import evaluate_signal_at
@@ -195,6 +198,12 @@ def _sha256_file(path):
     return digest.hexdigest()
 
 
+def _provider_for_asset(asset, interval):
+    if asset in LONDON_ASSETS and interval == "1d":
+        return "eodhd"
+    return PROVIDER_MAP.get(asset)
+
+
 def _snapshot_metadata(
     asset,
     ticker,
@@ -202,18 +211,20 @@ def _snapshot_metadata(
     data,
     csv_path,
     digest,
+    provider,
 ):
     return {
         "bot_version": VERSION,
         "asset": asset,
         "ticker": ticker,
         "timeframe": interval,
-        "provider": "Yahoo Finance",
-        "period_requested": PERIODS[interval]["period"],
+        "provider": provider,
+        "period_requested": "provider_maximum_available",
         "interval_requested": interval,
-        "auto_adjust": True,
+        "auto_adjust": None,
+        "adjustment_policy": "as_returned_by_provider_unverified",
         "closed_candle_policy": (
-            "Se excluye la última fila descargada"
+            "El motor live excluye velas incompletas antes de devolver el histórico"
         ),
         "downloaded_at_utc": _utc_now(),
         "first_timestamp": str(data.index[0]),
@@ -268,6 +279,7 @@ def _save_snapshot(asset, ticker, interval, data):
             data,
             csv_path,
             digest,
+            _provider_for_asset(asset, interval),
         )
 
         with open(
@@ -366,8 +378,9 @@ def _load_snapshot(asset, ticker, interval):
         "asset": asset,
         "ticker": ticker,
         "timeframe": interval,
-        "provider": "Yahoo Finance",
-        "auto_adjust": True,
+        "provider": _provider_for_asset(asset, interval),
+        "auto_adjust": None,
+        "adjustment_policy": "as_returned_by_provider_unverified",
     }
 
     for key, value in expected.items():
@@ -936,262 +949,81 @@ def _valid_ohlc(data):
 # ---------------------------------------------------------
 
 def download_history(ticker, interval, asset=None):
-    """
-    En modo download:
-      - Descarga Yahoo.
-      - Valida OHLC.
-      - Rechaza timestamps duplicados o desordenados.
-      - Excluye la última fila.
-      - Guarda el histórico exacto y su SHA-256.
-
-    En modo replay:
-      - No consulta Yahoo.
-      - Carga el snapshot.
-      - Comprueba su integridad.
-    """
-
+    """Usa el mismo motor de proveedores y validación que el escáner."""
     key = (ticker, interval)
-
     DOWNLOAD_ERRORS.pop(key, None)
-
     if interval not in PERIODS:
         DOWNLOAD_ERRORS[key] = "Temporalidad no admitida"
         return None
-
     if asset is None:
-        asset = next(
-            (
-                name
-                for name, settings in get_assets()
-                if settings == ticker
-            ),
-            None,
-        )
-
+        asset = next((name for name, settings in get_assets() if settings == ticker), None)
     if asset is None:
-        DOWNLOAD_ERRORS[key] = (
-            "No se pudo identificar el activo del histórico"
-        )
+        DOWNLOAD_ERRORS[key] = "No se pudo identificar el activo del histórico"
         return None
-
     if BACKTEST_DATA_MODE == "replay":
         try:
-            return _load_snapshot(
-                asset,
-                ticker,
-                interval,
-            )
+            return _load_snapshot(asset, ticker, interval)
         except Exception as exc:
-            DOWNLOAD_ERRORS[key] = (
-                f"Error reproduciendo snapshot: "
-                f"{type(exc).__name__}: {exc}"
-            )
-            warnings.warn(
-                f"{asset} ({interval}): {DOWNLOAD_ERRORS[key]}"
-            )
+            DOWNLOAD_ERRORS[key] = f"Error reproduciendo snapshot: {type(exc).__name__}: {exc}"
+            warnings.warn(f"{asset} ({interval}): {DOWNLOAD_ERRORS[key]}")
             return None
-
-    settings = PERIODS[interval]
-
     try:
-        data = yf.download(
-            ticker,
-            period=settings["period"],
-            interval=interval,
-            auto_adjust=True,
-            progress=False,
-            threads=False,
-        )
-
+        data = download_data(asset, interval)
     except Exception as exc:
-        error = (
-            f"Excepción Yahoo Finance: "
-            f"{type(exc).__name__}: {exc}"
-        )
-
-        DOWNLOAD_ERRORS[key] = error
-        warnings.warn(f"{ticker} ({interval}): {error}")
-
+        DOWNLOAD_ERRORS[key] = f"Motor de datos: {type(exc).__name__}: {exc}"
+        warnings.warn(f"{asset} ({interval}): {DOWNLOAD_ERRORS[key]}")
         return None
-
-    if data is None or data.empty:
-        DOWNLOAD_ERRORS[key] = (
-            "Yahoo Finance devolvió un histórico vacío"
-        )
+    if data is None or not isinstance(data, pd.DataFrame) or data.empty:
+        DOWNLOAD_ERRORS[key] = "El motor de datos no devolvió un histórico válido"
         return None
-
-    raw_rows = len(data)
-
     try:
-        data = _normalize_columns(data)
-    except Exception as exc:
-        DOWNLOAD_ERRORS[key] = (
-            f"Error normalizando columnas: {exc}"
-        )
-        return None
-
-    required = ["Open", "High", "Low", "Close"]
-
-    missing = [
-        column
-        for column in required
-        if column not in data.columns
-    ]
-
-    if missing:
-        DOWNLOAD_ERRORS[key] = (
-            f"Columnas ausentes: {missing}. "
-            f"Columnas recibidas: {list(data.columns)}"
-        )
-        return None
-
-    columns = required.copy()
-
-    if "Volume" in data.columns:
-        columns.append("Volume")
-
-    try:
+        data = _normalize_columns(data.copy())
+        required = ["Open", "High", "Low", "Close"]
+        missing = [column for column in required if column not in data.columns]
+        if missing:
+            raise ValueError(f"Columnas OHLC ausentes: {missing}")
+        columns = required + (["Volume"] if "Volume" in data.columns else [])
         data = data[columns].copy()
-
+        if not isinstance(data.index, pd.DatetimeIndex):
+            data.index = pd.to_datetime(data.index, utc=True, errors="coerce")
+        elif data.index.tz is None:
+            data.index = data.index.tz_localize("UTC")
+        else:
+            data.index = data.index.tz_convert("UTC")
+        if data.index.hasnans: raise ValueError("timestamps inválidos")
+        if not data.index.is_monotonic_increasing: raise ValueError("timestamps desordenados")
+        if data.index.has_duplicates: raise ValueError("timestamps duplicados")
         for column in columns:
-            data[column] = pd.to_numeric(
-                data[column],
-                errors="coerce",
-            )
-
-        data = data.replace(
-            [np.inf, -np.inf],
-            np.nan,
-        )
-
-        if data.index.hasnans:
-            DOWNLOAD_ERRORS[key] = (
-                "El índice contiene fechas no válidas"
-            )
-            return None
-
-        # Consolidar únicamente duplicados idénticos.
-        # Si un mismo timestamp contiene velas distintas, el histórico
-        # se rechaza para no elegir arbitrariamente una cotización.
-        duplicated = data.index.duplicated(keep=False)
-
-        if duplicated.any():
-            duplicate_rows = data.loc[duplicated]
-
-            for timestamp, group in duplicate_rows.groupby(level=0):
-                if len(group.drop_duplicates()) > 1:
-                    DOWNLOAD_ERRORS[key] = (
-                        "Histórico rechazado: "
-                        f"timestamp duplicado conflictivo ({timestamp})"
-                    )
-                    return None
-
-            data = data[~data.index.duplicated(keep="last")].copy()
-
-        # No ordenar automáticamente: el orden recibido forma
-        # parte de la integridad del histórico descargado.
-        if not data.index.is_monotonic_increasing:
-            DOWNLOAD_ERRORS[key] = (
-                "Histórico rechazado: timestamps desordenados"
-            )
-            return None
-
+            data[column] = pd.to_numeric(data[column], errors="coerce")
+        for column in required:
+            values = data[column].to_numpy(dtype=float)
+            if not np.isfinite(values).all() or (values <= 0).any():
+                raise ValueError(f"{column} contiene precios ausentes, no finitos o no positivos")
+        invalid_mask = _ohlc_incoherent_mask(data)
+        if invalid_mask.any():
+            invalid_rows = data.loc[invalid_mask]
+            for timestamp, candle in invalid_rows.iterrows():
+                EXCLUDED_OHLC_CANDLES.append({
+                    "ticker": ticker, "timeframe": interval, "fecha": str(timestamp),
+                    "open": float(candle["Open"]), "high": float(candle["High"]),
+                    "low": float(candle["Low"]), "close": float(candle["Close"]),
+                    "motivo": "Histórico rechazado por OHLC incoherente",
+                })
+            raise ValueError(f"{len(invalid_rows)} velas OHLC incoherentes")
+        validation_error = _ohlc_validation_error(data)
+        if validation_error: raise ValueError(validation_error)
+        if len(data) < MIN_BARS:
+            raise ValueError(f"Histórico insuficiente: {len(data)} filas; mínimo {MIN_BARS}")
+        provider = _provider_for_asset(asset, interval)
+        if not provider: raise ValueError("No hay proveedor configurado para el activo")
+        _save_snapshot(asset, ticker, interval, data)
+        DOWNLOAD_ERRORS.pop(key, None)
+        print(f"  Fuente live: {provider} | {len(data)} velas | {data.index[0]} → {data.index[-1]}")
+        return data
     except Exception as exc:
-        DOWNLOAD_ERRORS[key] = (
-            f"Error limpiando histórico: "
-            f"{type(exc).__name__}: {exc}"
-        )
+        DOWNLOAD_ERRORS[key] = f"Histórico rechazado: {type(exc).__name__}: {exc}"
+        warnings.warn(f"{asset} ({interval}): {DOWNLOAD_ERRORS[key]}")
         return None
-
-    # Excluir primero la última vela, que el backtest considera
-    # potencialmente incompleta. No debe invalidar el histórico
-    # por valores OHLC todavía en formación.
-    if len(data) > 1:
-        data = data.iloc[:-1].copy()
-
-    for column in required:
-        if data[column].isna().any():
-            count = int(data[column].isna().sum())
-            DOWNLOAD_ERRORS[key] = (
-                f"{column} contiene {count} valores ausentes "
-                "o no numéricos en velas cerradas"
-            )
-            return None
-
-        values = data[column].to_numpy(dtype=float)
-
-        if not np.isfinite(values).all():
-            DOWNLOAD_ERRORS[key] = (
-                f"{column} contiene valores no finitos"
-            )
-            return None
-
-        if (values <= 0).any():
-            DOWNLOAD_ERRORS[key] = (
-                f"{column} contiene precios no positivos"
-            )
-            return None
-
-    invalid_mask = _ohlc_incoherent_mask(data)
-    invalid_rows = data.loc[invalid_mask]
-
-    if not invalid_rows.empty:
-        for timestamp, candle in invalid_rows.iterrows():
-            EXCLUDED_OHLC_CANDLES.append({
-                "ticker": ticker,
-                "timeframe": interval,
-                "fecha": str(timestamp),
-                "open": float(candle["Open"]),
-                "high": float(candle["High"]),
-                "low": float(candle["Low"]),
-                "close": float(candle["Close"]),
-                "motivo": (
-                    "Histórico rechazado por OHLC incoherente"
-                ),
-            })
-
-        DOWNLOAD_ERRORS[key] = (
-            f"Histórico rechazado: "
-            f"{len(invalid_rows)} velas OHLC incoherentes"
-        )
-
-        return None
-
-    validation_error = _ohlc_validation_error(data)
-
-    if validation_error:
-        DOWNLOAD_ERRORS[key] = validation_error
-        return None
-
-    if len(data) < MIN_BARS:
-        DOWNLOAD_ERRORS[key] = (
-            f"Histórico insuficiente: "
-            f"{len(data)} filas; mínimo {MIN_BARS}. "
-            f"Filas originales: {raw_rows}; "
-            f"periodo: {settings['period']}"
-        )
-        return None
-
-    try:
-        _save_snapshot(
-            asset,
-            ticker,
-            interval,
-            data,
-        )
-    except Exception as exc:
-        DOWNLOAD_ERRORS[key] = str(exc)
-        return None
-
-    DOWNLOAD_ERRORS.pop(key, None)
-
-    return data
-
-
-# ---------------------------------------------------------
-# HUECOS DE EJECUCIÓN
-# ---------------------------------------------------------
-
 def _validate_execution_gaps(
     df,
     start_index,
@@ -2255,7 +2087,7 @@ def main():
     print(f"Activos habilitados: {len(assets)}")
     print("Modo: histórico, compras únicamente")
     print("Estrategia: sin cambios")
-    print("Datos: Yahoo Finance (snapshots guardados)")
+    print("Datos: mismo motor y proveedores que el escáner (snapshots guardados)")
     print(f"Modo de datos: {BACKTEST_DATA_MODE}")
     print(f"Directorio de históricos: {SNAPSHOT_DIR}")
     print("Costes: no incluidos ni verificados")
@@ -2267,7 +2099,9 @@ def main():
     print("Diagnóstico: todas las candidatas")
     print("Simulación: sin operaciones solapadas")
     print("Calendario: festivos y sesiones por mercado")
-    print("Snapshots: hash, filas, orden y timestamps verificados")
+    print("Proveedores: Twelve Data / Yahoo Finance / EODHD según motor live")
+    print("Ajuste de precios: nativo del proveedor; equivalencia no verificada")
+    print("Snapshots: hash, proveedor, filas, orden y timestamps verificados")
 
     if BACKTEST_DATA_MODE == "replay":
         print("SEGURIDAD: no se descargarán ni sobrescribirán snapshots.")
