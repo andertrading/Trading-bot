@@ -12,7 +12,7 @@ import os
 from datetime import datetime, timezone
 
 import Bot
-from config import SIGNAL_ALERTS_ENABLED
+from config import SIGNAL_ALERTS_ENABLED, STRATEGY_VALIDATED
 from data_engine import signal_expiry_at
 from signal_lifecycle import (
     UpstashSignalStateStore,
@@ -119,7 +119,11 @@ def run_scheduled_scan(timeframe: str) -> dict:
     if timeframe not in {"15m", "1d"}:
         raise ValueError("Temporalidad no admitida: use 15m o 1d")
 
-    alerts_enabled = bool(SIGNAL_ALERTS_ENABLED)
+    alerts_enabled = bool(SIGNAL_ALERTS_ENABLED and STRATEGY_VALIDATED)
+    if SIGNAL_ALERTS_ENABLED and not STRATEGY_VALIDATED:
+        logger.warning(
+            "TELEGRAM ALERTS HELD | strategy has not passed the validation gate"
+        )
     if alerts_enabled and not Bot.TELEGRAM_ENABLED:
         raise RuntimeError(
             "SIGNAL_ALERTS_ENABLED está activo, pero faltan TELEGRAM_TOKEN/TELEGRAM_CHAT_ID"
