@@ -178,6 +178,37 @@ class TestPortfolioBacktest(unittest.TestCase):
         self.assertTrue(net["summary"]["costs_included"])
         self.assertEqual(net["summary"]["pnl_basis"], "NET_AFTER_ASSUMED_COSTS")
 
+
+    def test_crypto_exit_cost_reserve_uses_expected_exit_notional_and_spread(self):
+        trade = self.make_trade(
+            asset="BTC",
+            entry=100.0,
+            stop=90.0,
+            result_R=10.0,
+        )
+        trade["exit"] = 200.0
+
+        result = simulate_portfolio(
+            [trade],
+            capital_usd=1000.0,
+            execution_costs={"venue": "ETORO_REAL", "spread_bps": 100},
+        )
+
+        position = result["trades"][0]
+        quantity = position["quantity"]
+        expected_exit_notional = 200.0 * quantity
+        expected_exit_cost = expected_exit_notional * 0.01
+        expected_exit_cost += expected_exit_notional * 100 / 20000.0
+        self.assertAlmostEqual(
+            position["reserved_exit_cost_usd"],
+            expected_exit_cost,
+            places=8,
+        )
+        self.assertGreater(
+            position["reserved_exit_cost_usd"],
+            position["entry_cost_usd"],
+        )
+
     def test_crypto_commission_is_charged_on_entry_and_exit_notional(self):
         trade = self.make_trade(
             asset="BTC",
