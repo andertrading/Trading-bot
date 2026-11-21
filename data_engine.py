@@ -892,6 +892,81 @@ def _has_intraday_gaps(df, asset):
 
 
 # ---------------------------------------------------------------------
+# DETECCIÓN DE HUECOS DIARIOS
+# ---------------------------------------------------------------------
+
+def _has_daily_gaps(df, asset):
+    """
+    Comprueba que el histórico diario no omite sesiones esperadas.
+
+    Cripto:
+    - Exige una vela por cada día UTC consecutivo.
+
+    Acciones y ETF:
+    - Permite fines de semana y festivos del mercado correspondiente.
+    - Rechaza cualquier sesión bursátil completa ausente.
+    """
+    if df is None or df.empty or asset is None:
+        return True
+
+    timestamps = pd.DatetimeIndex(df.index).sort_values()
+
+    if timestamps.has_duplicates:
+        logger.error(
+            "HISTÓRICO DIARIO RECHAZADO: fechas duplicadas | %s",
+            asset,
+        )
+        return True
+
+    session_dates = [timestamp.date() for timestamp in timestamps]
+
+    if any(
+        current <= previous
+        for previous, current in zip(session_dates, session_dates[1:])
+    ):
+        logger.error(
+            "HISTÓRICO DIARIO RECHAZADO: fechas no crecientes | %s",
+            asset,
+        )
+        return True
+
+    if asset in CRYPTO_ASSETS:
+        differences = timestamps.to_series().diff().dropna()
+
+        if not (
+            differences == pd.Timedelta(days=1)
+        ).all():
+            logger.error(
+                "HUECO DIARIO | %s | mercado cripto",
+                asset,
+            )
+            return True
+
+        return False
+
+    for previous_date, current_date in zip(
+        session_dates,
+        session_dates[1:],
+    ):
+        missing_date = previous_date + timedelta(days=1)
+
+        while missing_date < current_date:
+            if _is_trading_day(missing_date, asset):
+                logger.error(
+                    "SESIÓN DIARIA AUSENTE | %s | fecha=%s | anterior=%s | siguiente=%s",
+                    asset,
+                    missing_date,
+                    previous_date,
+                    current_date,
+                )
+                return True
+
+            missing_date += timedelta(days=1)
+
+    return False
+
+
+# ---------------------------------------------------------------------
 # REGISTRO DE DATOS
 # ---------------------------------------------------------------------
 
@@ -1142,7 +1217,12 @@ def _download_twelvedata(asset, config, interval):
             )
             return None
 
-        if interval == "15m" and _has_intraday_gaps(df, asset):
+        has_gaps = (
+            _has_intraday_gaps(df, asset)
+            if interval == "15m"
+            else _has_daily_gaps(df, asset)
+        )
+        if has_gaps:
             logger.error(
                 "HISTÓRICO RECHAZADO POR HUECOS | %s | %s",
                 asset,
@@ -1360,7 +1440,12 @@ def _download_yahoo(asset, config, interval):
             )
             return None
 
-        if interval == "15m" and _has_intraday_gaps(df, asset):
+        has_gaps = (
+            _has_intraday_gaps(df, asset)
+            if interval == "15m"
+            else _has_daily_gaps(df, asset)
+        )
+        if has_gaps:
             logger.error(
                 "HISTÓRICO RECHAZADO POR HUECOS | %s | %s",
                 asset,
@@ -1426,10 +1511,12 @@ def download_data(asset, interval="15m"):
         validated = _normalise_dataframe(cached)
 
         if validated is not None:
-            if interval != "15m" or not _has_intraday_gaps(
-                validated,
-                asset,
-            ):
+            if interval == "15m":
+                has_gaps = _has_intraday_gaps(validated, asset)
+            else:
+                has_gaps = _has_daily_gaps(validated, asset)
+
+            if not has_gaps:
                 return validated
 
         logger.warning(
