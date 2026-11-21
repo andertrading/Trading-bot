@@ -367,6 +367,15 @@ def resolve_unique_instrument(
     items = response.data.get("items")
     if not isinstance(items, list):
         raise EtoroAPIError("Falta la lista de instrumentos en la búsqueda")
+    total_items = response.data.get("totalItems")
+    if (
+        isinstance(total_items, bool)
+        or not isinstance(total_items, int)
+        or total_items != len(items)
+    ):
+        raise EtoroAPIError(
+            "La búsqueda de instrumentos está incompleta o requiere paginación adicional"
+        )
 
     target = identifier.strip().casefold()
     matches = []
