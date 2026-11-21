@@ -316,15 +316,18 @@ def simulate_portfolio(
             )
 
         def risk_constraints_satisfied(factor):
-            # Entry fees are already deducted from the equity denominator.
-            # Open risk therefore includes the remaining gross loss to stop
-            # plus the estimated exit-side fee at the stop price.
-            post_entry_equity = max(
-                0.0,
-                equity_for_limits - batch_entry_costs(factor),
-            )
-            batch_stop_risk = sum(
-                requested_risk * factor
+            # The new trade's full stop loss includes entry fee, gross
+            # distance-to-stop loss and exit-side cost at the stop. Compare
+            # that complete amount with pre-entry equity. Once opened, the
+            # entry fee is deducted from equity and only remaining stop risk
+            # (gross loss plus stop-side exit cost) stays reserved.
+            batch_total_stop_risk = sum(
+                side_cost(
+                    item,
+                    requested_risk * factor / item["risk_per_unit"],
+                    item["entry"],
+                )
+                + requested_risk * factor
                 + side_cost(
                     item,
                     requested_risk * factor / item["risk_per_unit"],
@@ -333,18 +336,23 @@ def simulate_portfolio(
                 for item, requested_risk, _ in requests
             )
             if (
-                open_risk + batch_stop_risk
-                > portfolio_limit_pct * post_entry_equity + 1e-10
+                open_risk + batch_total_stop_risk
+                > portfolio_limit_pct * equity_for_limits + 1e-10
             ):
                 return False
             return all(
-                requested_risk * factor
+                side_cost(
+                    item,
+                    requested_risk * factor / item["risk_per_unit"],
+                    item["entry"],
+                )
+                + requested_risk * factor
                 + side_cost(
                     item,
                     requested_risk * factor / item["risk_per_unit"],
                     item["stop"],
                 )
-                <= per_trade_limit_pct * post_entry_equity + 1e-10
+                <= per_trade_limit_pct * equity_for_limits + 1e-10
                 for item, requested_risk, _ in requests
             )
 
