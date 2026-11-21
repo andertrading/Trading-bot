@@ -31,6 +31,8 @@ def _resolution_error_status(exc: Exception) -> str:
     # Exact, generic markers emitted by the strict response normalizers.
     # Never include exception text, payload fragments, symbols, or account data.
     known = (
+        # More specific post-search normalizers must precede generic search errors.
+        ("La respuesta de cotizaciones no es un objeto JSON", "QUOTES_RESPONSE_SCHEMA_INVALID"),
         # Instrument search
         ("Falta la lista results", "SEARCH_RESULTS_MISSING"),
         ("Falta el estado de paginación", "SEARCH_PAGINATION_MISSING"),
@@ -58,7 +60,6 @@ def _resolution_error_status(exc: Exception) -> str:
         ("no cubre todos los instrumentos", "ELIGIBILITY_INSTRUMENTS_INCOMPLETE"),
         # Realtime quotes
         ("Las cotizaciones no son una respuesta HTTP 200 completa", "QUOTES_RESPONSE_INVALID"),
-        ("La respuesta de cotizaciones no es un objeto JSON", "QUOTES_RESPONSE_SCHEMA_INVALID"),
         ("instrumentId inválido en cotización", "QUOTES_INSTRUMENT_ID_INVALID"),
         ("Instrumento inesperado en cotizaciones", "QUOTES_UNEXPECTED_INSTRUMENT"),
         ("Fecha ausente en cotización", "QUOTES_TIMESTAMP_MISSING"),
@@ -362,7 +363,7 @@ def run_audit(
     )
     return {
         "audit_scope": "read-only diagnostics; not authorization to trade",
-        "position_risk_scope": "eToro real-account positions only; separate from the bot's virtual paper portfolio",
+        "position_risk_scope": "eToro real-account risk only; separate from the bot's virtual paper portfolio",
         "account_snapshot_schema_valid": account_valid,
         "account_snapshot_status": account_snapshot_status,
         "account_snapshot_missing_fields": account_snapshot_missing_fields,
