@@ -34,13 +34,17 @@ The API response is useful but is not, by itself, a complete risk calculation.
 7. **What-if costs:** request a hypothetical cost estimate only after instrument, settlement type, direction, leverage and amount are known. Require a complete response with all applicable cost components; absent or ambiguous cost data keeps the candidate blocked.
 8. **Read-only boundary:** the integration must contain only GET account/market requests and the documented what-if cost POST. It must not call trading execution, order creation, close, modify-stop, cancel, transfer, or any write endpoint.
 
+## Manual audit workflow
+
+A manually triggered GitHub Actions workflow is being added for the first authenticated validation. It uses only `ETORO_API_KEY` and `ETORO_USER_KEY` repository secrets, performs read-only account/schema, instrument-discovery and realtime-quote checks, and prints only pass/fail flags plus public instrument IDs. It does not print balances, positions, order details, raw responses or credentials. It has no schedule and does not activate trading.
+
 ## Proposed integration sequence
 
-1. Add a read-only API client with environment-variable credentials, request IDs, strict timeouts, bounded retries, redacted logs, and no secrets in source control.
-2. Add schema validation and fixtures based on the official response shapes. Test malformed payloads, missing positions, no-stop positions, partial HTTP 206 rates, delayed quotes, stale quotes, 401/403, 429 and 5xx.
-3. Build an account snapshot normalizer. Keep portfolio status `UNKNOWN` unless the response is complete and all account-level checks pass.
-4. Resolve all open instrument IDs and supported settlement types. Establish position risk only for combinations with verified unit/multiplier/FX semantics; block everything else.
-5. Reconcile pending entry orders and available cash using eToro's formula, explicitly resolving the documented field-casing discrepancy. Independently compare computed cash with the broker UI before enabling any sizing.
+1. Add a read-only API client with environment-variable credentials, request IDs, strict timeouts, bounded retries, redacted errors, and a strict endpoint allowlist. (Implemented, dormant.)
+2. Add schema validation and fixtures for the official nested account response, exact instrument search, and fresh realtime quotes. (Implemented, dormant; CI tested.)
+3. Run the manual redacted audit after the user adds read-only API credentials as GitHub repository secrets. The workflow is manual-only and emits no private account values.
+4. Compare the live account snapshot and calculated available cash with the eToro UI. Resolve any remaining response-shape differences before using account data.
+5. Resolve all 12 instrument IDs and supported settlement types. Establish position risk only for combinations with verified unit/multiplier/FX semantics; block everything else.
 6. Validate what-if cost results against the eToro order ticket for representative REAL and CFD instruments and for different holding periods.
 7. Run in shadow/read-only mode for multiple sessions. Compare balances, positions, cash, quotes and costs manually. Only then consider removing the corresponding validation blockers.
 
