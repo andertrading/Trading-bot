@@ -1,3 +1,4 @@
+import os
 import unittest
 from unittest.mock import patch
 from contextlib import redirect_stdout
@@ -18,6 +19,18 @@ class TestBacktestV3(unittest.TestCase):
 
         with patch.dict("os.environ", {}, clear=True):
             self.assertEqual(backtest_v3._provider_for_asset("CSPX", "1d"), "eodhd")
+
+    def test_daily_lookback_reads_environment_value(self):
+        with patch.dict(os.environ, {"BACKTEST_DAILY_LOOKBACK_DAYS": "1825"}):
+            self.assertEqual(backtest_v3._parse_daily_lookback_days(), 1825)
+
+    def test_daily_lookback_rejects_invalid_environment_value(self):
+        for value in ("abc", "100", "5000"):
+            with self.subTest(value=value), patch.dict(
+                os.environ, {"BACKTEST_DAILY_LOOKBACK_DAYS": value}
+            ):
+                with self.assertRaises(ValueError):
+                    backtest_v3._parse_daily_lookback_days()
 
     def test_daily_snapshot_period_label_tracks_configured_lookback(self):
         with patch.object(backtest_v3, "BACKTEST_DAILY_LOOKBACK_DAYS", 730):

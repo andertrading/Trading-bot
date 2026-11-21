@@ -41,7 +41,25 @@ PERIODS = {
 }
 
 MIN_BARS = 220
-BACKTEST_DAILY_LOOKBACK_DAYS = 730
+
+
+def _parse_daily_lookback_days():
+    raw_value = os.getenv("BACKTEST_DAILY_LOOKBACK_DAYS", "730")
+    try:
+        days = int(raw_value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            "BACKTEST_DAILY_LOOKBACK_DAYS must be an integer"
+        ) from exc
+
+    if days < MIN_BARS or days > 3650:
+        raise ValueError(
+            f"BACKTEST_DAILY_LOOKBACK_DAYS must be between {MIN_BARS} and 3650"
+        )
+    return days
+
+
+BACKTEST_DAILY_LOOKBACK_DAYS = _parse_daily_lookback_days()
 
 MIN_EXECUTION_RR = 2.0
 RR_TOLERANCE = 1e-6
