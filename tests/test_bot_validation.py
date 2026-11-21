@@ -306,5 +306,47 @@ class TestBotValidation(unittest.TestCase):
         self.assertFalse(result["real_trading_authorized"])
 
 
+
+    def test_scan_can_select_only_one_supported_timeframe(self):
+        with patch.object(Bot, "ASSETS", {
+            "AAPL": {"enabled": True},
+        }), patch.object(
+            Bot, "get_portfolio_status", return_value={"status": "UNKNOWN"}
+        ), patch.object(
+            Bot, "is_intraday_market_open", return_value=False
+        ):
+            result = Bot.run_scan(timeframes=["15m"])
+
+        self.assertEqual(result["timeframes"], ["15m"])
+        self.assertEqual(result["analyses_completed"], 1)
+        self.assertTrue(result["results"][0]["market_closed"])
+        self.assertFalse(result["results"][0]["data_valid"])
+
+    def test_scan_rejects_unsupported_timeframe(self):
+        with self.assertRaises(ValueError):
+            Bot.run_scan(timeframes=["5m"])
+
+    def test_daily_only_scan_does_not_call_intraday_market_check(self):
+        with patch.object(Bot, "ASSETS", {
+            "AAPL": {"enabled": True},
+        }), patch.object(
+            Bot, "get_portfolio_status", return_value={"status": "UNKNOWN"}
+        ), patch.object(
+            Bot, "analyze_asset", return_value={
+                "action": "NO TRADE",
+                "asset": "AAPL",
+                "timeframe": "1d",
+                "data_valid": True,
+            }
+        ) as analyze, patch.object(
+            Bot, "is_intraday_market_open"
+        ) as market_open:
+            result = Bot.run_scan(timeframes=["1d"])
+
+        analyze.assert_called_once_with("AAPL", "1d")
+        market_open.assert_not_called()
+        self.assertEqual(result["timeframes"], ["1d"])
+
+
 if __name__ == "__main__":
     unittest.main()
