@@ -20,6 +20,9 @@ jobs:
         with:
           python-version: "3.13"
 
+      - name: Install requests
+        run: python -m pip install requests
+
       - name: Query Twelve Data symbol catalog
         env:
           TWELVE_DATA_API_KEY: ${{ secrets.TWELVE_DATA_API_KEY }}
