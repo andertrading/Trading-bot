@@ -1815,7 +1815,16 @@ def download_data(asset, interval="15m"):
         )
         return None
 
-    cached = _get_cached_data(asset, interval)
+    provider = PROVIDER_MAP.get(asset)
+    extended_backtest = (
+        provider == "twelvedata"
+        and interval == "15m"
+        and os.getenv(
+            "BACKTEST_EXTENDED_INTRADAY_HISTORY", "false"
+        ).strip().lower() in {"1", "true", "yes", "on"}
+    )
+
+    cached = None if extended_backtest else _get_cached_data(asset, interval)
 
     if cached is not None:
         validated = _normalise_dataframe(cached)
@@ -1840,8 +1849,6 @@ def download_data(asset, interval="15m"):
         with _cache_lock:
             _data_cache.pop((asset, interval), None)
 
-    provider = PROVIDER_MAP.get(asset)
-
     if asset in LONDON_ASSETS and interval == "1d":
         dataframe = download_eodhd_daily(
             asset,
@@ -1851,12 +1858,6 @@ def download_data(asset, interval="15m"):
         )
 
     elif provider == "twelvedata":
-        extended_backtest = (
-            interval == "15m"
-            and os.getenv(
-                "BACKTEST_EXTENDED_INTRADAY_HISTORY", "false"
-            ).strip().lower() in {"1", "true", "yes", "on"}
-        )
         if extended_backtest:
             dataframe = _download_twelvedata_extended(
                 asset,
