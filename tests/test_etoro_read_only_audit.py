@@ -1,9 +1,10 @@
 import unittest
 from datetime import datetime, timezone
+from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import Mock
 
-from etoro_read_only import EtoroResponse
+from etoro_read_only import EtoroAccountSnapshot, EtoroResponse
 from etoro_read_only_audit import run_audit
 
 
@@ -17,7 +18,15 @@ class FakeAuditClient:
     def get_account_snapshot(self, account_currency):
         if not self.account_ok:
             raise RuntimeError("private account data must not be logged")
-        return object()
+        return EtoroAccountSnapshot(
+            account_currency=account_currency,
+            account_currency_source="bot_configuration",
+            client_id=None,
+            available_cash=Decimal("0"),
+            unrealized_pnl=Decimal("0"),
+            positions=(),
+            has_unbounded_stop_risk=False,
+        )
 
     def search_instruments(self, filters):
         self.search_calls.append(dict(filters))
@@ -80,6 +89,9 @@ class ReadOnlyAuditTests(unittest.TestCase):
         self.assertTrue(report["account_snapshot_schema_valid"])
         self.assertTrue(report["instrument_eligibility_validated"])
         self.assertTrue(report["complete_realtime_quotes_validated"])
+        self.assertTrue(report["gross_position_stop_risk_diagnostic_validated"])
+        self.assertTrue(report["complete_position_risk_validated"])
+        self.assertFalse(report["portfolio_risk_admission_ready"])
         self.assertTrue(report["overall_pass"])
         self.assertEqual(report["instrument_resolution"][0]["instrument_id"], 123)
         self.assertNotIn("available_cash", str(report))
@@ -98,6 +110,7 @@ class ReadOnlyAuditTests(unittest.TestCase):
         client = FakeAuditClient(account_ok=False)
         report = run_audit(client, self.assets, "USD", self.now)
         self.assertFalse(report["account_snapshot_schema_valid"])
+        self.assertFalse(report["gross_position_stop_risk_diagnostic_validated"])
         self.assertFalse(report["overall_pass"])
         self.assertNotIn("private account data", str(report))
 
