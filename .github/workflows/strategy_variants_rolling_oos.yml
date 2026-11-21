@@ -144,3 +144,4 @@ jobs:
             strategy_research_status.json
             snapshot_coverage.json
             strategy_research_broker_cost_scenarios.csv
+            strategy_research_history_calendar_coverage.csv
