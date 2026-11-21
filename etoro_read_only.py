@@ -1,7 +1,7 @@
 """Strict read-only eToro API client.
 
-This module intentionally exposes only account/market-data reads and the
-documented what-if cost-estimation POST. It contains no order execution,
+This module exposes account/market-data reads and two documented read-only
+POSTs: hypothetical cost estimation and instrument eligibility. It contains no order execution,
 modification, cancellation, transfer, or other trading-write methods.
 """
 from __future__ import annotations
@@ -625,6 +625,184 @@ def normalize_cost_estimate(
     )
 
 
+@dataclass(frozen=True)
+class EtoroInstrumentEligibility:
+    instrument_id: int
+    symbol: str
+    allow_open_position: bool
+    allow_mit_orders: bool
+    allow_entry_orders: bool
+    allow_exit_orders: bool
+    allow_trailing_stop_loss: bool
+    min_position_exposure: Decimal | None
+    max_units_per_order: Decimal | None
+    units_quantity_type: str
+    order_fill_behavior_type: str
+    allowed_order_quantity_type: str
+    trade_unit_type: str
+    leverage_configs: tuple[Mapping[str, Any], ...]
+
+
+def normalize_instrument_eligibility(
+    response: EtoroResponse,
+    expected_instrument_ids: list[int],
+) -> dict[int, EtoroInstrumentEligibility]:
+    """Validate complete per-account eligibility without inferring permission."""
+    if response.status_code != 200 or not isinstance(response.data, Mapping):
+        raise EtoroAPIError("La elegibilidad no es una respuesta HTTP 200 válida")
+    if not expected_instrument_ids or any(
+        isinstance(value, bool) or not isinstance(value, int) or value <= 0
+        for value in expected_instrument_ids
+    ):
+        raise EtoroAPIError("Los instrumentIds esperados no son válidos")
+    if len(set(expected_instrument_ids)) != len(expected_instrument_ids):
+        raise EtoroAPIError("Los instrumentIds esperados contienen duplicados")
+    if response.data.get("currency") != "USD":
+        raise EtoroAPIError("La respuesta de elegibilidad no está en USD")
+
+    not_found_ids = response.data.get("notFoundInstrumentIds")
+    not_found_symbols = response.data.get("notFoundSymbols")
+    raw_eligibilities = response.data.get("eligibilities")
+    if (
+        not isinstance(not_found_ids, list)
+        or not isinstance(not_found_symbols, list)
+        or not isinstance(raw_eligibilities, list)
+        or not_found_ids
+        or not_found_symbols
+    ):
+        raise EtoroAPIError("La respuesta de elegibilidad está incompleta o contiene activos no encontrados")
+
+    expected = set(expected_instrument_ids)
+    normalized: dict[int, EtoroInstrumentEligibility] = {}
+    boolean_fields = (
+        "allowOpenPosition",
+        "allowMitOrders",
+        "allowEntryOrders",
+        "allowExitOrders",
+        "allowTrailingStopLoss",
+    )
+    string_fields = (
+        "unitsQuantityType",
+        "orderFillBehaviorType",
+        "allowedOrderQuantityType",
+        "tradeUnitType",
+    )
+
+    for index, item in enumerate(raw_eligibilities):
+        if not isinstance(item, Mapping):
+            raise EtoroAPIError(f"Elegibilidad inválida: {index}")
+        instrument_id = item.get("instrumentId")
+        if (
+            isinstance(instrument_id, bool)
+            or not isinstance(instrument_id, int)
+            or instrument_id not in expected
+            or instrument_id in normalized
+        ):
+            raise EtoroAPIError("La respuesta contiene instrumentId inesperado o duplicado")
+        symbol = item.get("symbol")
+        if not isinstance(symbol, str) or not symbol.strip():
+            raise EtoroAPIError(f"symbol ausente en elegibilidad {instrument_id}")
+
+        for field in boolean_fields:
+            if not isinstance(item.get(field), bool):
+                raise EtoroAPIError(f"Campo {field} inválido en elegibilidad {instrument_id}")
+        for field in string_fields:
+            if not isinstance(item.get(field), str) or not item[field].strip():
+                raise EtoroAPIError(f"Campo {field} ausente en elegibilidad {instrument_id}")
+
+        allow_open = item["allowOpenPosition"]
+        min_exposure = None
+        max_units = None
+        if item.get("minPositionExposure") is not None:
+            min_exposure = _decimal(item["minPositionExposure"], "minPositionExposure")
+            if min_exposure <= 0:
+                raise EtoroAPIError("minPositionExposure debe ser positivo")
+        if item.get("maxUnitsPerOrder") is not None:
+            max_units = _decimal(item["maxUnitsPerOrder"], "maxUnitsPerOrder")
+            if max_units <= 0:
+                raise EtoroAPIError("maxUnitsPerOrder debe ser positivo")
+        if allow_open and (min_exposure is None or max_units is None):
+            raise EtoroAPIError("Faltan límites de exposición para un instrumento habilitado")
+
+        configs = item.get("leverageConfigs")
+        if not isinstance(configs, list) or (allow_open and not configs):
+            raise EtoroAPIError("Falta la configuración de apalancamiento")
+        validated_configs: list[Mapping[str, Any]] = []
+        for config_index, config in enumerate(configs):
+            if not isinstance(config, Mapping):
+                raise EtoroAPIError(f"Leverage config inválida: {config_index}")
+            settlement = config.get("settlementType")
+            direction = config.get("direction")
+            leverage_values = config.get("leverageValues")
+            if not isinstance(settlement, str) or not settlement.strip():
+                raise EtoroAPIError("settlementType ausente en leverage config")
+            if direction not in {"LONG", "SHORT"}:
+                raise EtoroAPIError("direction inválida en leverage config")
+            if not isinstance(leverage_values, list) or not leverage_values:
+                raise EtoroAPIError("leverageValues ausente en leverage config")
+            if any(
+                isinstance(value, bool) or not isinstance(value, int) or value < 1
+                for value in leverage_values
+            ) or len(set(leverage_values)) != len(leverage_values):
+                raise EtoroAPIError("leverageValues inválidos o duplicados")
+            if not isinstance(config.get("isPotential"), bool):
+                raise EtoroAPIError("isPotential inválido en leverage config")
+            if config.get("minPositionAmount") is not None:
+                if _decimal(config["minPositionAmount"], "minPositionAmount") <= 0:
+                    raise EtoroAPIError("minPositionAmount debe ser positivo")
+            for flag in ("allowEditStopLoss", "allowEditTakeProfit", "allowStopLossTakeProfit"):
+                if not isinstance(config.get(flag), bool):
+                    raise EtoroAPIError(f"{flag} inválido en leverage config")
+
+            percentage_fields = (
+                "minStopLossPercentage",
+                "maxStopLossPercentage",
+                "defaultStopLossPercentage",
+                "minTakeProfitPercentage",
+                "maxTakeProfitPercentage",
+                "defaultTakeProfitPercentage",
+            )
+            percentages: dict[str, Decimal] = {}
+            for field in percentage_fields:
+                value = config.get(field)
+                if value is not None:
+                    percentages[field] = _decimal(value, field)
+                    if percentages[field] <= 0:
+                        raise EtoroAPIError(f"{field} debe ser positivo")
+            if config["allowStopLossTakeProfit"] and len(percentages) != len(percentage_fields):
+                raise EtoroAPIError("Faltan límites de stop/take profit en leverage config")
+            for prefix in ("StopLoss", "TakeProfit"):
+                minimum = percentages.get(f"min{prefix}Percentage")
+                maximum = percentages.get(f"max{prefix}Percentage")
+                default = percentages.get(f"default{prefix}Percentage")
+                if minimum is not None and maximum is not None and default is not None:
+                    if not minimum <= default <= maximum:
+                        raise EtoroAPIError(f"Rangos {prefix} inconsistentes")
+
+            validated_configs.append(dict(config))
+
+        normalized[instrument_id] = EtoroInstrumentEligibility(
+            instrument_id=instrument_id,
+            symbol=symbol,
+            allow_open_position=allow_open,
+            allow_mit_orders=item["allowMitOrders"],
+            allow_entry_orders=item["allowEntryOrders"],
+            allow_exit_orders=item["allowExitOrders"],
+            allow_trailing_stop_loss=item["allowTrailingStopLoss"],
+            min_position_exposure=min_exposure,
+            max_units_per_order=max_units,
+            units_quantity_type=item["unitsQuantityType"],
+            order_fill_behavior_type=item["orderFillBehaviorType"],
+            allowed_order_quantity_type=item["allowedOrderQuantityType"],
+            trade_unit_type=item["tradeUnitType"],
+            leverage_configs=tuple(validated_configs),
+        )
+
+    if set(normalized) != expected:
+        raise EtoroAPIError("La respuesta de elegibilidad no cubre todos los instrumentos")
+    return normalized
+
+
 class EtoroReadOnlyClient:
     """Small eToro client with a deliberately restricted endpoint surface."""
 
@@ -667,6 +845,7 @@ class EtoroReadOnlyClient:
             ("GET", "/api/v2/market-data/rates"),
             ("GET", "/api/v1/market-data/search"),
             ("POST", "/api/v2/trading/info/costs"),
+            ("POST", "/api/v2/trading/info/eligibility"),
         }
         candle_pattern = (
             r"^/api/v1/market-data/instruments/[1-9][0-9]*/history/"
@@ -681,8 +860,23 @@ class EtoroReadOnlyClient:
         if path == "/api/v2/trading/info/costs":
             if method != "POST" or not isinstance(json_body, Mapping) or json_body.get("action") != "open":
                 raise EtoroAPIError("Solo se permite la estimación hipotética de apertura")
+        elif path == "/api/v2/trading/info/eligibility":
+            if (
+                method != "POST"
+                or not isinstance(json_body, Mapping)
+                or set(json_body) != {"instrumentIds", "currency"}
+                or json_body.get("currency") != "USD"
+                or not isinstance(json_body.get("instrumentIds"), list)
+                or not 1 <= len(json_body["instrumentIds"]) <= 100
+                or any(
+                    isinstance(value, bool) or not isinstance(value, int) or value <= 0
+                    for value in json_body["instrumentIds"]
+                )
+                or len(set(json_body["instrumentIds"])) != len(json_body["instrumentIds"])
+            ):
+                raise EtoroAPIError("Payload de elegibilidad no permitido o incompleto")
         elif json_body is not None:
-            raise EtoroAPIError("No se permiten cuerpos de escritura en endpoints GET")
+            raise EtoroAPIError("No se permiten cuerpos en endpoints GET")
 
         headers = {
             "x-api-key": self.app_key,
@@ -780,6 +974,36 @@ class EtoroReadOnlyClient:
             "/api/v1/market-data/search",
             params=params,
         )
+
+    def get_instrument_eligibility(
+        self,
+        instrument_ids: list[int],
+        currency: str = "USD",
+    ) -> EtoroResponse:
+        if not instrument_ids or len(instrument_ids) > 100:
+            raise ValueError("instrument_ids debe contener entre 1 y 100 IDs")
+        if any(
+            isinstance(value, bool) or not isinstance(value, int) or value <= 0
+            for value in instrument_ids
+        ):
+            raise ValueError("instrument_ids debe contener IDs enteros positivos")
+        if len(set(instrument_ids)) != len(instrument_ids):
+            raise ValueError("instrument_ids no puede contener duplicados")
+        if currency != "USD":
+            raise ValueError("La API de elegibilidad solo admite USD")
+        return self._request(
+            "POST",
+            "/api/v2/trading/info/eligibility",
+            json_body={"instrumentIds": list(instrument_ids), "currency": currency},
+        )
+
+    def get_validated_instrument_eligibility(
+        self,
+        instrument_ids: list[int],
+        currency: str = "USD",
+    ) -> dict[int, EtoroInstrumentEligibility]:
+        response = self.get_instrument_eligibility(instrument_ids, currency)
+        return normalize_instrument_eligibility(response, instrument_ids)
 
     def get_account_pnl(self) -> EtoroResponse:
         return self._request("GET", "/api/v1/trading/info/real/pnl")
