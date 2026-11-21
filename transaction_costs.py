@@ -220,12 +220,15 @@ def estimate_etoro_trade_costs(
 def estimate_funding_conversion_cost(
     amount,
     source_currency,
-    target_currency=ACCOUNT_CURRENCY,
+    target_currency=None,
     *,
     fx_rate=None,
     conversion_fee_pct=None,
 ):
     """Estimate one-off funding FX cost separately from per-trade FX."""
+    target_was_defaulted = target_currency is None
+    if target_was_defaulted:
+        target_currency = ACCOUNT_CURRENCY
     result = {
         "valid": False,
         "complete": False,
@@ -243,10 +246,12 @@ def estimate_funding_conversion_cost(
     if not source or not target:
         result["unpriced_costs"].append("funding_currency_missing")
         return result
+    if target_was_defaulted and not ETORO_ACCOUNT_CURRENCY_CONFIRMED:
+        result["unpriced_costs"].append("account_currency_not_confirmed")
     if source == target:
         result["conversion_cost_target_currency"] = 0.0
         result["valid"] = True
-        result["complete"] = True
+        result["complete"] = not result["unpriced_costs"]
         return result
 
     if conversion_fee_pct is None:
