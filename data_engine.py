@@ -1475,8 +1475,8 @@ def _download_twelvedata_extended(asset, config, interval):
             asset,
             config,
             interval,
-            start_date=start.strftime("%Y-%m-%dT%H:%M:%S"),
-            end_date=end.strftime("%Y-%m-%dT%H:%M:%S"),
+            start_date=start.strftime("%Y-%m-%d %H:%M:%S"),
+            end_date=end.strftime("%Y-%m-%d %H:%M:%S"),
         )
         if chunk is None or chunk.empty:
             logger.error(
