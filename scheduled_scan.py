@@ -59,7 +59,18 @@ def _send_signal_report(scan_result: dict, candidate: dict, signal: dict) -> boo
         )
         chart = None
     if chart is not None:
-        return bool(Bot.send_telegram_photo(chart, messages[1]))
+        try:
+            if Bot.send_telegram_photo(chart, messages[1]):
+                return True
+        except Exception:
+            logger.exception(
+                "No se pudo enviar el gráfico para %s; se enviará el mensaje de texto",
+                signal["signal_id"],
+            )
+        logger.warning(
+            "El envío del gráfico falló para %s; se usará el mensaje de texto",
+            signal["signal_id"],
+        )
     return bool(Bot.send_telegram_message(messages[1]))
 
 
