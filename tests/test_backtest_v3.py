@@ -213,6 +213,23 @@ class TestBacktestV3(unittest.TestCase):
         self.assertEqual(metadata["adjustment_policy"], "raw_unadjusted_intraday")
         self.assertTrue(metadata["price_adjustment_verified"])
 
+        daily_data = self.make_data()
+        daily_data.attrs.update({
+            "data_provider": "twelvedata",
+            "price_adjustment_policy": "split_adjusted_ohlc_no_dividend_adjustment",
+            "price_adjustment_verified": True,
+        })
+        daily_metadata = backtest_v3._snapshot_metadata(
+            "AAPL",
+            "AAPL",
+            "1d",
+            daily_data,
+            backtest_v3.Path("daily_snapshot.csv"),
+            "sha256",
+            "twelvedata",
+        )
+        self.assertEqual(daily_metadata["period_requested"], "2y")
+
     def test_backtest_rejects_duplicate_timestamps_from_provider(self):
         data = self.make_data()
         duplicated = pd.concat([data, data.iloc[[-1]]])
