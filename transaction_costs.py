@@ -238,13 +238,23 @@ def estimate_etoro_trade_costs(
         borrow_rate = ETORO_CFD_STOCK_SHORT_BORROW_ANNUAL_RATE_PCT.get(asset)
         if borrow_rate is None or not _finite(borrow_rate) or float(borrow_rate) < 0:
             result["unpriced_costs"].append("cfd_short_borrow_rate_missing")
-        else:
+        elif float(borrow_rate) < 0.10:
+            # eToro classifies annual borrow costs below 10% as
+            # easy-to-borrow: no overnight fee applies.
+            result["overnight_cost"] = 0.0
+        elif float(borrow_rate) > 0.10:
+            # Hard-to-borrow: annual borrow cost is charged against
+            # opening bid notional, prorated by billable fee units.
             result["overnight_cost"] = (
                 entry_notional
                 * float(borrow_rate)
                 * float(overnight_charge_units)
                 / 365.0
             )
+        else:
+            # eToro's public rule defines below and above 10%, but not
+            # exactly 10%; fail closed rather than invent a classification.
+            result["unpriced_costs"].append("cfd_short_borrow_rate_threshold_ambiguous")
     elif asset_type == "CRYPTO":
         rate = ETORO_CFD_CRYPTO_OVERNIGHT_USD_PER_UNIT_DAY.get(asset)
         if rate is None or not _finite(rate) or float(rate) < 0:
