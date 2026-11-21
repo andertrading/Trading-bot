@@ -2121,9 +2121,6 @@ class TestAutomatedScanSchedulingHelpers(unittest.TestCase):
             engine.signal_expiry_at("AAPL", "5m")
 
 
-if __name__ == "__main__":
-    unittest.main()
-
 
 
 
@@ -2139,10 +2136,11 @@ class TestExtendedDailyHistoryIsBacktestOnly(unittest.TestCase):
     def test_london_extended_daily_uses_yahoo_and_bypasses_cache(
         self, save_cache, eodhd, yahoo, get_cache
     ):
-        frame = make_valid_ohlcv_frame(260, "1d")
+        frame = make_ohlcv(pd.bdate_range("2025-01-01", periods=260, tz="UTC"))
         yahoo.return_value = frame
 
-        result = engine.download_data("CSPX", "1d")
+        with patch.object(engine, "_remove_incomplete_candle", side_effect=lambda frame, interval: frame), patch.object(engine, "_has_daily_gaps", return_value=None):
+            result = engine.download_data("CSPX", "1d")
 
         get_cache.assert_not_called()
         yahoo.assert_called_once()
@@ -2158,10 +2156,11 @@ class TestExtendedDailyHistoryIsBacktestOnly(unittest.TestCase):
     def test_live_london_daily_keeps_eodhd(
         self, save_cache, eodhd, yahoo, get_cache
     ):
-        frame = make_valid_ohlcv_frame(260, "1d")
+        frame = make_ohlcv(pd.bdate_range("2025-01-01", periods=260, tz="UTC"))
         eodhd.return_value = frame
 
-        result = engine.download_data("CSPX", "1d")
+        with patch.object(engine, "_remove_incomplete_candle", side_effect=lambda frame, interval: frame), patch.object(engine, "_has_daily_gaps", return_value=None):
+            result = engine.download_data("CSPX", "1d")
 
         eodhd.assert_called_once()
         yahoo.assert_not_called()
@@ -2174,10 +2173,11 @@ class TestExtendedDailyHistoryIsBacktestOnly(unittest.TestCase):
     def test_extended_daily_twelvedata_bypasses_cache(
         self, save_cache, twelvedata, get_cache
     ):
-        frame = make_valid_ohlcv_frame(260, "1d")
+        frame = make_ohlcv(pd.bdate_range("2025-01-01", periods=260, tz="UTC"))
         twelvedata.return_value = frame
 
-        result = engine.download_data("BTC", "1d")
+        with patch.object(engine, "_remove_incomplete_candle", side_effect=lambda frame, interval: frame), patch.object(engine, "_has_daily_gaps", return_value=None):
+            result = engine.download_data("BTC", "1d")
 
         get_cache.assert_not_called()
         twelvedata.assert_called_once()
@@ -2332,3 +2332,7 @@ class TestTwelveDataDateRangeFormatting(unittest.TestCase):
             "2026-11-21 00:00:00",
         )
 
+
+
+if __name__ == "__main__":
+    unittest.main()
