@@ -48,6 +48,19 @@ def _resolve_asset(client: EtoroReadOnlyClient, symbol: str, asset: Mapping[str,
     return None
 
 
+def _fee_class(instrument_type: Any) -> str | None:
+    if not isinstance(instrument_type, str):
+        return None
+    normalized = instrument_type.strip().casefold().replace(" ", "")
+    if normalized in {"stock", "stocks"}:
+        return "STOCK"
+    if normalized in {"etf", "exchange-tradedfund", "exchangetradedfund"}:
+        return "ETF"
+    if normalized in {"crypto", "cryptocurrency", "cryptocurrencies"}:
+        return "CRYPTO"
+    return None
+
+
 def run_audit(
     client: EtoroReadOnlyClient,
     assets: Mapping[str, Mapping[str, Any]],
@@ -62,24 +75,6 @@ def run_audit(
     except Exception:
         account_valid = False
 
-    gross_position_risk_validated = False
-    complete_position_risk_validated = False
-    if account_valid:
-        try:
-            risk_diagnostic = calculate_account_gross_stop_risk_from_client(
-                client,
-                snapshot,
-                now_utc,
-            )
-            gross_position_risk_validated = risk_diagnostic["status"] in {
-                "GROSS_ONLY_UNVALIDATED",
-                "COMPLETE_NO_OPEN_POSITIONS",
-            }
-            complete_position_risk_validated = risk_diagnostic["complete"]
-        except Exception:
-            gross_position_risk_validated = False
-            complete_position_risk_validated = False
-
     enabled_assets = {
         symbol: asset
         for symbol, asset in assets.items()
@@ -91,6 +86,31 @@ def run_audit(
         item = _resolve_asset(client, symbol, asset)
         if item is not None:
             resolved[symbol] = item
+
+    fee_classes_by_instrument_id = {
+        item["instrumentId"]: fee_class
+        for item in resolved.values()
+        if (fee_class := _fee_class(item.get("instrumentType"))) is not None
+    }
+
+    gross_position_risk_validated = False
+    complete_position_risk_validated = False
+    if account_valid:
+        try:
+            risk_diagnostic = calculate_account_gross_stop_risk_from_client(
+                client,
+                snapshot,
+                now_utc,
+                fee_classes_by_instrument_id,
+            )
+            gross_position_risk_validated = risk_diagnostic["status"] in {
+                "MODELED_STOP_RISK",
+                "COMPLETE_NO_OPEN_POSITIONS",
+            }
+            complete_position_risk_validated = risk_diagnostic["complete"]
+        except Exception:
+            gross_position_risk_validated = False
+            complete_position_risk_validated = False
 
     eligibility_valid = False
     quotes_valid = False
