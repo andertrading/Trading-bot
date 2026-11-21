@@ -249,12 +249,19 @@ def simulate_portfolio(
 
         open_risk = sum(p["allocated_risk_usd"] for p in open_positions.values())
         open_notional = sum(p["notional_usd"] for p in open_positions.values())
+        reserved_exit_cost = sum(
+            p.get("reserved_exit_cost_usd", 0.0)
+            for p in open_positions.values()
+        )
         equity_for_limits = max(0.0, equity)
         available_risk = max(
             0.0,
             equity_for_limits * portfolio_limit_pct - open_risk,
         )
-        available_cash = max(0.0, equity_for_limits - open_notional)
+        available_cash = max(
+            0.0,
+            equity_for_limits - open_notional - reserved_exit_cost,
+        )
 
         requests = []
         for item in batch:
@@ -327,9 +334,12 @@ def simulate_portfolio(
         def batch_cash_usage(factor):
             if factor <= 1e-12:
                 return 0.0
+            # Reserve a second side of estimated fees at entry. This keeps
+            # fixed stock commissions from overdrawing a tiny remaining
+            # account balance when the position later closes.
             return (
                 total_requested_notional * factor
-                + batch_entry_costs(factor)
+                + 2.0 * batch_entry_costs(factor)
             )
 
         low, high = 0.0, risk_factor
@@ -373,6 +383,7 @@ def simulate_portfolio(
             position = {
                 **item,
                 "entry_cost_usd": entry_cost,
+                "reserved_exit_cost_usd": entry_cost,
                 "asset_type": asset_type,
                 "allocated_risk_usd": allocated_risk,
                 "notional_usd": notional,
@@ -486,6 +497,7 @@ def simulate_portfolio(
             "allocation_factor": round(position["allocation_factor"], 8),
             "realized_pnl_usd": round(position.get("realized_pnl_usd", 0.0), 8),
             "entry_cost_usd": round(position.get("entry_cost_usd", 0.0), 8),
+            "reserved_exit_cost_usd": round(position.get("reserved_exit_cost_usd", 0.0), 8),
             "exit_cost_usd": round(position.get("exit_cost_usd", 0.0), 8),
             "net_realized_pnl_usd": round(position.get("net_realized_pnl_usd", 0.0), 8),
             "equity_after_exit_usd": round(position.get("equity_after_exit_usd", equity), 8),
