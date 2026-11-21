@@ -9,12 +9,51 @@ from strategy_research import (
     _broker_cost_sensitivity_rows,
     _history_calendar_coverage,
     _synchronized_oos_trades,
+    _portfolio_allocated_cost_trades,
 )
 
 
 class TestCommonCalendarOutOfSampleSplit(unittest.TestCase):
 
 
+
+    def test_synchronized_oos_trades_excludes_trade_exit_after_window(self):
+        trades = [
+            {"timeframe": "15m", "entry_time": "2025-01-20T00:00:00Z",
+             "exit_time": "2025-01-25T00:00:00Z"},
+            {"timeframe": "15m", "entry_time": "2025-01-20T00:00:00Z",
+             "exit_time": "2025-02-02T00:00:00Z"},
+        ]
+        selected = _synchronized_oos_trades(
+            trades, "15m", "2025-01-01T00:00:00Z", "2025-01-31T00:00:00Z"
+        )
+        self.assertEqual(len(selected), 1)
+        self.assertEqual(selected[0]["exit_time"], "2025-01-25T00:00:00Z")
+
+    def test_portfolio_allocated_cost_trades_use_actual_scaled_quantity(self):
+        source = [{
+            "asset": "BTC", "timeframe": "15m",
+            "entry_time": "2025-01-20T00:00:00Z",
+            "exit_time": "2025-01-21T00:00:00Z",
+            "entry": 100000.0, "exit": 101000.0,
+            "hypothetical_quantity": 0.01,
+            "hypothetical_risk_budget_usd": 10.0,
+            "hypothetical_gross_pnl_usd": 10.0,
+        }]
+        accepted = [{
+            "asset": "BTC", "timeframe": "15m",
+            "entry_time": "2025-01-20T00:00:00+00:00",
+            "exit_time": "2025-01-21T00:00:00+00:00",
+            "quantity": 0.002, "allocated_risk_usd": 2.0,
+            "realized_pnl_usd": 2.0, "notional_usd": 200.0,
+            "allocation_factor": 0.2,
+        }]
+        scaled = _portfolio_allocated_cost_trades(source, accepted)
+        self.assertEqual(len(scaled), 1)
+        self.assertAlmostEqual(scaled[0]["hypothetical_quantity"], 0.002)
+        self.assertAlmostEqual(scaled[0]["hypothetical_risk_budget_usd"], 2.0)
+        self.assertAlmostEqual(scaled[0]["hypothetical_gross_pnl_usd"], 2.0)
+        self.assertAlmostEqual(scaled[0]["portfolio_allocated_notional_usd"], 200.0)
 
     def test_synchronized_oos_trades_uses_shared_timeframe_midpoint_and_bounds(self):
         trades = [
