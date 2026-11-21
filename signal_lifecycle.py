@@ -274,12 +274,17 @@ def advance_signal(
             for value in (signal_data_timestamp, last_market_timestamp)
             if value
         ]
-        # Ignore duplicate or out-of-order candles. Without this guard, a
-        # delayed provider response can invalidate a live entry using an old
-        # stop/target touch that predates the most recently processed candle.
-        price_data_is_new = not reference_timestamps or (
-            incoming_timestamp > max(reference_timestamps)
-        )
+        # A candle timestamp later than the scan clock is not completed data.
+        # Ignore it rather than letting a provider clock error advance state.
+        if incoming_timestamp > current:
+            price_data_is_new = False
+        else:
+            # Ignore duplicate or out-of-order candles. Without this guard, a
+            # delayed provider response can invalidate a live entry using an old
+            # stop/target touch that predates the most recently processed candle.
+            price_data_is_new = not reference_timestamps or (
+                incoming_timestamp > max(reference_timestamps)
+            )
         if price_data_is_new and (
             latest_price is not None
             or latest_high is not None
