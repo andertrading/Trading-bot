@@ -72,11 +72,24 @@ def run_audit(
         if item is not None:
             resolved[symbol] = item
 
+    eligibility_valid = False
     quotes_valid = False
     if resolved and len(resolved) == len(enabled_assets):
+        instrument_ids = [item["instrumentId"] for item in resolved.values()]
+        try:
+            eligibility = client.get_validated_instrument_eligibility(
+                instrument_ids,
+                currency="USD",
+            )
+            eligibility_valid = (
+                set(eligibility) == set(instrument_ids)
+                and all(item.supports_long for item in eligibility.values())
+            )
+        except Exception:
+            eligibility_valid = False
         try:
             client.get_realtime_quotes(
-                [item["instrumentId"] for item in resolved.values()],
+                instrument_ids,
                 now_utc,
                 max_age_seconds=30,
             )
@@ -104,12 +117,14 @@ def run_audit(
     overall = (
         account_valid
         and len(resolved) == len(enabled_assets)
+        and eligibility_valid
         and quotes_valid
     )
     return {
         "audit_scope": "read-only diagnostics; not authorization to trade",
         "account_snapshot_schema_valid": account_valid,
         "instrument_resolution": instrument_report,
+        "instrument_eligibility_validated": eligibility_valid,
         "complete_realtime_quotes_validated": quotes_valid,
         "overall_pass": overall,
     }
