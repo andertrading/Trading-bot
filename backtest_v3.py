@@ -995,6 +995,18 @@ def download_history(ticker, interval, asset=None):
         DOWNLOAD_ERRORS[key] = "El motor de datos no devolvió un histórico válido"
         return None
     try:
+        expected_provider = _provider_for_asset(asset, interval)
+        expected_adjustment = (
+            "raw_unadjusted_intraday"
+            if interval == "15m"
+            else "split_adjusted_ohlc_no_dividend_adjustment"
+        )
+        if data.attrs.get("data_provider") != expected_provider:
+            raise ValueError("El motor no confirma el proveedor del histórico")
+        if data.attrs.get("price_adjustment_policy") != expected_adjustment:
+            raise ValueError("La política de ajuste de precios no coincide")
+        if data.attrs.get("price_adjustment_verified") is not True:
+            raise ValueError("El ajuste de precios no está verificado")
         data = _normalize_columns(data.copy())
         required = ["Open", "High", "Low", "Close"]
         missing = [column for column in required if column not in data.columns]
