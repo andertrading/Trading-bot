@@ -27,10 +27,11 @@ from data_engine import (
 from indicators import add_indicators
 from strategies import evaluate_signal_at
 from risk_manager import risk_pct_for_score
+from portfolio_backtest import simulate_portfolio
 from transaction_costs import estimate_etoro_trade_costs
 
 
-VERSION = "3.18"
+VERSION = "3.19"
 
 PERIODS = {
     "15m": {"period": "60d", "max_bars": 32},
@@ -2279,7 +2280,7 @@ def main():
     print(f"Modo de datos: {BACKTEST_DATA_MODE}")
     print(f"Directorio de históricos: {SNAPSHOT_DIR}")
     print("Costes: comisiones públicas modeladas parcialmente; spread real/financiación sin confirmar")
-    print("Sizing: solo tamaño hipotético por operación para estimar costes; no es simulación de cartera")
+    print("Sizing individual: escenario hipotético para costes; cartera: simulación conjunta con riesgo y efectivo compartidos")
     print("Entrada: apertura de la vela siguiente")
     print("Stop y objetivo: niveles originales")
     print(f"RR mínimo: {MIN_EXECUTION_RR:.2f}:1")
@@ -2348,6 +2349,49 @@ def main():
                 })
 
                 print(f"  Error: {error_message}")
+
+    # -----------------------------------------------------
+    # SIMULACIÓN CONJUNTA DE CARTERA
+    # -----------------------------------------------------
+
+    portfolio_result = simulate_portfolio(
+        all_trades,
+        capital_usd=INITIAL_CAPITAL_USD,
+    )
+
+    pd.DataFrame(portfolio_result["trades"]).to_csv(
+        "operaciones_cartera_backtest_v3.csv",
+        index=False,
+    )
+    pd.DataFrame(portfolio_result["rejections"]).to_csv(
+        "rechazos_cartera_backtest_v3.csv",
+        index=False,
+    )
+    pd.DataFrame([portfolio_result["summary"]]).to_csv(
+        "resultados_cartera_backtest_v3.csv",
+        index=False,
+    )
+
+    portfolio_metrics = portfolio_result["summary"]
+    print(
+        "Cartera simulada: "
+        f"{portfolio_metrics['trades_accepted']} aceptadas / "
+        f"{portfolio_metrics['trades_rejected']} rechazadas | "
+        f"PnL bruto: {portfolio_metrics['net_pnl_usd']:.2f} USD | "
+        f"DD máximo: {portfolio_metrics['max_drawdown_usd']:.2f} USD"
+    )
+    print(
+        "Límite de riesgo conjunto: "
+        f"{portfolio_metrics['portfolio_risk_limit_pct']:.2f}% | "
+        f"pico riesgo abierto: "
+        f"{portfolio_metrics['peak_open_risk_usd']:.2f} USD | "
+        f"pico nominal: "
+        f"{portfolio_metrics['peak_open_notional_usd']:.2f} USD"
+    )
+    print(
+        "Cartera: long-only, capital compartido, entradas simultáneas "
+        "prorrateadas; PnL bruto sin costes ni spreads."
+    )
 
     # -----------------------------------------------------
     # SEÑALES SOLAPADAS
