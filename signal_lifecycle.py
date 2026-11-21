@@ -295,6 +295,8 @@ def advance_signal(
     high = None
     low = None
     if price_data_is_new and (latest_high is not None or latest_low is not None):
+        if (latest_high is None) != (latest_low is None):
+            raise ValueError("latest_high and latest_low must be supplied together")
         fallback = (
             _positive_number(latest_price, "latest_price")
             if latest_price is not None
