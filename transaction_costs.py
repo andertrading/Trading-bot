@@ -245,12 +245,24 @@ def estimate_etoro_trade_costs(
         elif float(borrow_rate) > 0.10:
             # Hard-to-borrow: annual borrow cost is charged against
             # opening bid notional, prorated by billable fee units.
-            result["overnight_cost"] = (
-                entry_notional
-                * float(borrow_rate)
-                * float(overnight_charge_units)
-                / 365.0
-            )
+            if overnight_charge_units is None:
+                result["unpriced_costs"].append(
+                    "cfd_overnight_charge_units_missing"
+                )
+            elif (
+                not _finite(overnight_charge_units)
+                or float(overnight_charge_units) < 0
+            ):
+                result["unpriced_costs"].append(
+                    "invalid_overnight_charge_units"
+                )
+            else:
+                result["overnight_cost"] = (
+                    entry_notional
+                    * float(borrow_rate)
+                    * float(overnight_charge_units)
+                    / 365.0
+                )
         else:
             # eToro's public rule defines below and above 10%, but not
             # exactly 10%; fail closed rather than invent a classification.
@@ -259,9 +271,20 @@ def estimate_etoro_trade_costs(
         rate = ETORO_CFD_CRYPTO_OVERNIGHT_USD_PER_UNIT_DAY.get(asset)
         if rate is None or not _finite(rate) or float(rate) < 0:
             result["unpriced_costs"].append("cfd_crypto_overnight_fee_missing")
+        elif overnight_charge_units is None:
+            result["unpriced_costs"].append(
+                "cfd_overnight_charge_units_missing"
+            )
+        elif (
+            not _finite(overnight_charge_units)
+            or float(overnight_charge_units) < 0
+        ):
+            result["unpriced_costs"].append(
+                "invalid_overnight_charge_units"
+            )
         else:
             result["overnight_cost"] = (
-                quantity * float(rate) * overnight_charge_units
+                quantity * float(rate) * float(overnight_charge_units)
             )
 
     result["known_costs_total"] = (
