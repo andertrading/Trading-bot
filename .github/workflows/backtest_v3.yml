@@ -11,6 +11,7 @@ on:
       - "backtest_v3.py"
       - "data_engine.py"
       - "eodhd_provider.py"
+      - "transaction_costs.py"
       - "strategies.py"
       - "indicators.py"
       - "config.py"
@@ -22,6 +23,9 @@ on:
       - main
     paths:
       - "backtest_v3.py"
+      - "data_engine.py"
+      - "eodhd_provider.py"
+      - "transaction_costs.py"
       - "strategies.py"
       - "indicators.py"
       - "config.py"
@@ -74,6 +78,7 @@ jobs:
           test -f velas_ohlc_excluidas_v3.csv
           test -f rechazos_rr_backtest_v3.csv
           test -f senales_solapadas_v3.csv
+          test -f costes_backtest_v3.csv
 
           echo "Todos los CSV obligatorios están disponibles."
 
@@ -142,6 +147,7 @@ jobs:
               "velas_ohlc_excluidas_v3.csv",
               "rechazos_rr_backtest_v3.csv",
               "senales_solapadas_v3.csv",
+              "costes_backtest_v3.csv",
           ]
 
           summary_path = os.environ["GITHUB_STEP_SUMMARY"]
@@ -199,7 +205,8 @@ jobs:
               f"- Directorio de snapshots: **{os.getenv('BACKTEST_SNAPSHOT_DIR', 'unknown')}**",
               "- Proveedores históricos: según el enrutamiento del motor live (Twelve Data, Yahoo Finance o EODHD).",
               "- Ajuste de precios: política nativa de cada proveedor; equivalencia entre fuentes no verificada.",
-              "- Costes y sizing: no incluidos.",
+              "- Costes: modelo eToro parcial con tarifas públicas base; spread bid-ask real, conversión y financiación variable quedan sin precio cuando faltan datos.",
+              "- Sizing: cantidad hipotética por operación para estimar el efecto de comisiones; no representa una cartera simultánea.",
               "",
           ]
 
@@ -391,6 +398,16 @@ jobs:
                   section("Muestra de operaciones", operations, 10)
               )
 
+          cost_data = data.get("costes_backtest_v3.csv")
+          if cost_data is not None:
+              report.append(
+                  section(
+                      "9. Costes eToro estimados por operación",
+                      cost_data,
+                      40,
+                  )
+              )
+
           errors = data.get("errores_backtest_v3.csv")
 
           if errors is not None:
@@ -443,11 +460,8 @@ jobs:
               "",
               "- Los resultados en R no representan por sí solos "
               "una rentabilidad monetaria de cartera.",
-              "- No se consideran incluidos los costes reales, "
-              "el deslizamiento, la financiación ni el cambio de divisa.",
-              "- Los snapshots permiten reproducir los datos descargados, "
-              "pero no garantizan que el proveedor histórico sea idéntico "
-              "al utilizado por el escáner en tiempo real.",
+              "- El resultado tras comisiones conocidas es parcial: no incluye spreads bid-ask variables ni cargos de financiación o conversión no confirmados.",
+              "- Las series intradía se normalizan sin ajuste; las diarias se normalizan por splits, sin ajuste por dividendos. La paridad de precios ejecutables con eToro no está garantizada.",
               "- Una ejecución verde no demuestra rentabilidad futura.",
               "",
               "## Fin del informe",
@@ -473,6 +487,7 @@ jobs:
             velas_ohlc_excluidas_v3.csv
             rechazos_rr_backtest_v3.csv
             senales_solapadas_v3.csv
+            costes_backtest_v3.csv
             historicos_backtest_v3/
           if-no-files-found: warn
           retention-days: 30
