@@ -163,7 +163,7 @@ class TestBacktestV3(unittest.TestCase):
         ):
             result = backtest_v3.download_history("AAPL", "15m", asset="AAPL")
         self.assertEqual(len(result), len(data))
-        self.assertEqual(result.index[-1], data.index[-1])
+        self.assertEqual(result.index[-1], pd.Timestamp(data.index[-1]).tz_localize("UTC"))
 
     def test_backtest_rejects_incoherent_history_from_provider(self):
         data = self.make_data()
