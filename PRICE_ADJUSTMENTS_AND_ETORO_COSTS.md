@@ -37,7 +37,7 @@ The model deliberately does **not** invent a market spread, FX fee or CFD financ
 
 Funding conversion is a one-off account-funding cost, not a per-trade cost. It has a separate estimator and is not deducted from each trade's R. The current model leaves it unpriced until the actual source currency, deposit method, account currency and applicable conversion fee are known.
 
-The eToro public fee schedule says stock commissions vary by country and exchange, crypto fees may vary by Club level, conversion fees depend on location/payment method/Club level, and CFD financing rates can change. The Spanish page also states that new Spanish users have not been able to trade CFDs since 2 August 2024. The bot therefore keeps CFD availability and each instrument's actual execution type unconfirmed.
+The eToro public fee schedule says stock commissions vary by country and exchange, crypto fees may vary by Club level, conversion fees depend on location/payment method/Club level, and CFD financing rates can change. It also warns that some unleveraged BUY orders in stocks and ETFs can still be executed as CFDs because of product restrictions. The Spanish page states that new Spanish users have not been able to trade CFDs since 2 August 2024. The bot therefore keeps CFD availability and each instrument's actual execution type unconfirmed until the order ticket labels it REAL or CFD.
 
 ## Backtest interpretation
 
