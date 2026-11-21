@@ -132,6 +132,24 @@ def _lifecycle_message(signal: dict, event: str) -> str:
     return messages.get(event, "")
 
 
+def _pending_notification_events(signal: dict) -> list[str]:
+    """Return queued lifecycle events, including the legacy single-event field."""
+    queued = signal.get("pending_notification_events")
+    events = list(queued) if isinstance(queued, list) else []
+    legacy = signal.get("pending_notification_event")
+    if legacy and legacy not in events:
+        events.insert(0, legacy)
+    return events
+
+
+def _set_pending_notification_events(signal: dict, events: list[str]) -> dict:
+    updated = dict(signal)
+    # Keep the first item in the legacy field for old readers and pruning logic.
+    updated["pending_notification_events"] = list(events)
+    updated["pending_notification_event"] = events[0] if events else None
+    return updated
+
+
 def _notify_lifecycle_event(store, signal: dict, event: str, alerts_enabled: bool):
     if not alerts_enabled or not signal.get("alert_sent"):
         return signal
@@ -140,16 +158,19 @@ def _notify_lifecycle_event(store, signal: dict, event: str, alerts_enabled: boo
     if not message:
         return signal
 
+    pending = _pending_notification_events(signal)
     if Bot.send_telegram_message(message):
-        updated = dict(signal)
-        updated["pending_notification_event"] = None
+        if event in pending:
+            pending.remove(event)
+        updated = _set_pending_notification_events(signal, pending)
         updated["last_notification_event"] = event
         updated["last_notification_at"] = datetime.now(timezone.utc).isoformat()
         store.update(updated)
         return updated
 
-    updated = dict(signal)
-    updated["pending_notification_event"] = event
+    if event not in pending:
+        pending.append(event)
+    updated = _set_pending_notification_events(signal, pending)
     store.update(updated)
     return updated
 
@@ -164,11 +185,19 @@ def _retry_pending_notifications(store, state: dict, timeframe: str, alerts_enab
     for stored_signal in list(state["signals"].values()):
         if stored_signal.get("timeframe") != timeframe:
             continue
-        pending_event = stored_signal.get("pending_notification_event")
-        if pending_event and stored_signal.get("alert_sent") and alerts_enabled:
-            updated = _notify_lifecycle_event(
-                store, stored_signal, pending_event, alerts_enabled
-            )
+        pending_events = _pending_notification_events(stored_signal)
+        if pending_events and stored_signal.get("alert_sent") and alerts_enabled:
+            updated = stored_signal
+            # Preserve event order. If Telegram is unavailable, leave this and
+            # all later events queued for the next scheduled scan.
+            for pending_event in pending_events:
+                previous_count = len(_pending_notification_events(updated))
+                updated = _notify_lifecycle_event(
+                    store, updated, pending_event, alerts_enabled
+                )
+                remaining = _pending_notification_events(updated)
+                if pending_event in remaining or len(remaining) >= previous_count:
+                    break
             state["signals"][stored_signal["signal_id"]] = updated
     return state
 
