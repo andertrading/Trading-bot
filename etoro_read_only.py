@@ -548,6 +548,18 @@ def normalize_cost_estimate(
     """Validate a fresh USD cost response and its instrument identity."""
     if response.status_code != 200 or not isinstance(response.data, Mapping):
         raise EtoroAPIError("La estimación de costes no es una respuesta HTTP 200 válida")
+    if (expected_instrument_id is None) == (expected_symbol is None):
+        raise EtoroAPIError("Debe indicarse exactamente un instrumento esperado")
+    if expected_instrument_id is not None and (
+        isinstance(expected_instrument_id, bool)
+        or not isinstance(expected_instrument_id, int)
+        or expected_instrument_id <= 0
+    ):
+        raise EtoroAPIError("expected_instrument_id inválido")
+    if expected_symbol is not None and (
+        not isinstance(expected_symbol, str) or not expected_symbol.strip()
+    ):
+        raise EtoroAPIError("expected_symbol inválido")
     if (
         not isinstance(now_utc, datetime)
         or now_utc.tzinfo is None
