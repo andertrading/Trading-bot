@@ -706,6 +706,12 @@ def build_telegram_messages(scan_result):
             candidate.get("price_adjustment_policy", "N/D")
         )
         signal_expiry = candidate.get("expires_at")
+        duration_estimate = candidate.get("duration_estimate")
+        duration_text = (
+            str(duration_estimate)
+            if duration_estimate not in (None, "", "N/D")
+            else "NO VALIDADA"
+        )
         if data_timestamp:
             data_time_text = escape_html(format_timestamp(data_timestamp))
         else:
@@ -800,6 +806,7 @@ def build_telegram_messages(scan_result):
             "━━━━━━━━━━━━━━━━━━\n"
             "Probabilidad histórica: <b>NO VALIDADA</b>\n"
             f"Caducidad de la señal: <b>{expiry_text}</b>\n"
+            f"Duración estimada de operación: <b>{escape_html(duration_text)}</b>\n"
             "Noticias y costes: <b>NO INCORPORADOS AÚN</b>\n"
             f"{escape_html(report_closing)}\n"
             "Este informe no constituye asesoramiento financiero."
