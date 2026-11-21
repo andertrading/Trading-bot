@@ -53,7 +53,7 @@ class TestTelegramResearchReport(unittest.TestCase):
     def test_report_discloses_unvalidated_probability_and_expiry(self):
         report = Bot.build_telegram_messages(self.scan)[1]
         self.assertIn("Probabilidad histórica: <b>NO VALIDADA</b>", report)
-        self.assertIn("Ventana de entrada/caducidad: <b>NO CONFIGURADA</b>", report)
+        self.assertIn("Caducidad de la señal: <b>NO CONFIGURADA</b>", report)
         self.assertIn("Noticias y costes: <b>NO INCORPORADOS AÚN</b>", report)
 
     def test_report_escapes_untrusted_text(self):
