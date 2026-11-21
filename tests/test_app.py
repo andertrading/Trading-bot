@@ -84,7 +84,9 @@ class TestTradingBotApp(unittest.TestCase):
             "mode": "PAPER_ONLY",
         }
 
-        result = run_scan()
+        # The test verifies full scan coverage during active market sessions.
+        with patch("Bot.is_intraday_market_open", return_value=True):
+            result = run_scan()
 
         expected_assets = [
             asset for asset, settings in ASSETS.items()
