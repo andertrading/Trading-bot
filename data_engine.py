@@ -498,7 +498,8 @@ def _normalise_dataframe(df):
 # VELAS INCOMPLETAS Y HORARIOS
 # ---------------------------------------------------------------------
 
-def _last_expected_intraday_timestamp(asset, now_utc):    tz, opening, regular_closing = _session_for_asset(asset)
+def _last_expected_intraday_timestamp(asset, now_utc):
+    tz, opening, regular_closing = _session_for_asset(asset)
 
     now_local = now_utc.astimezone(tz)
     session_date = now_local.date()
