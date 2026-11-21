@@ -99,6 +99,7 @@ class TestBacktestV3(unittest.TestCase):
         data,
         signal_indexes=(4,),
         target=109.0,
+        max_bars=3,
     ):
         signals = set(signal_indexes)
 
@@ -126,7 +127,7 @@ class TestBacktestV3(unittest.TestCase):
                 {
                     "15m": {
                         "period": "60d",
-                        "max_bars": 3,
+                        "max_bars": max_bars,
                     }
                 },
             ),
@@ -867,6 +868,34 @@ class TestBacktestV3(unittest.TestCase):
             1.25,
         )
 
+    def test_entry_gap_that_consumes_more_than_half_original_risk_is_rejected(self):
+        data = self.make_execution_data()
+        data.iloc[5, data.columns.get_loc("Open")] = 98.0
+        data.iloc[5, data.columns.get_loc("High")] = 99.0
+        data.iloc[5, data.columns.get_loc("Low")] = 97.5
+        data.iloc[5, data.columns.get_loc("Close")] = 98.0
+
+        trades, error = self.run_execution_test(data)
+
+        self.assertIsNone(error)
+        self.assertEqual(trades, [])
+        self.assertEqual(
+            backtest_v3.SIGNAL_DIAGNOSTICS[-1]["signal_status"],
+            "ENTRY_GAP_CONSUMED_RISK",
+        )
+
+    def test_entry_gap_with_exactly_half_original_risk_remaining_is_accepted(self):
+        data = self.make_execution_data()
+        data.iloc[5, data.columns.get_loc("Open")] = 98.5
+        data.iloc[5, data.columns.get_loc("High")] = 99.0
+        data.iloc[5, data.columns.get_loc("Low")] = 98.0
+        data.iloc[5, data.columns.get_loc("Close")] = 98.5
+
+        trades, error = self.run_execution_test(data)
+
+        self.assertIsNone(error)
+        self.assertEqual(len(trades), 1)
+
     def test_execution_rr_above_two_to_one_is_accepted(self):
         data = self.make_execution_data()
 
@@ -1051,6 +1080,47 @@ class TestBacktestV3(unittest.TestCase):
     # ---------------------------------------------------------
     # PRUEBAS DEL CÁLCULO DE R
     # ---------------------------------------------------------
+
+    def test_intraday_equity_trade_closes_at_session_end_before_overnight(self):
+        first_session = pd.date_range(
+            "2025-01-02T14:30:00Z",
+            periods=26,
+            freq="15min",
+        )
+        next_session = pd.date_range(
+            "2025-01-03T14:30:00Z",
+            periods=14,
+            freq="15min",
+        )
+        index = first_session.append(next_session)
+        data = pd.DataFrame(
+            {
+                "Open": [100.0] * len(index),
+                "High": [101.0] * len(index),
+                "Low": [99.0] * len(index),
+                "Close": [100.0] * len(index),
+                "Volume": [1000] * len(index),
+                "ATR": [2.0] * len(index),
+            },
+            index=index,
+        )
+        data.iloc[5, data.columns.get_loc("Open")] = 101.0
+        data.iloc[5, data.columns.get_loc("High")] = 102.0
+        data.iloc[26, data.columns.get_loc("Open")] = 95.0
+        data.iloc[26, data.columns.get_loc("High")] = 96.0
+        data.iloc[26, data.columns.get_loc("Low")] = 94.0
+        data.iloc[26, data.columns.get_loc("Close")] = 95.0
+
+        trades, error = self.run_execution_test(
+            data,
+            max_bars=32,
+        )
+
+        self.assertIsNone(error)
+        self.assertEqual(len(trades), 1)
+        self.assertEqual(trades[0]["exit_reason"], "SESSION_CLOSE")
+        self.assertEqual(trades[0]["exit_time"], str(first_session[-1]))
+        self.assertAlmostEqual(trades[0]["exit"], 100.0)
 
     def test_stop_gap_result_r_can_be_below_minus_one(self):
         data = self.make_execution_data()

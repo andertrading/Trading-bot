@@ -20,9 +20,11 @@ from config import (
 from data_engine import (
     _is_trading_day,
     _market_for_asset,
+    _session_for_asset,
     download_data,
     PROVIDER_MAP,
     LONDON_ASSETS,
+    CRYPTO_ASSETS,
 )
 from indicators import add_indicators
 from strategies import evaluate_signal_at
@@ -43,6 +45,10 @@ BACKTEST_DAILY_LOOKBACK_DAYS = 730
 
 MIN_EXECUTION_RR = 2.0
 RR_TOLERANCE = 1e-6
+
+# Evita ejecutar una entrada cuyo gap haya consumido más de la mitad
+# de la distancia de riesgo prevista entre la referencia y el stop.
+MIN_REMAINING_RISK_FRACTION = 0.5
 
 # ---------------------------------------------------------
 # REPRODUCIBILIDAD
@@ -116,6 +122,7 @@ SIGNAL_DIAGNOSTIC_COLUMNS = [
     "entry_time",
     "entry",
     "entry_gap_pct",
+    "remaining_risk_fraction",
     "stop",
     "target",
     "initial_risk_per_unit",
@@ -1330,6 +1337,33 @@ def _prepare_candidate(
         )
         return None, None
 
+    planned_risk = entry_reference - stop
+    remaining_risk_fraction = (
+        initial_risk / planned_risk
+        if np.isfinite(planned_risk) and planned_risk > 0
+        else None
+    )
+    _update_signal_diagnostic(
+        diagnostic,
+        remaining_risk_fraction=remaining_risk_fraction,
+    )
+
+    if (
+        remaining_risk_fraction is None
+        or not np.isfinite(remaining_risk_fraction)
+        or remaining_risk_fraction < MIN_REMAINING_RISK_FRACTION
+    ):
+        _finish_signal_diagnostic(
+            diagnostic,
+            "ENTRY_GAP_CONSUMED_RISK",
+            (
+                "El gap de entrada deja menos del "
+                f"{MIN_REMAINING_RISK_FRACTION:.0%} del riesgo "
+                "original hasta el stop"
+            ),
+        )
+        return None, None
+
     if entry >= target:
         _finish_signal_diagnostic(
             diagnostic,
@@ -1512,6 +1546,32 @@ def _estimate_backtest_cost_fields(asset, trade):
 # SIMULACIÓN DE UNA OPERACIÓN
 # ---------------------------------------------------------
 
+def _is_last_intraday_session_bar(df, index, asset):
+    """
+    True si la siguiente vela pertenece a otra sesión bursátil.
+
+    Se usa para cerrar posiciones M15 de acciones/ETF antes del cierre,
+    evitando que una estrategia intradía arrastre riesgo overnight.
+    """
+    if asset in CRYPTO_ASSETS or index + 1 >= len(df):
+        return False
+
+    market_tz, _, _ = _session_for_asset(asset)
+
+    current = pd.Timestamp(df.index[index])
+    following = pd.Timestamp(df.index[index + 1])
+
+    if current.tzinfo is None:
+        current = current.tz_localize("UTC")
+    if following.tzinfo is None:
+        following = following.tz_localize("UTC")
+
+    current_local = current.tz_convert(market_tz)
+    following_local = following.tz_convert(market_tz)
+
+    return current_local.date() != following_local.date()
+
+
 def _simulate_candidate(
     asset,
     ticker,
@@ -1622,6 +1682,25 @@ def _simulate_candidate(
         if candle_high >= target:
             exit_price = target
             exit_reason = "TARGET"
+            exit_index = j
+            break
+
+        if (
+            interval == "15m"
+            and _is_last_intraday_session_bar(df, j, asset)
+        ):
+            try:
+                exit_price = float(candle["Close"])
+            except (TypeError, ValueError, KeyError):
+                error = "No se pudo obtener el cierre de la sesión intradía"
+                _finish_signal_diagnostic(
+                    diagnostic,
+                    "INVALID_SESSION_CLOSE",
+                    error,
+                )
+                return None, error
+
+            exit_reason = "SESSION_CLOSE"
             exit_index = j
             break
 
@@ -2113,6 +2192,7 @@ def generate_operations_summary(trades):
         "TARGET",
         "TARGET_GAP",
         "MAX_HOLD",
+        "SESSION_CLOSE",
     ]
 
     if trades is None:
@@ -2265,6 +2345,7 @@ def generate_operations_summary(trades):
             "TARGET": int(reasons.get("TARGET", 0)),
             "TARGET_GAP": int(reasons.get("TARGET_GAP", 0)),
             "MAX_HOLD": int(reasons.get("MAX_HOLD", 0)),
+            "SESSION_CLOSE": int(reasons.get("SESSION_CLOSE", 0)),
         })
 
     for (asset, timeframe), group in df.groupby(
@@ -2331,6 +2412,11 @@ def main():
     print("Stop y objetivo: niveles originales")
     print(f"RR mínimo: {MIN_EXECUTION_RR:.2f}:1")
     print(f"Tolerancia RR: {RR_TOLERANCE}")
+    print(
+        "Riesgo restante mínimo tras gap de entrada: "
+        f"{MIN_REMAINING_RISK_FRACTION:.0%}"
+    )
+    print("M15 acciones/ETF: cierre forzado al final de la sesión; sin overnight")
     print("Diagnóstico: todas las candidatas")
     print("Simulación: sin operaciones solapadas")
     print("Calendario: festivos y sesiones por mercado")
