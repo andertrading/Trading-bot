@@ -1292,6 +1292,27 @@ class TestMarketCalendars(unittest.TestCase):
             )
         )
 
+    def test_uk_platinum_jubilee_market_closures_2022(self):
+        for closed_day in (
+            date(2022, 6, 2),
+            date(2022, 6, 3),
+            date(2022, 9, 19),
+        ):
+            with self.subTest(day=closed_day):
+                self.assertFalse(
+                    engine._is_trading_day(closed_day, "CSPX")
+                )
+
+    def test_uk_spring_bank_holiday_was_moved_in_2022(self):
+        self.assertTrue(
+            engine._is_trading_day(date(2022, 5, 30), "CSPX")
+        )
+
+    def test_uk_coronation_market_closure_2023(self):
+        self.assertFalse(
+            engine._is_trading_day(date(2023, 5, 8), "CNDX")
+        )
+
     def test_crypto_does_not_use_weekend_calendar(self):
         result = engine._previous_trading_day(
             date(2026, 11, 22),

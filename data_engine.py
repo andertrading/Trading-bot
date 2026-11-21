@@ -198,6 +198,18 @@ def _uk_holidays(year):
         _last_weekday(year, 8, 0),
     })
 
+    # Exceptional UK exchange closures in the five-year history window.
+    if year == 2022:
+        # Spring bank holiday moved for the Platinum Jubilee; 3 June was added.
+        holidays.discard(date(2022, 5, 30))
+        holidays.update({
+            date(2022, 6, 2),
+            date(2022, 6, 3),
+            date(2022, 9, 19),  # State funeral of Queen Elizabeth II.
+        })
+    elif year == 2023:
+        holidays.add(date(2023, 5, 8))  # Coronation bank holiday.
+
     return holidays
 
 
