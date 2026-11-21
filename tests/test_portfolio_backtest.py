@@ -136,6 +136,35 @@ class TestPortfolioBacktest(unittest.TestCase):
         self.assertAlmostEqual(result["summary"]["ending_equity_usd"], 1000.0)
         self.assertAlmostEqual(result["summary"]["max_drawdown_usd"], 0.0)
 
+    def test_drawdown_percentage_uses_equity_peak(self):
+        winning = self.make_trade(
+            asset="AAPL",
+            entry_time="2026-01-01T10:00:00Z",
+            exit_time="2026-01-01T11:00:00Z",
+            score=90,
+            result_R=2.0,
+        )
+        losing = self.make_trade(
+            asset="MSFT",
+            entry_time="2026-01-01T12:00:00Z",
+            exit_time="2026-01-01T13:00:00Z",
+            score=90,
+            result_R=-1.0,
+        )
+        result = simulate_portfolio(
+            [winning, losing],
+            capital_usd=1000.0,
+        )
+
+        self.assertAlmostEqual(
+            result["summary"]["max_drawdown_usd"],
+            10.2,
+        )
+        self.assertAlmostEqual(
+            result["summary"]["max_drawdown_pct"],
+            1.0,
+        )
+
     def test_invalid_capital_fails_closed(self):
         with self.assertRaises(ValueError):
             simulate_portfolio([], capital_usd=0)
