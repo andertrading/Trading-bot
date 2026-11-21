@@ -69,7 +69,18 @@ def _lifecycle_message(signal: dict, event: str) -> str:
             f"{signal_id_line}"
             f"Caducidad: <code>{expiry}</code>\n"
             "Ha terminado la ventana de entrada de esta señal. "
-            "No reutilices la alerta anterior."
+            "No abras una nueva operación con esta alerta. "
+            "Esto no es una instrucción para cerrar una posición ya abierta; "
+            "el bot no puede saber si ejecutaste manualmente."
+        ),
+        "SIGNAL_ENTRY_ZONE_INVALIDATED": (
+            "⚠️ <b>PRECIO FUERA DE LA ZONA DE ENTRADA</b>\\n"
+            "━━━━━━━━━━━━━━━━━━\\n"
+            f"📌 <b>{asset}</b> | {timeframe}\\n"
+            f"{signal_id_line}"
+            "El precio ya no conserva el riesgo/recompensa mínimo ni la "
+            "distancia de seguridad prevista hasta el stop. No abrir una "
+            "nueva entrada. Esto no ordena cerrar una posición existente."
         ),
         "SIGNAL_INVALIDATED": (
             "⚠️ <b>SEÑAL INVALIDADA</b>\n"
@@ -142,7 +153,7 @@ def run_scheduled_scan(timeframe: str) -> dict:
     store = UpstashSignalStateStore(state_url, state_token)
 
     now = datetime.now(timezone.utc)
-    store.prune(now=now, retention_days=90, max_terminal_records=10000)
+    store.prune(now=now, retention_days=180, max_terminal_records=10000)
     scan_result = Bot.run_scan(timeframes=[timeframe])
     results = scan_result.get("results", [])
     by_asset = {
@@ -166,12 +177,14 @@ def run_scheduled_scan(timeframe: str) -> dict:
                 store, stored_signal, pending_event, alerts_enabled
             )
 
-    # Advance pending signals. Missing/stale market data never invalidates an
-    # opportunity, but clock-based expiry is still evaluated on every scan.
+    # Continue monitoring price levels even after the entry window expires
+    # or technical conditions invalidate the setup. The bot cannot know
+    # whether the user entered manually.
     for stored_signal in list(state["signals"].values()):
         if (
             stored_signal.get("timeframe") != timeframe
-            or stored_signal.get("status") != "PENDING"
+            or stored_signal.get("monitor_status", "ACTIVE") != "ACTIVE"
+            or stored_signal.get("status") not in {"PENDING", "EXPIRED", "INVALIDATED"}
         ):
             continue
 
@@ -184,9 +197,11 @@ def run_scheduled_scan(timeframe: str) -> dict:
             latest_price=current.get("last_price") if data_is_valid else None,
             conditions_valid=(
                 current.get("action") == "BUY CANDIDATE"
-                if data_is_valid
+                if data_is_valid and stored_signal.get("status") == "PENDING"
                 else True
             ),
+            latest_high=current.get("last_high") if data_is_valid else None,
+            latest_low=current.get("last_low") if data_is_valid else None,
         )
 
         if event:
@@ -200,10 +215,14 @@ def run_scheduled_scan(timeframe: str) -> dict:
                 store.update(updated)
             continue
 
-        # Retry an unsent initial alert only while the same opportunity remains
-        # valid. A later scan never invents whether the user entered.
+        if updated != stored_signal:
+            store.update(updated)
+
+        # Retry an unsent initial alert only while the entry window is open
+        # and the same opportunity remains valid.
         if (
-            alerts_enabled
+            updated.get("status") == "PENDING"
+            and alerts_enabled
             and data_is_valid
             and not updated.get("alert_sent")
             and current.get("action") == "BUY CANDIDATE"
@@ -218,6 +237,7 @@ def run_scheduled_scan(timeframe: str) -> dict:
     # the same completed candle cannot send duplicate initial alerts.
     created = 0
     sent = 0
+    stale_candidates_skipped = 0
     for candidate in results:
         if (
             candidate.get("action") != "BUY CANDIDATE"
@@ -232,6 +252,16 @@ def run_scheduled_scan(timeframe: str) -> dict:
             data_timestamp=candidate.get("data_timestamp"),
             validity_bars=2,
         )
+        if expiry <= now:
+            stale_candidates_skipped += 1
+            logger.warning(
+                "STALE CANDIDATE NOT SENT | %s | %s | expiry=%s",
+                candidate.get("asset"),
+                timeframe,
+                expiry.isoformat(),
+            )
+            continue
+
         signal = build_signal_record(
             candidate,
             now,
@@ -256,6 +286,7 @@ def run_scheduled_scan(timeframe: str) -> dict:
         "lifecycle_transitions": transitions,
         "alerts_sent": sent,
         "alerts_retried": retried_alerts,
+        "stale_candidates_skipped": stale_candidates_skipped,
         "alerts_enabled": alerts_enabled,
         "automatic_execution": False,
         "real_trading_authorized": False,
