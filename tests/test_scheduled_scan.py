@@ -263,6 +263,67 @@ class ScheduledScanTests(unittest.TestCase):
         self.assertIn("No abras una nueva operación", message)
         self.assertIn("no es una instrucción para cerrar", message)
 
+    @patch.object(scheduled_scan.Bot, "send_telegram_message", return_value=False)
+    def test_failed_lifecycle_notification_is_persisted_for_retry(self, send):
+        store = MemoryStore("url", "token")
+        signal = {
+            "signal_id": "retry-expiry",
+            "asset": "BTC",
+            "timeframe": "15m",
+            "expires_at": "2026-11-21T12:30:00+00:00",
+            "alert_sent": True,
+            "pending_notification_event": None,
+        }
+        updated = scheduled_scan._notify_lifecycle_event(
+            store, signal, "SIGNAL_EXPIRED", alerts_enabled=True
+        )
+        send.assert_called_once()
+        self.assertEqual(updated["pending_notification_event"], "SIGNAL_EXPIRED")
+        self.assertEqual(
+            store.state["signals"]["retry-expiry"]["pending_notification_event"],
+            "SIGNAL_EXPIRED",
+        )
+
+    @patch.object(scheduled_scan.Bot, "send_telegram_message", return_value=True)
+    def test_successful_lifecycle_retry_clears_pending_event(self, send):
+        store = MemoryStore("url", "token")
+        signal = {
+            "signal_id": "retry-expiry",
+            "asset": "BTC",
+            "timeframe": "15m",
+            "expires_at": "2026-11-21T12:30:00+00:00",
+            "alert_sent": True,
+            "pending_notification_event": "SIGNAL_EXPIRED",
+        }
+        updated = scheduled_scan._notify_lifecycle_event(
+            store, signal, "SIGNAL_EXPIRED", alerts_enabled=True
+        )
+        send.assert_called_once()
+        self.assertIsNone(updated["pending_notification_event"])
+        self.assertEqual(updated["last_notification_event"], "SIGNAL_EXPIRED")
+        self.assertTrue(updated.get("last_notification_at"))
+        self.assertIsNone(
+            store.state["signals"]["retry-expiry"]["pending_notification_event"]
+        )
+
+    @patch.object(scheduled_scan.Bot, "send_telegram_message")
+    def test_lifecycle_notification_is_gated_by_initial_alert(self, send):
+        store = MemoryStore("url", "token")
+        signal = {
+            "signal_id": "never-alerted",
+            "asset": "BTC",
+            "timeframe": "15m",
+            "expires_at": "2026-11-21T12:30:00+00:00",
+            "alert_sent": False,
+            "pending_notification_event": None,
+        }
+        unchanged = scheduled_scan._notify_lifecycle_event(
+            store, signal, "SIGNAL_EXPIRED", alerts_enabled=True
+        )
+        send.assert_not_called()
+        self.assertEqual(unchanged, signal)
+        self.assertEqual(store.state["signals"], {})
+
     def test_invalid_timeframe_is_rejected_before_network_access(self):
         with self.assertRaises(ValueError):
             scheduled_scan.run_scheduled_scan("5m")
