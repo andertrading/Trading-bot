@@ -683,10 +683,15 @@ def build_telegram_messages(scan_result):
 
         data_timestamp = candidate.get("data_timestamp")
         data_age = candidate.get("data_age_minutes")
+        signal_expiry = candidate.get("expires_at")
         if data_timestamp:
             data_time_text = escape_html(format_timestamp(data_timestamp))
         else:
             data_time_text = "N/D"
+        if signal_expiry:
+            expiry_text = escape_html(format_timestamp(signal_expiry))
+        else:
+            expiry_text = "NO CONFIGURADA"
         try:
             age_value = float(data_age)
             age_text = f"{age_value:.1f} min" if math.isfinite(age_value) else "N/D"
@@ -741,7 +746,7 @@ def build_telegram_messages(scan_result):
             f"{blocker_text}\n\n"
             "━━━━━━━━━━━━━━━━━━\n"
             "Probabilidad histórica: <b>NO VALIDADA</b>\n"
-            "Ventana de entrada/caducidad: <b>NO CONFIGURADA</b>\n"
+            f"Caducidad de la señal: <b>{expiry_text}</b>\n"
             "Noticias y costes: <b>NO INCORPORADOS AÚN</b>\n"
             "Este informe es investigación, no asesoramiento ni una orden.\n"
             "<b>NO OPERAR.</b>"
