@@ -94,8 +94,10 @@ class ScheduledScanTests(unittest.TestCase):
         self.assertEqual(len(store.state["signals"]), 1)
 
     def test_existing_signal_expires_even_when_market_data_is_stale(self):
-        with patch.object(scheduled_scan, "UpstashSignalStateStore", MemoryStore):
-            store = MemoryStore("url", "token")
+        store = MemoryStore("url", "token")
+        with patch.object(
+            scheduled_scan, "UpstashSignalStateStore", return_value=store
+        ):
             old = {
                 "schema_version": 1,
                 "signal_id": "expired-1",
