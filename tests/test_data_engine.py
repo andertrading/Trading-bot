@@ -1083,6 +1083,17 @@ class TestDailyGaps(unittest.TestCase):
         self.assertIn("siguiente=2026-11-18T00:00:00+00:00", message)
         self.assertIn("días_transcurridos=2.0", message)
 
+    def test_ignores_crypto_daily_gap_outside_two_year_lookback(self):
+        df = self.make_daily([
+            "2020-11-12",
+            "2020-11-15",
+            "2025-11-20",
+            "2025-11-21",
+            "2026-11-20",
+        ])
+        self.assertFalse(engine._has_daily_gaps(df, "ETH"))
+
+
     def test_accepts_us_weekend_gap(self):
         df = self.make_daily([
             "2026-11-20",
