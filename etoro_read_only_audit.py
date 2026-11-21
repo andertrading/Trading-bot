@@ -77,8 +77,14 @@ def run_audit(
     if resolved and len(resolved) == len(enabled_assets):
         instrument_ids = [item["instrumentId"] for item in resolved.values()]
         try:
-            client.get_validated_instrument_eligibility(instrument_ids, currency="USD")
-            eligibility_valid = True
+            eligibility = client.get_validated_instrument_eligibility(
+                instrument_ids,
+                currency="USD",
+            )
+            eligibility_valid = (
+                set(eligibility) == set(instrument_ids)
+                and all(item.supports_long for item in eligibility.values())
+            )
         except Exception:
             eligibility_valid = False
         try:
