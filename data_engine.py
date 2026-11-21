@@ -1391,9 +1391,6 @@ def _download_twelvedata(
 
         df = _normalise_dataframe(df)
 
-        if df is not None and repair_metadata is not None:
-            df.attrs.update(repair_metadata)
-
         if df is None:
             logger.error(
                 "HISTÓRICO RECHAZADO | Twelve Data | %s",
@@ -2141,6 +2138,9 @@ def _download_yahoo(asset, config, interval):
         )
 
         df = _normalise_dataframe(df)
+
+        if df is not None and repair_metadata is not None:
+            df.attrs.update(repair_metadata)
 
         if df is None:
             logger.error(
