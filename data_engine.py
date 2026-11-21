@@ -1689,12 +1689,55 @@ def _download_coinbase_crypto_history(
             return None
 
         expected = pd.date_range(start_utc, end_utc, freq="15min")
-        if not combined.index.equals(expected):
+        missing = expected.difference(combined.index)
+        twelvedata_repair_used = False
+
+        if len(missing) and os.getenv("TWELVE_DATA_API_KEY"):
+            # Coinbase omits buckets with no published candle. Request only
+            # those exact missing intervals from Twelve Data in USD, retaining
+            # the original Coinbase bars everywhere else.
+            missing_groups = []
+            for stamp in missing:
+                if (
+                    not missing_groups
+                    or stamp != missing_groups[-1][-1] + pd.Timedelta(minutes=15)
+                ):
+                    missing_groups.append([stamp])
+                else:
+                    missing_groups[-1].append(stamp)
+
+            for group in missing_groups:
+                repair_start = group[0] - pd.Timedelta(minutes=15)
+                repair_end = group[-1] + pd.Timedelta(minutes=15)
+                repair = _download_twelvedata(
+                    asset,
+                    ASSETS[asset],
+                    "15m",
+                    start_date=repair_start.strftime("%Y-%m-%d %H:%M:%S"),
+                    end_date=repair_end.strftime("%Y-%m-%d %H:%M:%S"),
+                    validate_gaps=False,
+                )
+                if repair is None or repair.empty:
+                    continue
+                repair = repair.loc[repair.index.isin(group)]
+                if not repair.empty:
+                    combined = pd.concat([combined, repair]).sort_index()
+                    combined = combined.loc[
+                        ~combined.index.duplicated(keep="last")
+                    ]
+                    combined = _normalise_dataframe(combined)
+                    twelvedata_repair_used = True
+
+            missing = expected.difference(combined.index)
+
+        if len(missing):
             logger.error(
-                "COINBASE HISTÓRICO INCOMPLETO | %s | esperadas=%s | recibidas=%s",
+                "COINBASE HISTÓRICO INCOMPLETO | %s | esperadas=%s | recibidas=%s | faltantes=%s | primeros=%s",
                 asset,
                 len(expected),
                 len(combined),
+                len(missing),
+                [stamp.isoformat() for stamp in missing[:20]],
             )
             _has_intraday_gaps(combined, asset)
             return None
@@ -1708,10 +1751,19 @@ def _download_coinbase_crypto_history(
 
         combined.attrs["price_adjustment_policy"] = "raw_unadjusted_intraday"
         combined.attrs["price_adjustment_verified"] = True
-        combined.attrs["provider"] = "coinbase_exchange"
+        combined.attrs["provider"] = (
+            "coinbase_exchange+twelvedata_gap_repair"
+            if twelvedata_repair_used
+            else "coinbase_exchange"
+        )
         combined.attrs["price_source_detail"] = (
-            "Coinbase Exchange public SOL-USD spot candles; 15m UTC; "
-            f"{request_count} paginated requests; exact continuous coverage"
+            "Coinbase Exchange public USD spot candles; 15m UTC; "
+            f"{request_count} paginated requests; "
+            + (
+                "missing timestamps repaired from Twelve Data USD candles; "
+                if twelvedata_repair_used else ""
+            )
+            + "exact continuous coverage"
         )
         logger.info(
             "COINBASE EXTENDED HISTORY OK | %s | %s velas | %s -> %s | requests=%s",
