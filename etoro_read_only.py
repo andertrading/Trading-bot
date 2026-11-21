@@ -325,6 +325,11 @@ class EtoroReadOnlyClient:
     def get_account_pnl(self) -> EtoroResponse:
         return self._request("GET", "/api/v1/trading/info/real/pnl")
 
+    def get_account_snapshot(self) -> EtoroAccountSnapshot:
+        """Fetch and validate the account snapshot; malformed data raises."""
+        response = self.get_account_pnl()
+        return normalize_account_snapshot(response.data)
+
     def get_rates(self, instrument_ids: list[int]) -> EtoroResponse:
         if not instrument_ids or any(
             isinstance(value, bool) or not isinstance(value, int) or value <= 0
