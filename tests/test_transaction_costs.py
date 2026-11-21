@@ -140,6 +140,47 @@ class TestEtoroTransactionCosts(unittest.TestCase):
             result["unpriced_costs"],
         )
 
+    def test_easy_to_borrow_short_stock_with_positive_rate_has_zero_fee(self):
+        with patch.dict(
+            costs.ETORO_CFD_STOCK_SHORT_BORROW_ANNUAL_RATE_PCT,
+            {"AAPL": 0.0025},
+        ):
+            result = costs.estimate_etoro_trade_costs(
+                "AAPL",
+                100.0,
+                90.0,
+                1.0,
+                execution_type="CFD",
+                market_spread_bps=0,
+                overnight_charge_units=1,
+                leverage=1.0,
+                side="SELL",
+            )
+        self.assertEqual(result["overnight_cost"], 0.0)
+        self.assertNotIn("cfd_short_borrow_rate_missing", result["unpriced_costs"])
+
+    def test_exact_ten_percent_short_borrow_rate_fails_closed(self):
+        with patch.dict(
+            costs.ETORO_CFD_STOCK_SHORT_BORROW_ANNUAL_RATE_PCT,
+            {"AAPL": 0.10},
+        ):
+            result = costs.estimate_etoro_trade_costs(
+                "AAPL",
+                100.0,
+                90.0,
+                1.0,
+                execution_type="CFD",
+                market_spread_bps=0,
+                overnight_charge_units=1,
+                leverage=1.0,
+                side="SELL",
+            )
+        self.assertIsNone(result["overnight_cost"])
+        self.assertIn(
+            "cfd_short_borrow_rate_threshold_ambiguous",
+            result["unpriced_costs"],
+        )
+
     def test_short_stock_cfd_uses_annual_borrow_rate_on_opening_notional(self):
         with patch.dict(
             costs.ETORO_CFD_STOCK_SHORT_BORROW_ANNUAL_RATE_PCT,
