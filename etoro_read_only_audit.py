@@ -87,11 +87,16 @@ def run_audit(
         if item is not None:
             resolved[symbol] = item
 
-    fee_classes_by_instrument_id = {
-        item["instrumentId"]: fee_class
-        for item in resolved.values()
-        if (fee_class := _fee_class(item.get("instrumentType"))) is not None
-    }
+    fee_classes_by_instrument_id: dict[int, str] = {}
+    for symbol, item in resolved.items():
+        actual_fee_class = _fee_class(item.get("instrumentType"))
+        expected_fee_class = enabled_assets[symbol].get("type")
+        if (
+            actual_fee_class is not None
+            and isinstance(expected_fee_class, str)
+            and actual_fee_class == expected_fee_class.strip().upper()
+        ):
+            fee_classes_by_instrument_id[item["instrumentId"]] = actual_fee_class
 
     gross_position_risk_validated = False
     complete_position_risk_validated = False
@@ -104,7 +109,8 @@ def run_audit(
                 fee_classes_by_instrument_id,
             )
             gross_position_risk_validated = risk_diagnostic["status"] in {
-                "MODELED_STOP_RISK",
+                "MODELED_UNCONFIRMED",
+                "VALIDATED_STOP_RISK",
                 "COMPLETE_NO_OPEN_POSITIONS",
             }
             complete_position_risk_validated = risk_diagnostic["complete"]
