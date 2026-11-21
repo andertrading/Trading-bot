@@ -145,6 +145,63 @@ STRATEGIES = {
 }
 
 
+
+def _snapshot_coverage(assets, timeframes, manifest):
+    """Compare immutable snapshots with the configured asset/timeframe universe."""
+    if not isinstance(manifest, list):
+        raise ValueError("Snapshot manifest must be a list")
+
+    available = set()
+    for item in manifest:
+        if not isinstance(item, dict):
+            raise ValueError("Snapshot manifest contains a non-object entry")
+        asset = str(item.get("asset", "")).upper()
+        timeframe = str(item.get("timeframe", "")).lower()
+        if not asset or not timeframe:
+            raise ValueError("Snapshot manifest entry lacks asset/timeframe")
+        key = (asset, timeframe)
+        if key in available:
+            raise ValueError(f"Duplicate snapshot manifest entry: {asset} {timeframe}")
+        available.add(key)
+
+    expected = {
+        (str(asset).upper(), str(timeframe).lower())
+        for asset, _ in assets
+        for timeframe in timeframes
+    }
+    rows = []
+    for asset, timeframe in sorted(expected):
+        present = (asset, timeframe) in available
+        rows.append({
+            "asset": asset,
+            "timeframe": timeframe,
+            "status": "AVAILABLE" if present else "MISSING",
+        })
+
+    unexpected = sorted(available - expected)
+    for asset, timeframe in unexpected:
+        rows.append({
+            "asset": asset,
+            "timeframe": timeframe,
+            "status": "UNEXPECTED",
+        })
+
+    missing = sorted(expected - available)
+    return rows, {
+        "status": "COMPLETE" if not missing and not unexpected else "PARTIAL",
+        "expected_combinations": len(expected),
+        "available_combinations": len(expected & available),
+        "missing_combinations": [
+            {"asset": asset, "timeframe": timeframe}
+            for asset, timeframe in missing
+        ],
+        "unexpected_combinations": [
+            {"asset": asset, "timeframe": timeframe}
+            for asset, timeframe in unexpected
+        ],
+    }
+
+
 def _metrics_row(strategy_name, asset, timeframe, period, trades):
     metrics = bt.calculate_metrics(trades)
     return {
@@ -306,6 +363,28 @@ def main():
     if bt.BACKTEST_DATA_MODE != "replay":
         raise SystemExit("Research requires BACKTEST_DATA_MODE=replay")
 
+    manifest_path = bt.SNAPSHOT_DIR / "manifest.json"
+    if not manifest_path.is_file():
+        raise SystemExit(f"Snapshot manifest missing: {manifest_path}")
+    with open(manifest_path, "r", encoding="utf-8") as manifest_file:
+        snapshot_manifest = json.load(manifest_file)
+    coverage_rows, coverage_summary = _snapshot_coverage(
+        assets, timeframes, snapshot_manifest
+    )
+    pd.DataFrame(coverage_rows).to_csv(
+        "strategy_research_coverage.csv", index=False
+    )
+    with open("strategy_research_status.json", "w", encoding="utf-8") as status_file:
+        json.dump(coverage_summary, status_file, ensure_ascii=False, indent=2)
+    print(
+        "UNIVERSE COVERAGE:",
+        coverage_summary["status"],
+        f'{coverage_summary["available_combinations"]}/'
+        f'{coverage_summary["expected_combinations"]}',
+    )
+    if coverage_summary["missing_combinations"]:
+        print("MISSING SNAPSHOTS:", coverage_summary["missing_combinations"])
+
     print("RESEARCH ONLY — no live alerts, no orders, no parameter optimization")
     print("Assets:", ", ".join(asset for asset, _ in assets))
     print("Timeframes:", ", ".join(timeframes))
@@ -442,6 +521,9 @@ def main():
         oos_portfolio_rows.append({
             "strategy": strategy_name,
             "sample": "OUT_OF_SAMPLE_ONLY",
+            "universe_coverage_status": coverage_summary["status"],
+            "universe_expected_combinations": coverage_summary["expected_combinations"],
+            "universe_available_combinations": coverage_summary["available_combinations"],
             **oos_portfolio["summary"],
         })
 
