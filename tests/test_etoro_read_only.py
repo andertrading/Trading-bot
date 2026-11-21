@@ -531,6 +531,13 @@ class CostEstimateValidationTests(unittest.TestCase):
         self.assertEqual(estimate.costs["marketSpread"], Decimal("0.03"))
         self.assertEqual(estimate.symbol, "AAPL")
 
+    def test_cost_estimate_requires_expected_instrument_identity(self):
+        with self.assertRaises(EtoroAPIError):
+            normalize_cost_estimate(
+                EtoroResponse(self.data, 200, {}),
+                now_utc=self.now,
+            )
+
     def test_cost_estimate_rejects_wrong_instrument_and_stale_timestamp(self):
         response = EtoroResponse(self.data, 200, {})
         with self.assertRaises(EtoroAPIError):
