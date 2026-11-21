@@ -1052,6 +1052,81 @@ class TestIntradayGaps(unittest.TestCase):
         )
 
 
+class TestTwelveDataAdjustmentMode(unittest.TestCase):
+
+    def test_daily_requests_explicit_split_adjustment_and_intraday_raw(self):
+        class Response:
+            def __init__(self, payload):
+                self.payload = payload
+
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return self.payload
+
+        for interval, expected_adjust in (("1d", "splits"), ("15m", "none")):
+            with self.subTest(interval=interval):
+                if interval == "1d":
+                    index = pd.date_range(
+                        "2026-01-01T00:00:00Z",
+                        periods=220,
+                        freq="D",
+                    )
+                else:
+                    index = pd.date_range(
+                        "2026-11-18T00:00:00Z",
+                        periods=220,
+                        freq="15min",
+                    )
+
+                values = [
+                    {
+                        "datetime": timestamp.strftime("%Y-%m-%d %H:%M:%S"),
+                        "open": "100",
+                        "high": "102",
+                        "low": "99",
+                        "close": "101",
+                        "volume": "1000",
+                    }
+                    for timestamp in index
+                ]
+                payload = {
+                    "meta": {
+                        "symbol": "BTC/USD",
+                        "currency_quote": "USD",
+                    },
+                    "values": values,
+                }
+
+                with (
+                    patch.dict("os.environ", {"TWELVE_DATA_API_KEY": "test"}),
+                    patch.object(
+                        engine,
+                        "_twelvedata_request",
+                        return_value=Response(payload),
+                    ) as request,
+                    patch.object(
+                        engine,
+                        "_remove_incomplete_candle",
+                        side_effect=lambda frame, timeframe, asset: frame,
+                    ),
+                    patch.object(engine, "_has_daily_gaps", return_value=False),
+                    patch.object(engine, "_has_intraday_gaps", return_value=False),
+                ):
+                    result = engine._download_twelvedata(
+                        "BTC",
+                        engine.ASSETS["BTC"],
+                        interval,
+                    )
+
+                self.assertIsNotNone(result)
+                self.assertEqual(
+                    request.call_args.kwargs["params"]["adjust"],
+                    expected_adjust,
+                )
+
+
 # ---------------------------------------------------------------------
 # HUECOS EN HISTÓRICOS DIARIOS
 # ---------------------------------------------------------------------
