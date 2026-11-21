@@ -750,6 +750,7 @@ class AccountSnapshotTests(unittest.TestCase):
         snapshot = client.get_account_snapshot("USD")
         self.assertEqual(snapshot.account_currency, "USD")
         self.assertEqual(snapshot.account_currency_source, "bot_configuration")
+        self.assertEqual(snapshot.client_id, 123)
         self.assertEqual(snapshot.available_cash, 1000)
         session.request.assert_called_once()
 
@@ -764,11 +765,26 @@ class AccountSnapshotTests(unittest.TestCase):
     def test_valid_official_nested_schema_preserves_positions_and_cash(self):
         snapshot = normalize_account_snapshot(self.payload, "USD")
         self.assertEqual(snapshot.account_currency, "USD")
+        self.assertEqual(snapshot.client_id, 123)
         self.assertEqual(snapshot.available_cash, 1000)
         self.assertEqual(snapshot.unrealized_pnl, Decimal("12.50"))
         self.assertEqual(len(snapshot.positions), 1)
         self.assertEqual(snapshot.positions[0]["positionId"], 10)
         self.assertFalse(snapshot.has_unbounded_stop_risk)
+
+    def test_missing_or_mixed_position_cid_fails_closed(self):
+        del self.payload["clientPortfolio"]["positions"][0]["cid"]
+        with self.assertRaisesRegex(EtoroAPIError, "cid"):
+            normalize_account_snapshot(self.payload, "USD")
+
+        self.payload["clientPortfolio"]["positions"][0]["cid"] = 123
+        self.payload["clientPortfolio"]["positions"].append({
+            **self.payload["clientPortfolio"]["positions"][0],
+            "positionId": 11,
+            "cid": 456,
+        })
+        with self.assertRaisesRegex(EtoroAPIError, "CID"):
+            normalize_account_snapshot(self.payload, "USD")
 
     def test_explicit_empty_positions_is_not_confused_with_missing_positions(self):
         self.payload["clientPortfolio"]["positions"] = []
