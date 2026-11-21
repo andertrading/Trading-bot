@@ -105,6 +105,7 @@ def calculate_position_size(
     quote_to_usd=None,
     portfolio_risk_usd=None,
     costs_per_unit_quote=None,
+    fixed_costs_quote=None,
 ):
     """
     Calcula el tamaño teórico de una posición en USD.
@@ -121,10 +122,12 @@ def calculate_position_size(
         Es obligatorio facilitarlo explícitamente.
 
     costs_per_unit_quote:
-        Costes estimados por unidad en la moneda de cotización.
-        Deben incluir los costes aplicables por unidad.
-        No introducir una comisión fija por operación
-        como si fuese un coste unitario.
+        Costes variables estimados por unidad en moneda de cotización.
+
+    fixed_costs_quote:
+        Suma de costes fijos conocidos de apertura y cierre en moneda
+        de cotización. Es obligatorio facilitarlo explícitamente,
+        incluso cuando el valor confirmado sea 0.
 
     El cálculo permanece bloqueado mientras
     ALLOW_POSITION_SIZING sea False.
@@ -151,7 +154,12 @@ def calculate_position_size(
 
     if costs_per_unit_quote is None:
         return _blocked_status(
-            "Falta la estimación de costes por unidad."
+            "Falta la estimación de costes variables por unidad."
+        )
+
+    if fixed_costs_quote is None:
+        return _blocked_status(
+            "Falta confirmar los costes fijos totales de apertura y cierre."
         )
 
     values = {
@@ -162,6 +170,7 @@ def calculate_position_size(
         "quote_to_usd": quote_to_usd,
         "portfolio_risk_usd": portfolio_risk_usd,
         "costs_per_unit_quote": costs_per_unit_quote,
+        "fixed_costs_quote": fixed_costs_quote,
         "MAX_RISK_PER_TRADE": MAX_RISK_PER_TRADE,
         "MAX_PORTFOLIO_RISK": MAX_PORTFOLIO_RISK,
     }
@@ -179,6 +188,7 @@ def calculate_position_size(
     quote_to_usd = float(quote_to_usd)
     portfolio_risk_usd = float(portfolio_risk_usd)
     costs_per_unit_quote = float(costs_per_unit_quote)
+    fixed_costs_quote = float(fixed_costs_quote)
 
     configured_trade_limit = float(MAX_RISK_PER_TRADE)
     configured_portfolio_limit = float(MAX_PORTFOLIO_RISK)
@@ -216,7 +226,12 @@ def calculate_position_size(
 
     if costs_per_unit_quote < 0:
         return _blocked_status(
-            "Los costes por unidad no pueden ser negativos."
+            "Los costes variables por unidad no pueden ser negativos."
+        )
+
+    if fixed_costs_quote < 0:
+        return _blocked_status(
+            "Los costes fijos no pueden ser negativos."
         )
 
     if configured_trade_limit <= 0:
@@ -287,6 +302,18 @@ def calculate_position_size(
             "El porcentaje de riesgo efectivo no es válido."
         )
 
+    fixed_costs_usd = fixed_costs_quote * quote_to_usd
+    if not _is_finite_number(fixed_costs_usd):
+        return _blocked_status(
+            "Los costes fijos convertidos a USD no son válidos."
+        )
+
+    available_risk_for_units_usd = risk_amount_usd - fixed_costs_usd
+    if available_risk_for_units_usd <= 0:
+        return _blocked_status(
+            "Los costes fijos consumen todo el presupuesto de riesgo disponible."
+        )
+
     price_risk_quote = entry - stop
 
     total_risk_per_unit_quote = (
@@ -314,7 +341,7 @@ def calculate_position_size(
         )
 
     position_size = (
-        risk_amount_usd / total_risk_per_unit_usd
+        available_risk_for_units_usd / total_risk_per_unit_usd
     )
 
     if (
@@ -343,6 +370,11 @@ def calculate_position_size(
             remaining_portfolio_risk_usd
         ),
         "risk_per_unit_usd": total_risk_per_unit_usd,
+        "fixed_costs_usd": fixed_costs_usd,
+        "position_risk_usd": position_size * total_risk_per_unit_usd,
+        "total_reserved_risk_usd": (
+            fixed_costs_usd + position_size * total_risk_per_unit_usd
+        ),
         "position_size": position_size,
         "capital_usd": capital_usd,
         "currency": "USD",

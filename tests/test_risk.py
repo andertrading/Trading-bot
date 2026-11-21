@@ -67,6 +67,7 @@ class TestRiskManager(unittest.TestCase):
             quote_to_usd=1,
             portfolio_risk_usd=0,
             costs_per_unit_quote=0,
+                fixed_costs_quote=0,
         )
 
         self.assertEqual(result["status"], "BLOCKED")
@@ -80,6 +81,7 @@ class TestRiskManager(unittest.TestCase):
                 score=85,
                 quote_to_usd=1,
                 costs_per_unit_quote=0,
+                fixed_costs_quote=0,
             )
 
         self.assertEqual(result["status"], "BLOCKED")
@@ -94,6 +96,7 @@ class TestRiskManager(unittest.TestCase):
                 quote_to_usd=None,
                 portfolio_risk_usd=0,
                 costs_per_unit_quote=0,
+                fixed_costs_quote=0,
             )
 
         self.assertEqual(result["status"], "BLOCKED")
@@ -106,6 +109,73 @@ class TestRiskManager(unittest.TestCase):
                 score=85,
                 quote_to_usd=1,
                 portfolio_risk_usd=0,
+            )
+
+        self.assertEqual(result["status"], "BLOCKED")
+
+    def test_missing_fixed_costs_blocks_position_size(self):
+        with patch("risk_manager.ALLOW_POSITION_SIZING", True):
+            result = calculate_position_size(
+                entry=100,
+                stop=95,
+                score=85,
+                quote_to_usd=1,
+                portfolio_risk_usd=0,
+                costs_per_unit_quote=0,
+            )
+
+        self.assertEqual(result["status"], "BLOCKED")
+        self.assertIn("costes fijos", result["reason"])
+
+    def test_invalid_fixed_costs_block_position_size(self):
+        invalid_values = (float("nan"), float("inf"), float("-inf"), -1)
+        with patch("risk_manager.ALLOW_POSITION_SIZING", True):
+            for value in invalid_values:
+                with self.subTest(value=value):
+                    result = calculate_position_size(
+                        entry=100,
+                        stop=95,
+                        score=85,
+                        quote_to_usd=1,
+                        portfolio_risk_usd=0,
+                        costs_per_unit_quote=0,
+                        fixed_costs_quote=value,
+                    )
+                    self.assertEqual(result["status"], "BLOCKED")
+
+    def test_fixed_costs_reduce_position_without_exceeding_risk_budget(self):
+        with patch("risk_manager.ALLOW_POSITION_SIZING", True):
+            result = calculate_position_size(
+                entry=100,
+                stop=95,
+                score=85,
+                capital_usd=1000,
+                quote_to_usd=1,
+                portfolio_risk_usd=0,
+                costs_per_unit_quote=1,
+                fixed_costs_quote=2,
+            )
+
+        self.assertAlmostEqual(result["fixed_costs_usd"], 2)
+        self.assertAlmostEqual(result["position_size"], 0.5)
+        self.assertAlmostEqual(result["position_risk_usd"], 3)
+        self.assertAlmostEqual(result["total_reserved_risk_usd"], 5)
+        self.assertLessEqual(
+            result["total_reserved_risk_usd"],
+            result["risk_amount_usd"],
+        )
+
+    def test_fixed_costs_consuming_budget_block_position_size(self):
+        with patch("risk_manager.ALLOW_POSITION_SIZING", True):
+            result = calculate_position_size(
+                entry=100,
+                stop=95,
+                score=85,
+                capital_usd=1000,
+                quote_to_usd=1,
+                portfolio_risk_usd=0,
+                costs_per_unit_quote=0,
+                fixed_costs_quote=5,
             )
 
         self.assertEqual(result["status"], "BLOCKED")
@@ -129,6 +199,7 @@ class TestRiskManager(unittest.TestCase):
                         quote_to_usd=1,
                         portfolio_risk_usd=0,
                         costs_per_unit_quote=0,
+                fixed_costs_quote=0,
                     )
 
                     self.assertEqual(
@@ -154,6 +225,7 @@ class TestRiskManager(unittest.TestCase):
                         quote_to_usd=1,
                         portfolio_risk_usd=0,
                         costs_per_unit_quote=value,
+                fixed_costs_quote=0,
                     )
 
                     self.assertEqual(
@@ -171,6 +243,7 @@ class TestRiskManager(unittest.TestCase):
                 quote_to_usd=1,
                 portfolio_risk_usd=0,
                 costs_per_unit_quote=0,
+                fixed_costs_quote=0,
             )
 
         self.assertEqual(
@@ -193,6 +266,7 @@ class TestRiskManager(unittest.TestCase):
                 quote_to_usd=1,
                 portfolio_risk_usd=0,
                 costs_per_unit_quote=1,
+                fixed_costs_quote=0,
             )
 
         self.assertAlmostEqual(
@@ -214,6 +288,7 @@ class TestRiskManager(unittest.TestCase):
                 quote_to_usd=1,
                 portfolio_risk_usd=28,
                 costs_per_unit_quote=0,
+                fixed_costs_quote=0,
             )
 
         self.assertAlmostEqual(
@@ -244,6 +319,7 @@ class TestRiskManager(unittest.TestCase):
                     quote_to_usd=1,
                     portfolio_risk_usd=0,
                     costs_per_unit_quote=0,
+                    fixed_costs_quote=0,
                 )
 
         self.assertAlmostEqual(
