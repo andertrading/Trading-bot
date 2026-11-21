@@ -556,7 +556,7 @@ class UpstashSignalStateStore:
 
     def prune(self, now=None, retention_days: int = 90,
               max_terminal_records: int = 10000) -> int:
-        """Bound state growth while preserving every pending signal."""
+        """Bound state growth while preserving pending signals and undelivered events."""
         if isinstance(retention_days, bool) or retention_days <= 0:
             raise ValueError("retention_days must be positive")
         if isinstance(max_terminal_records, bool) or max_terminal_records <= 0:
@@ -573,6 +573,10 @@ class UpstashSignalStateStore:
 
             for signal_id, signal in list(signals.items()):
                 if signal.get("status") not in TERMINAL_STATUSES:
+                    continue
+                # An undelivered lifecycle alert is still operationally
+                # important. Keep it until Telegram delivery succeeds.
+                if signal.get("pending_notification_event"):
                     continue
                 terminal_at = signal.get("last_checked_at") or signal.get("generated_at")
                 try:
