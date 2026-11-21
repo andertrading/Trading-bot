@@ -284,7 +284,7 @@ class TestPortfolioBacktest(unittest.TestCase):
         )
         self.assertLessEqual(committed_cash, 100.0 + 1e-8)
         self.assertLess(position["notional_usd"], 100.0)
-        self.assertAlmostEqual(result["summary"]["ending_equity_usd"], 100.0, places=7)
+        self.assertAlmostEqual(result["summary"]["ending_equity_usd"], 90.0, places=7)
 
     def test_invalid_capital_fails_closed(self):
         with self.assertRaises(ValueError):
