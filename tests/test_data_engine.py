@@ -1278,6 +1278,20 @@ class TestMarketCalendars(unittest.TestCase):
             )
         )
 
+    def test_uk_new_year_sunday_substitute_is_monday(self):
+        self.assertFalse(
+            engine._is_trading_day(
+                date(2017, 1, 2),
+                "CSPX",
+            )
+        )
+        self.assertTrue(
+            engine._is_trading_day(
+                date(2017, 1, 3),
+                "CSPX",
+            )
+        )
+
     def test_crypto_does_not_use_weekend_calendar(self):
         result = engine._previous_trading_day(
             date(2026, 11, 22),
@@ -2154,6 +2168,34 @@ class TestYahooDailyHistoryDownload(unittest.TestCase):
             list(result.columns),
             ["Open", "High", "Low", "Close", "Volume"],
         )
+
+
+class TestExtendedDailyYahooLookback(unittest.TestCase):
+    def test_extended_daily_yahoo_uses_requested_lookback(self):
+        now = datetime(2026, 11, 21, 12, 0, tzinfo=timezone.utc)
+        with patch.dict(
+            os.environ,
+            {
+                "BACKTEST_EXTENDED_DAILY_HISTORY": "true",
+                "BACKTEST_DAILY_LOOKBACK_DAYS": "1825",
+            },
+        ):
+            start = engine._extended_daily_yahoo_start(now)
+        self.assertEqual(start, now - timedelta(days=1825))
+
+    def test_extended_daily_yahoo_rejects_invalid_lookback(self):
+        for value in ("abc", "100", "5000"):
+            with self.subTest(value=value), patch.dict(
+                os.environ,
+                {
+                    "BACKTEST_EXTENDED_DAILY_HISTORY": "true",
+                    "BACKTEST_DAILY_LOOKBACK_DAYS": value,
+                },
+            ):
+                with self.assertRaises(ValueError):
+                    engine._extended_daily_yahoo_start(
+                        datetime(2026, 11, 21, 12, 0, tzinfo=timezone.utc)
+                    )
 
 
 class TestExtendedDailyYahooCleaning(unittest.TestCase):

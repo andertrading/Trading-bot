@@ -173,8 +173,13 @@ def _uk_substitute_holidays(year):
     for month, day in ((1, 1), (12, 25), (12, 26)):
         original = date(year, month, day)
 
-        if original.weekday() in (5, 6):
+        if original.weekday() == 5:
             holidays.add(original + timedelta(days=2))
+        elif original.weekday() == 6:
+            # New Year's Day substitutes on Monday when 1 January is Sunday.
+            # Christmas and Boxing Day use the next available weekdays.
+            offset = 1 if (month, day) == (1, 1) else 2
+            holidays.add(original + timedelta(days=offset))
         else:
             holidays.add(original)
 
@@ -1899,6 +1904,18 @@ def _drop_invalid_ohlc_rows(dataframe, asset, interval):
     return dataframe.loc[valid_rows].copy()
 
 
+def _extended_daily_yahoo_start(now):
+    """Use the exact requested daily backtest lookback, never an implicit 10y window."""
+    raw_days = os.getenv("BACKTEST_DAILY_LOOKBACK_DAYS", "1825")
+    try:
+        lookback_days = int(raw_days)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("BACKTEST_DAILY_LOOKBACK_DAYS no es válido") from exc
+    if not 365 <= lookback_days <= 3650:
+        raise ValueError("BACKTEST_DAILY_LOOKBACK_DAYS fuera de rango")
+    return now - timedelta(days=lookback_days)
+
+
 def _download_yahoo(asset, config, interval):
     ticker = config.get("yahoo")
 
@@ -1910,6 +1927,12 @@ def _download_yahoo(asset, config, interval):
 
     if interval == "15m":
         start = now - timedelta(days=60)
+    elif _yahoo_repair_enabled(interval):
+        try:
+            start = _extended_daily_yahoo_start(now)
+        except ValueError as error:
+            logger.error("Ventana diaria extendida inválida: %s", error)
+            return None
     else:
         start = now - timedelta(days=3650)
 
