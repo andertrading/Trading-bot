@@ -50,6 +50,9 @@ class FakeAuditClient:
             items = []
         return EtoroResponse({"items": items, "totalItems": len(items)}, 200, {})
 
+    def get_validated_instrument_eligibility(self, instrument_ids, currency="USD"):
+        return {instrument_id: object() for instrument_id in instrument_ids}
+
     def get_realtime_quotes(self, instrument_ids, now_utc, max_age_seconds):
         self.quote_calls.append((list(instrument_ids), now_utc, max_age_seconds))
         return {instrument_id: object() for instrument_id in instrument_ids}
@@ -71,6 +74,7 @@ class ReadOnlyAuditTests(unittest.TestCase):
         client = FakeAuditClient()
         report = run_audit(client, self.assets, "USD", self.now)
         self.assertTrue(report["account_snapshot_schema_valid"])
+        self.assertTrue(report["instrument_eligibility_validated"])
         self.assertTrue(report["complete_realtime_quotes_validated"])
         self.assertTrue(report["overall_pass"])
         self.assertEqual(report["instrument_resolution"][0]["instrument_id"], 123)
