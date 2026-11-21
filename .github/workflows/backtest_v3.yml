@@ -412,7 +412,7 @@ jobs:
 
           if errors is not None:
               report.append(
-                  section("9. Errores del backtest", errors, 30)
+                  section("10. Errores del backtest", errors, 30)
               )
 
           excluded = data.get("velas_ohlc_excluidas_v3.csv")
@@ -420,7 +420,7 @@ jobs:
           if excluded is not None:
               report.append(
                   section(
-                      "10. Velas OHLC excluidas",
+                      "11. Velas OHLC excluidas",
                       excluded,
                       30,
                   )
@@ -429,7 +429,7 @@ jobs:
           snapshot_dir = Path("historicos_backtest_v3")
           manifest_path = snapshot_dir / "manifest.json"
 
-          report.append("\n## 11. Históricos reproducibles")
+          report.append("\n## 12. Históricos reproducibles")
 
           if manifest_path.is_file():
               try:
@@ -456,7 +456,7 @@ jobs:
 
           report.extend([
               "",
-              "## 12. Consideraciones",
+              "## 13. Consideraciones",
               "",
               "- Los resultados en R no representan por sí solos "
               "una rentabilidad monetaria de cartera.",
