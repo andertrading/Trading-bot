@@ -283,6 +283,8 @@ class ReadOnlyAuditTests(unittest.TestCase):
             (EtoroAPIError("eToro devolvió una respuesta JSON inválida"), "ETORO_INVALID_JSON_RESPONSE"),
             (EtoroAPIError("La respuesta de elegibilidad no incluye el campo currency"), "ELIGIBILITY_CURRENCY_MISSING"),
             (EtoroAPIError("La respuesta de elegibilidad no está en USD"), "ELIGIBILITY_CURRENCY_MISMATCH"),
+            (EtoroAPIError("La divisa de la respuesta de elegibilidad no es válida"), "ELIGIBILITY_CURRENCY_INVALID"),
+            (EtoroAPIError("La fecha de cotización 123 no incluye zona horaria"), "QUOTES_TIMESTAMP_TIMEZONE_MISSING"),
             (EtoroAPIError("El instrumento tiene cotización retrasada"), "QUOTES_NOT_REALTIME"),
             (EtoroAPIError("La respuesta de elegibilidad está incompleta o contiene activos no encontrados"), "ELIGIBILITY_RESULTS_INCOMPLETE"),
             (EtoroAPIError("El desglose no confirma la divisa de cuenta USD"), "RISK_CURRENCY_UNCONFIRMED"),
