@@ -482,5 +482,52 @@ class TestBotValidation(unittest.TestCase):
         self.assertIn("posiciones abiertas no están confirmadas", result["portfolio_admission"]["reason"])
 
 
+    def test_approved_candidate_is_included_in_telegram_report(self):
+        candidate = {
+            "action": "BUY CANDIDATE",
+            "validation_status": "APPROVED",
+            "asset": "AAPL",
+            "timeframe": "1d",
+            "score": 90,
+            "entry": 100.0,
+            "stop": 95.0,
+            "target": 110.0,
+            "provisional_risk_pct": 0.005,
+            "generated_at": "2026-11-21T10:00:00+00:00",
+            "expires_at": "2026-11-21T12:00:00+00:00",
+            "strategy_validated": True,
+            "data_timestamp": "2026-11-21T10:00:00+00:00",
+            "data_age_minutes": 1,
+            "data_provider": "test",
+            "price_adjustment_policy": "none",
+            "reasons": ["test reason"],
+            "validation_reasons": [],
+        }
+        scan = {
+            "timestamp": "2026-11-21T10:00:00+00:00",
+            "analyses_completed": 1,
+            "technical_candidates_found": 1,
+            "candidates_blocked": 0,
+            "validated_candidates": 1,
+            "no_trade_count": 0,
+            "portfolio_status": {"status": "OK"},
+            "results": [candidate],
+        }
+        with patch.object(
+            Bot,
+            "estimate_etoro_trade_costs",
+            return_value={
+                "valid": True,
+                "complete": False,
+                "unpriced_costs": ["live_market_bid_ask_spread_missing"],
+            },
+        ):
+            messages = Bot.build_telegram_messages(scan)
+
+        self.assertEqual(len(messages), 2)
+        self.assertIn("SEÑAL TÉCNICA", messages[1])
+        self.assertIn("CONFIRMA COSTES", messages[1])
+
+
 if __name__ == "__main__":
     unittest.main()
