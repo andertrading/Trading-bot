@@ -723,7 +723,7 @@ class AccountSnapshotTests(unittest.TestCase):
             "clientPortfolio": {
                 "credit": "1000",
                 "unrealizedPnL": "12.50",
-                "ordersForOpen": [{"amount": "100", "mirrorId": 0}],
+                "ordersForOpen": [],
                 "orders": [],
                 "mirrors": [],
                 "positions": [{
@@ -749,7 +749,7 @@ class AccountSnapshotTests(unittest.TestCase):
         snapshot = client.get_account_snapshot("USD")
         self.assertEqual(snapshot.account_currency, "USD")
         self.assertEqual(snapshot.account_currency_source, "bot_configuration")
-        self.assertEqual(snapshot.available_cash, 900)
+        self.assertEqual(snapshot.available_cash, 1000)
         session.request.assert_called_once()
 
     def test_client_snapshot_method_rejects_incomplete_account_response(self):
@@ -763,7 +763,7 @@ class AccountSnapshotTests(unittest.TestCase):
     def test_valid_official_nested_schema_preserves_positions_and_cash(self):
         snapshot = normalize_account_snapshot(self.payload, "USD")
         self.assertEqual(snapshot.account_currency, "USD")
-        self.assertEqual(snapshot.available_cash, 900)
+        self.assertEqual(snapshot.available_cash, 1000)
         self.assertEqual(snapshot.unrealized_pnl, Decimal("12.50"))
         self.assertEqual(len(snapshot.positions), 1)
         self.assertEqual(snapshot.positions[0]["positionId"], 10)
@@ -791,6 +791,13 @@ class AccountSnapshotTests(unittest.TestCase):
             {"amount": 25, "mirrorId": 7}
         ]
         with self.assertRaises(EtoroAPIError):
+            normalize_account_snapshot(self.payload, "USD")
+
+    def test_manual_pending_entry_order_blocks_risk_snapshot(self):
+        self.payload["clientPortfolio"]["ordersForOpen"] = [
+            {"amount": 25, "mirrorId": 0}
+        ]
+        with self.assertRaisesRegex(EtoroAPIError, "riesgo no está cuantificado"):
             normalize_account_snapshot(self.payload, "USD")
 
     def test_non_usd_configuration_fails_closed(self):

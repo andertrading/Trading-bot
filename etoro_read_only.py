@@ -191,6 +191,14 @@ def normalize_account_snapshot(
         except (TypeError, ValueError):
             raise EtoroAPIError(f"mirrorId inválido en orden {index}") from None
 
+    # Pending entries reserve exposure that is not represented in positions.
+    # Until their stop risk can be priced with confirmed instrument semantics,
+    # do not expose this snapshot to portfolio admission.
+    if pending_orders:
+        raise EtoroAPIError(
+            "La cuenta contiene órdenes de entrada pendientes cuyo riesgo no está cuantificado"
+        )
+
     unrealized_pnl = _decimal(portfolio.get("unrealizedPnL"), "clientPortfolio.unrealizedPnL")
     available_cash = calculate_available_cash(portfolio)
 
