@@ -76,6 +76,8 @@ class TestCommonCalendarOutOfSampleSplit(unittest.TestCase):
         lookup = {(row["asset"], row["venue"], row["fee_mode"]): row for row in rows}
         self.assertEqual(lookup[("AAPL", "ETORO_REAL", "published_fee_scenario")]["commission_scenario_usd"], 4.0)
         self.assertEqual(lookup[("AAPL", "XTB_OMI", "zero_commission_conditional")]["commission_scenario_usd"], 0.0)
+        self.assertEqual(lookup[("AAPL", "XTB_OMI", "zero_commission_conditional")]["broker_symbol"], "AAPL.US")
+        self.assertEqual(lookup[("BTC", "BITVAVO_SPOT", "maker")]["broker_symbol"], "BTC/EUR")
         self.assertEqual(lookup[("BTC", "ETORO_REAL", "published_fee_scenario")]["commission_scenario_usd"], 2.1)
         self.assertAlmostEqual(lookup[("BTC", "BITVAVO_SPOT", "maker")]["commission_scenario_usd"], 0.315)
         self.assertAlmostEqual(lookup[("BTC", "BITVAVO_SPOT", "taker")]["commission_scenario_usd"], 0.525)
