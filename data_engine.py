@@ -892,12 +892,15 @@ def _has_intraday_gaps(df, asset):
     if asset in CRYPTO_ASSETS:
         differences = timestamps.to_series().diff().dropna()
 
-        if not (
-            differences == pd.Timedelta(minutes=15)
-        ).all():
+        invalid = differences[differences != pd.Timedelta(minutes=15)]
+        if not invalid.empty:
+            first_position = differences.index.get_loc(invalid.index[0])
             logger.error(
-                "HUECO INTRADIA | %s | mercado cripto",
+                "HUECO INTRADIA | %s | mercado cripto | anterior=%s | siguiente=%s | intervalo=%s",
                 asset,
+                timestamps[first_position],
+                invalid.index[0],
+                invalid.iloc[0],
             )
             return True
 
@@ -1509,9 +1512,11 @@ def twelvedata_history_windows(asset, end=None, lookback_days=700):
     )
     start_utc = end_utc - timedelta(days=lookback_days)
 
-    # 50 calendar days produce at most 4,800 crypto 15m bars.
+    # Smaller crypto windows reduce provider-side truncation and make
+    # isolated historical gaps easier to diagnose while staying below
+    # Twelve Data's 5,000-bar request ceiling.
     # 180 calendar days stay comfortably below 5,000 US-equity session bars.
-    chunk_days = 50 if asset in CRYPTO_ASSETS else 180
+    chunk_days = 25 if asset in CRYPTO_ASSETS else 180
     windows = []
     cursor = start_utc
 
