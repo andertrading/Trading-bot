@@ -766,6 +766,8 @@ def normalize_instrument_eligibility(
         raise EtoroAPIError("Los instrumentIds esperados no son válidos")
     if len(set(expected_instrument_ids)) != len(expected_instrument_ids):
         raise EtoroAPIError("Los instrumentIds esperados contienen duplicados")
+    if "currency" not in response.data:
+        raise EtoroAPIError("La respuesta de elegibilidad no incluye el campo currency")
     if response.data.get("currency") != "USD":
         raise EtoroAPIError("La respuesta de elegibilidad no está en USD")
 
