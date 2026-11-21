@@ -939,12 +939,19 @@ def _has_daily_gaps(df, asset):
     if asset in CRYPTO_ASSETS:
         differences = timestamps.to_series().diff().dropna()
 
-        if not (
-            differences == pd.Timedelta(days=1)
-        ).all():
+        invalid_gaps = differences[
+            differences != pd.Timedelta(days=1)
+        ]
+        if not invalid_gaps.empty:
+            gap_position = differences.index.get_loc(invalid_gaps.index[0])
+            previous_timestamp = timestamps[gap_position]
+            current_timestamp = timestamps[gap_position + 1]
             logger.error(
-                "HUECO DIARIO | %s | mercado cripto",
+                "HUECO DIARIO | %s | mercado cripto | anterior=%s | siguiente=%s | días_transcurridos=%.1f",
                 asset,
+                previous_timestamp.isoformat(),
+                current_timestamp.isoformat(),
+                invalid_gaps.iloc[0].total_seconds() / 86400,
             )
             return True
 
@@ -1484,10 +1491,32 @@ def _download_yahoo(asset, config, interval):
 
         return df
 
-    except requests.RequestException:
+    except requests.HTTPError as error:
+        status_code = (
+            error.response.status_code
+            if error.response is not None
+            else "desconocido"
+        )
         logger.error(
-            "Error HTTP de Yahoo para %s",
+            "Error HTTP de Yahoo para %s | status=%s",
             ticker,
+            status_code,
+        )
+        return None
+
+    except requests.RequestException as error:
+        # No registrar la URL completa ni el texto de la excepción.
+        # El código de estado basta para diagnosticar el fallo sin
+        # arriesgar la exposición de parámetros sensibles.
+        status_code = (
+            error.response.status_code
+            if getattr(error, "response", None) is not None
+            else "sin respuesta HTTP"
+        )
+        logger.error(
+            "Error de conexión de Yahoo para %s | status=%s",
+            ticker,
+            status_code,
         )
         return None
 
