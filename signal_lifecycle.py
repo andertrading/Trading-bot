@@ -578,7 +578,10 @@ class UpstashSignalStateStore:
                     continue
                 # An undelivered lifecycle alert is still operationally
                 # important. Keep it until Telegram delivery succeeds.
-                if signal.get("pending_notification_event"):
+                if (
+                    signal.get("pending_notification_event")
+                    or signal.get("pending_notification_events")
+                ):
                     continue
                 terminal_at = signal.get("last_checked_at") or signal.get("generated_at")
                 try:
