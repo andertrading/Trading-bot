@@ -121,21 +121,23 @@ class InstrumentBreakdownNormalizationTests(unittest.TestCase):
 
 class PositionGrossStopRiskTests(unittest.TestCase):
     def test_long_uses_executable_bid_and_units(self):
-        result = calculate_position_gross_stop_risk_usd(position(), quote(bid="99", ask="100"))
+        result = calculate_position_gross_stop_risk_usd(position(), quote(bid="99", ask="100"), "STOCK")
         self.assertEqual(result["gross_stop_risk_usd"], Decimal("8"))
-        self.assertIsNone(result["risk_usd"])
-        self.assertFalse(result["complete"])
+        self.assertEqual(result["risk_usd"], Decimal("10"))
+        self.assertEqual(result["estimated_close_fee_usd"], Decimal("2"))
+        self.assertTrue(result["complete"])
 
     def test_short_uses_executable_ask_and_units(self):
         short = position(direction="short", stopLossRate=110)
-        result = calculate_position_gross_stop_risk_usd(short, quote(bid="99", ask="101"))
+        result = calculate_position_gross_stop_risk_usd(short, quote(bid="99", ask="101"), "STOCK")
         self.assertEqual(result["gross_stop_risk_usd"], Decimal("18"))
+        self.assertEqual(result["risk_usd"], Decimal("20"))
 
     def test_profit_protecting_stop_is_not_rejected_by_entry_side_assumption(self):
         # The stop is above a hypothetical long entry; only current executable
         # price versus the current stop is relevant to this gross giveback risk.
         long = position(stopLossRate=105)
-        result = calculate_position_gross_stop_risk_usd(long, quote(bid="110", ask="111"))
+        result = calculate_position_gross_stop_risk_usd(long, quote(bid="110", ask="111"), "STOCK")
         self.assertEqual(result["gross_stop_risk_usd"], Decimal("10"))
 
     def test_unsupported_settlement_currency_leverage_and_trailing_stop_block(self):
@@ -148,38 +150,72 @@ class PositionGrossStopRiskTests(unittest.TestCase):
         ]
         for item in invalid_positions:
             with self.subTest(item=item), self.assertRaises(EtoroAPIError):
-                calculate_position_gross_stop_risk_usd(item, quote())
+                calculate_position_gross_stop_risk_usd(item, quote(), "STOCK")
 
     def test_inconsistent_units_vs_etoro_exposure_blocks(self):
         with self.assertRaises(EtoroAPIError):
             calculate_position_gross_stop_risk_usd(
-                position(currentExposureAcctCcy=250), quote()
+                position(currentExposureAcctCcy=250), quote(), "STOCK"
             )
 
     def test_stop_already_touched_or_quote_mismatch_blocks(self):
         with self.assertRaises(EtoroAPIError):
             calculate_position_gross_stop_risk_usd(
-                position(stopLossRate=100), quote(bid="99", ask="100")
+                position(stopLossRate=100), quote(bid="99", ask="100"), "STOCK"
             )
         with self.assertRaises(EtoroAPIError):
-            calculate_position_gross_stop_risk_usd(position(), quote(instrument_id=999))
+            calculate_position_gross_stop_risk_usd(position(), quote(instrument_id=999), "STOCK")
 
     def test_account_aggregate_remains_unvalidated_until_close_costs_are_supported(self):
         positions = {7001: position(), 7002: position(positionId=7002, instrumentId=102)}
         quotes = {101: quote(), 102: quote(instrument_id=102, bid="98", ask="99")}
-        result = calculate_account_gross_stop_risk_usd(positions, quotes)
+        result = calculate_account_gross_stop_risk_usd(
+            positions, quotes, {101: "STOCK", 102: "ETF"}
+        )
         self.assertEqual(result["gross_stop_risk_usd"], Decimal("8") + Decimal("6"))
-        self.assertIsNone(result["risk_usd"])
-        self.assertFalse(result["complete"])
+        self.assertEqual(result["estimated_close_fees_usd"], Decimal("2"))
+        self.assertEqual(result["risk_usd"], Decimal("16"))
+        self.assertTrue(result["complete"])
+
+    def test_etf_and_crypto_use_published_maximum_close_fees(self):
+        etf = calculate_position_gross_stop_risk_usd(position(), quote(), "ETF")
+        self.assertEqual(etf["estimated_close_fee_usd"], Decimal("0"))
+        self.assertEqual(etf["risk_usd"], Decimal("8"))
+
+        crypto_position = position(stopLossRate=95)
+        crypto = calculate_position_gross_stop_risk_usd(
+            crypto_position, quote(), "CRYPTO"
+        )
+        self.assertEqual(crypto["estimated_close_fee_usd"], Decimal("1.90"))
+        self.assertEqual(crypto["risk_usd"], Decimal("9.90"))
+
+    def test_unknown_fee_class_blocks_risk(self):
+        with self.assertRaises(EtoroAPIError):
+            calculate_position_gross_stop_risk_usd(position(), quote(), "UNKNOWN")
+
+    def test_snapshot_with_unbounded_stop_blocks_end_to_end_risk(self):
+        snapshot = EtoroAccountSnapshot(
+            account_currency="USD",
+            account_currency_source="bot_configuration",
+            client_id=123,
+            available_cash=Decimal("500"),
+            unrealized_pnl=Decimal("0"),
+            positions=({"positionId": 7001, "instrumentId": 101, "cid": 123},),
+            has_unbounded_stop_risk=True,
+        )
+        with self.assertRaises(EtoroAPIError):
+            calculate_account_gross_stop_risk_from_client(
+                Mock(), snapshot, NOW, {101: "STOCK"}
+            )
 
     def test_empty_portfolio_has_zero_open_position_risk(self):
-        result = calculate_account_gross_stop_risk_usd({}, {})
+        result = calculate_account_gross_stop_risk_usd({}, {}, {})
         self.assertEqual(result["risk_usd"], Decimal("0"))
         self.assertTrue(result["complete"])
 
     def test_position_mapping_key_must_match_position_id(self):
         with self.assertRaises(EtoroAPIError):
-            calculate_account_gross_stop_risk_usd({9999: position()}, {101: quote()})
+            calculate_account_gross_stop_risk_usd({9999: position()}, {101: quote()}, {101: "STOCK"})
 
     def test_end_to_end_read_only_path_fetches_breakdown_and_quotes(self):
         pnl_position = {
@@ -199,9 +235,9 @@ class PositionGrossStopRiskTests(unittest.TestCase):
         client = Mock()
         client.get_instrument_breakdown.return_value = EtoroResponse(breakdown(), 200, {})
         client.get_realtime_quotes.return_value = {101: quote()}
-        result = calculate_account_gross_stop_risk_from_client(client, snapshot, NOW)
+        result = calculate_account_gross_stop_risk_from_client(client, snapshot, NOW, {101: "STOCK"})
         self.assertEqual(result["gross_stop_risk_usd"], Decimal("8"))
-        self.assertIsNone(result["risk_usd"])
+        self.assertEqual(result["risk_usd"], Decimal("10"))
         client.get_instrument_breakdown.assert_called_once_with(123)
         client.get_realtime_quotes.assert_called_once_with([101], NOW)
 
@@ -219,12 +255,12 @@ class PositionGrossStopRiskTests(unittest.TestCase):
         client = Mock()
         client.get_instrument_breakdown.return_value = EtoroResponse(breakdown(), 200, {})
         with self.assertRaises(EtoroAPIError):
-            calculate_account_gross_stop_risk_from_client(client, snapshot, NOW)
+            calculate_account_gross_stop_risk_from_client(client, snapshot, NOW, {999: "STOCK"})
         client.get_realtime_quotes.assert_not_called()
 
     def test_missing_quote_blocks_aggregate(self):
         with self.assertRaises(EtoroAPIError):
-            calculate_account_gross_stop_risk_usd({7001: position()}, {})
+            calculate_account_gross_stop_risk_usd({7001: position()}, {}, {101: "STOCK"})
 
 
 if __name__ == "__main__":
