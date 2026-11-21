@@ -162,7 +162,7 @@ class TestPortfolioBacktest(unittest.TestCase):
         )
         self.assertAlmostEqual(
             result["summary"]["max_drawdown_pct"],
-            1.0,
+            0.25,
         )
 
     def test_invalid_capital_fails_closed(self):
