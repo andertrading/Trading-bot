@@ -236,6 +236,18 @@ class SignalLifecycleTests(unittest.TestCase):
                 latest_data_timestamp=NOW + timedelta(minutes=15),
             )
 
+    def test_incomplete_ohlc_range_is_rejected(self):
+        signal = build_signal_record(candidate(), NOW, 30)
+        with self.assertRaisesRegex(ValueError, "must be supplied together"):
+            advance_signal(
+                signal,
+                NOW + timedelta(minutes=20),
+                latest_price=179.5,
+                latest_high=180.0,
+                latest_data_timestamp=NOW + timedelta(minutes=15),
+            )
+        self.assertNotIn("last_market_data_timestamp", signal)
+
     def test_intrabar_stop_is_detected_even_when_close_is_above_stop(self):
         signal = build_signal_record(candidate(), NOW, 30)
         updated, event = advance_signal(
