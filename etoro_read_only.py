@@ -252,12 +252,14 @@ def normalize_account_snapshot(
         ):
             raise EtoroAPIError(f"Tipo de liquidación no reconocido en posición {index}")
 
+        numeric_values = {}
         for numeric_field in ("openRate", "amount", "leverage", "units"):
             number = _decimal(position[numeric_field], f"positions[{index}].{numeric_field}")
             if number <= 0:
                 raise EtoroAPIError(
                     f"{numeric_field} debe ser positivo en posición {index}"
                 )
+            numeric_values[numeric_field] = number
 
         stop_value = position["stopLossRate"]
         if position["isNoStopLoss"]:
@@ -266,6 +268,17 @@ def normalize_account_snapshot(
             stop = _decimal(stop_value, f"positions[{index}].stopLossRate")
             if stop <= 0:
                 raise EtoroAPIError(f"Stop loss inválido en posición {index}")
+            open_rate = numeric_values["openRate"]
+            if position["isBuy"] and stop >= open_rate:
+                raise EtoroAPIError(
+                    f"Stop loss de compra debe estar por debajo del precio de apertura "
+                    f"en posición {index}"
+                )
+            if not position["isBuy"] and stop <= open_rate:
+                raise EtoroAPIError(
+                    f"Stop loss de venta debe estar por encima del precio de apertura "
+                    f"en posición {index}"
+                )
 
         normalized_positions.append(dict(position))
 
