@@ -222,7 +222,13 @@ def _snapshot_metadata(
         "period_requested": "provider_maximum_available",
         "interval_requested": interval,
         "auto_adjust": None,
-        "adjustment_policy": "as_returned_by_provider_unverified",
+        "adjustment_policy": data.attrs.get(
+            "price_adjustment_policy",
+            "unknown_unverified",
+        ),
+        "price_adjustment_verified": bool(
+            data.attrs.get("price_adjustment_verified", False)
+        ),
         "closed_candle_policy": (
             "El motor live excluye velas incompletas antes de devolver el histórico"
         ),
@@ -380,7 +386,12 @@ def _load_snapshot(asset, ticker, interval):
         "timeframe": interval,
         "provider": _provider_for_asset(asset, interval),
         "auto_adjust": None,
-        "adjustment_policy": "as_returned_by_provider_unverified",
+        "adjustment_policy": (
+            "raw_unadjusted_intraday"
+            if interval == "15m"
+            else "split_adjusted_ohlc_no_dividend_adjustment"
+        ),
+        "price_adjustment_verified": True,
     }
 
     for key, value in expected.items():
@@ -1533,7 +1544,12 @@ def _simulate_candidate(
         "duration_bars": duration_bars,
         "pnl_per_unit": round(pnl_per_unit, 6),
         "result_R": round(result_r, 4),
-        "data_source": "Yahoo Finance",
+        "data_source": _provider_for_asset(asset, interval),
+        "price_adjustment_policy": (
+            "raw_unadjusted_intraday"
+            if interval == "15m"
+            else "split_adjusted_ohlc_no_dividend_adjustment"
+        ),
         "costs_included": False,
         "position_sizing_included": False,
     }
