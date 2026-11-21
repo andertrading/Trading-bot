@@ -202,6 +202,111 @@ def _snapshot_coverage(assets, timeframes, manifest):
     }
 
 
+
+def _history_calendar_coverage(history_bounds, assets, timeframes):
+    """Audit whether every expected series shares a real calendar window.
+
+    This compares actual first/last timestamps captured from immutable replay
+    snapshots. It does not claim continuous candle coverage inside the bounds.
+    """
+    expected = {
+        (str(asset).upper(), str(timeframe).lower())
+        for asset, _ in assets
+        for timeframe in timeframes
+    }
+    rows = []
+    normalized = {}
+
+    for asset, timeframe in sorted(expected):
+        bounds = history_bounds.get((asset, timeframe))
+        if bounds is None:
+            rows.append({
+                "asset": asset, "timeframe": timeframe,
+                "history_status": "MISSING_HISTORY_BOUNDS",
+                "history_start_utc": None, "history_end_utc": None,
+                "history_duration_days": None,
+            })
+            continue
+        try:
+            start = _utc_timestamp(bounds[0])
+            end = _utc_timestamp(bounds[1])
+        except (TypeError, ValueError, OverflowError, IndexError):
+            start = end = None
+        if start is None or end is None or end <= start:
+            rows.append({
+                "asset": asset, "timeframe": timeframe,
+                "history_status": "INVALID_HISTORY_BOUNDS",
+                "history_start_utc": start.isoformat() if start is not None else None,
+                "history_end_utc": end.isoformat() if end is not None else None,
+                "history_duration_days": None,
+            })
+            continue
+        normalized[(asset, timeframe)] = (start, end)
+        rows.append({
+            "asset": asset, "timeframe": timeframe,
+            "history_status": "AVAILABLE",
+            "history_start_utc": start.isoformat(),
+            "history_end_utc": end.isoformat(),
+            "history_duration_days": round((end - start).total_seconds() / 86400, 4),
+        })
+
+    def intersection(keys):
+        available = [normalized[key] for key in keys if key in normalized]
+        if not available:
+            return {
+                "available_series": 0, "common_window_exists": False,
+                "common_start_utc": None, "common_end_utc": None,
+                "common_duration_days": 0.0,
+            }
+        common_start = max(start for start, _ in available)
+        common_end = min(end for _, end in available)
+        exists = common_end > common_start
+        return {
+            "available_series": len(available),
+            "common_window_exists": exists,
+            "common_start_utc": common_start.isoformat(),
+            "common_end_utc": common_end.isoformat(),
+            "common_duration_days": (
+                round((common_end - common_start).total_seconds() / 86400, 4)
+                if exists else 0.0
+            ),
+        }
+
+    by_timeframe = {}
+    for timeframe in sorted({key[1] for key in expected}):
+        keys = [key for key in sorted(expected) if key[1] == timeframe]
+        result = intersection(keys)
+        result["expected_series"] = len(keys)
+        result["missing_history_bounds"] = [
+            asset for asset, tf in keys if (asset, tf) not in normalized
+        ]
+        by_timeframe[timeframe] = result
+
+    all_result = intersection(sorted(expected))
+    all_result["expected_series"] = len(expected)
+    all_result["missing_history_bounds"] = [
+        {"asset": asset, "timeframe": timeframe}
+        for asset, timeframe in sorted(expected)
+        if (asset, timeframe) not in normalized
+    ]
+    all_result["status"] = (
+        "NO_COMMON_CALENDAR_WINDOW"
+        if not all_result["common_window_exists"]
+        else "PARTIAL_UNIVERSE"
+        if len(normalized) != len(expected)
+        else "COMPARABLE_BOUNDS_ONLY"
+    )
+    return rows, {
+        "all_timeframes": all_result,
+        "by_timeframe": by_timeframe,
+        "interpretation": (
+            "Intersection uses first/last timestamps only; internal candle gaps "
+            "must still be validated separately. A common calendar window is "
+            "not, by itself, proof of synchronized executable prices."
+        ),
+    }
+
+
 def _metrics_row(strategy_name, asset, timeframe, period, trades):
     metrics = bt.calculate_metrics(trades)
     return {
@@ -566,6 +671,13 @@ def main():
     ]
     if failed_pairs:
         coverage_summary["status"] = "PARTIAL"
+    calendar_rows, calendar_summary = _history_calendar_coverage(
+        history_bounds, assets, timeframes
+    )
+    coverage_summary["history_calendar_coverage"] = calendar_summary
+    pd.DataFrame(calendar_rows).to_csv(
+        "strategy_research_history_calendar_coverage.csv", index=False
+    )
     for portfolio_row in oos_portfolio_rows:
         portfolio_row["universe_coverage_status"] = coverage_summary["status"]
     pd.DataFrame(coverage_rows).to_csv(
