@@ -45,7 +45,10 @@ class EtoroReadOnlyClientTests(unittest.TestCase):
         self.assertEqual(result.data, {"credit": 100})
         args, kwargs = self.session.request.call_args
         self.assertEqual(args[0], "GET")
-        self.assertTrue(args[1].endswith("/api/v1/trading/info/real/pnl"))
+        self.assertEqual(
+            args[1],
+            "https://public-api.etoro.com/api/v1/trading/info/real/pnl",
+        )
         self.assertEqual(kwargs["headers"]["x-api-key"], "app-secret-test")
         self.assertEqual(kwargs["headers"]["x-user-key"], "user-secret-test")
         self.assertTrue(kwargs["headers"]["x-request-id"])
@@ -217,75 +220,103 @@ class AvailableCashTests(unittest.TestCase):
 class AccountSnapshotTests(unittest.TestCase):
     def setUp(self):
         self.payload = {
-            "accountCurrencyId": 1,
-            "unrealizedPnL": "12.50",
-            "credit": "1000",
-            "ordersForOpen": [{"amount": "100", "mirrorId": 0}],
-            "orders": [],
             "clientPortfolio": {
+                "credit": "1000",
+                "unrealizedPnL": "12.50",
+                "ordersForOpen": [{"amount": "100", "mirrorId": 0}],
+                "orders": [],
+                "mirrors": [],
                 "positions": [{
-                    "positionID": 10,
-                    "instrumentID": 20,
+                    "positionId": 10,
+                    "instrumentId": 20,
                     "isBuy": True,
                     "openRate": "100",
                     "stopLossRate": "95",
                     "amount": "200",
                     "leverage": "1",
                     "units": "2",
-                    "settlementTypeID": 1,
+                    "settlementTypeId": 1,
                     "isNoStopLoss": False,
-                }]
-            },
+                }],
+            }
         }
 
-    def test_valid_snapshot_confirms_usd_and_cash_without_inventing_risk(self):
-        snapshot = normalize_account_snapshot(self.payload)
+    def test_client_snapshot_method_fetches_and_validates_in_one_step(self):
+        session = Mock()
+        session.request.return_value = FakeResponse(data=self.payload)
+        client = EtoroReadOnlyClient("app-key", "user-key", session=session)
+        snapshot = client.get_account_snapshot("USD")
+        self.assertEqual(snapshot.account_currency, "USD")
+        self.assertEqual(snapshot.account_currency_source, "bot_configuration")
+        self.assertEqual(snapshot.available_cash, 900)
+        session.request.assert_called_once()
+
+    def test_client_snapshot_method_rejects_incomplete_account_response(self):
+        session = Mock()
+        session.request.return_value = FakeResponse(data={"credit": 1000})
+        client = EtoroReadOnlyClient("app-key", "user-key", session=session)
+        with self.assertRaises(EtoroAPIError):
+            client.get_account_snapshot("USD")
+        session.request.assert_called_once()
+
+    def test_valid_official_nested_schema_preserves_positions_and_cash(self):
+        snapshot = normalize_account_snapshot(self.payload, "USD")
         self.assertEqual(snapshot.account_currency, "USD")
         self.assertEqual(snapshot.available_cash, 900)
         self.assertEqual(snapshot.unrealized_pnl, Decimal("12.50"))
         self.assertEqual(len(snapshot.positions), 1)
+        self.assertEqual(snapshot.positions[0]["positionId"], 10)
         self.assertFalse(snapshot.has_unbounded_stop_risk)
 
     def test_explicit_empty_positions_is_not_confused_with_missing_positions(self):
         self.payload["clientPortfolio"]["positions"] = []
-        snapshot = normalize_account_snapshot(self.payload)
+        snapshot = normalize_account_snapshot(self.payload, "USD")
         self.assertEqual(snapshot.positions, ())
         self.assertFalse(snapshot.has_unbounded_stop_risk)
 
     def test_missing_positions_does_not_become_an_empty_portfolio(self):
         del self.payload["clientPortfolio"]["positions"]
         with self.assertRaises(EtoroAPIError):
-            normalize_account_snapshot(self.payload)
+            normalize_account_snapshot(self.payload, "USD")
 
-    def test_non_usd_or_ambiguous_currency_fails_closed(self):
-        self.payload["accountCurrencyId"] = 2
+
+    def test_nonempty_mirrors_are_rejected_to_prevent_double_counting(self):
+        self.payload["clientPortfolio"]["mirrors"] = [{"positions": []}]
         with self.assertRaises(EtoroAPIError):
-            normalize_account_snapshot(self.payload)
-        self.payload["accountCurrencyId"] = "1"
+            normalize_account_snapshot(self.payload, "USD")
+
+    def test_mirrored_pending_order_is_rejected_for_portfolio_risk(self):
+        self.payload["clientPortfolio"]["ordersForOpen"] = [
+            {"amount": 25, "mirrorId": 7}
+        ]
         with self.assertRaises(EtoroAPIError):
-            normalize_account_snapshot(self.payload)
+            normalize_account_snapshot(self.payload, "USD")
+
+    def test_non_usd_configuration_fails_closed(self):
+        with self.assertRaises(EtoroAPIError):
+            normalize_account_snapshot(self.payload, "EUR")
 
     def test_no_stop_position_is_preserved_and_flagged_as_unbounded(self):
         self.payload["clientPortfolio"]["positions"][0]["isNoStopLoss"] = True
         self.payload["clientPortfolio"]["positions"][0]["stopLossRate"] = None
-        snapshot = normalize_account_snapshot(self.payload)
+        snapshot = normalize_account_snapshot(self.payload, "USD")
         self.assertTrue(snapshot.has_unbounded_stop_risk)
         self.assertIsNone(snapshot.positions[0]["stopLossRate"])
 
     def test_missing_stop_for_position_claiming_to_have_one_is_rejected(self):
         self.payload["clientPortfolio"]["positions"][0]["stopLossRate"] = None
         with self.assertRaises(EtoroAPIError):
-            normalize_account_snapshot(self.payload)
+            normalize_account_snapshot(self.payload, "USD")
 
     def test_unsupported_settlement_type_is_rejected(self):
-        self.payload["clientPortfolio"]["positions"][0]["settlementTypeID"] = 99
+        self.payload["clientPortfolio"]["positions"][0]["settlementTypeId"] = 99
         with self.assertRaises(EtoroAPIError):
-            normalize_account_snapshot(self.payload)
+            normalize_account_snapshot(self.payload, "USD")
 
     def test_invalid_position_direction_is_rejected(self):
         self.payload["clientPortfolio"]["positions"][0]["isBuy"] = 1
         with self.assertRaises(EtoroAPIError):
-            normalize_account_snapshot(self.payload)
+            normalize_account_snapshot(self.payload, "USD")
 
 
 if __name__ == "__main__":

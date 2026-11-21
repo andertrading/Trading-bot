@@ -17,7 +17,7 @@ from uuid import uuid4
 import requests
 
 
-API_BASE_URL = "https://api.etoro.com"
+API_BASE_URL = "https://public-api.etoro.com"
 DEFAULT_TIMEOUT_SECONDS = 10
 MAX_ATTEMPTS = 3
 RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
@@ -117,24 +117,27 @@ class EtoroAccountSnapshot:
     """Validated account facts; position risk is intentionally not inferred."""
 
     account_currency: str
+    account_currency_source: str
     available_cash: Decimal
     unrealized_pnl: Decimal
     positions: tuple[Mapping[str, Any], ...]
     has_unbounded_stop_risk: bool
 
 
-def normalize_account_snapshot(payload: Mapping[str, Any]) -> EtoroAccountSnapshot:
-    """Validate the minimum real-account schema required for a trusted snapshot.
+def normalize_account_snapshot(
+    payload: Mapping[str, Any],
+    account_currency: str,
+) -> EtoroAccountSnapshot:
+    """Validate the documented nested clientPortfolio response.
 
-    This confirms USD account context and preserves positions, but does not
-    calculate position risk, infer multipliers, or treat missing stops as zero.
+    The PnL endpoint does not expose accountCurrencyId. Currency must therefore
+    be supplied from the bot's independently configured account currency; this
+    function does not claim that the endpoint itself verified the currency.
     """
     if not isinstance(payload, Mapping):
         raise EtoroAPIError("La respuesta de cuenta no es un objeto JSON")
-
-    currency_id = payload.get("accountCurrencyId")
-    if isinstance(currency_id, bool) or not isinstance(currency_id, int) or currency_id != 1:
-        raise EtoroAPIError("La divisa de cuenta no está confirmada como USD (ID 1)")
+    if account_currency != "USD":
+        raise EtoroAPIError("Solo se admite la divisa configurada USD en este bot")
 
     portfolio = payload.get("clientPortfolio")
     if not isinstance(portfolio, Mapping):
@@ -142,20 +145,42 @@ def normalize_account_snapshot(payload: Mapping[str, Any]) -> EtoroAccountSnapsh
     positions = portfolio.get("positions")
     if not isinstance(positions, list):
         raise EtoroAPIError("Falta la lista explícita de posiciones")
+    mirrors = portfolio.get("mirrors")
+    if not isinstance(mirrors, list):
+        raise EtoroAPIError("Falta la lista explícita de mirrors")
+    if mirrors:
+        raise EtoroAPIError(
+            "La cuenta contiene mirrors/copy trading no soportados; snapshot bloqueado"
+        )
 
-    unrealized_pnl = _decimal(payload.get("unrealizedPnL"), "unrealizedPnL")
-    available_cash = calculate_available_cash(payload)
+    pending_orders = portfolio.get("ordersForOpen")
+    if not isinstance(pending_orders, list):
+        raise EtoroAPIError("Falta la lista explícita de órdenes pendientes")
+    for index, order in enumerate(pending_orders):
+        if not isinstance(order, Mapping):
+            raise EtoroAPIError(f"Orden pendiente inválida: {index}")
+        mirror_id = _one_key(order, ("mirrorId", "mirrorID"), f"mirrorId[{index}]")
+        try:
+            if int(mirror_id) != 0:
+                raise EtoroAPIError(
+                    "La cuenta contiene órdenes pendientes mirror/copy no soportadas"
+                )
+        except (TypeError, ValueError):
+            raise EtoroAPIError(f"mirrorId inválido en orden {index}") from None
+
+    unrealized_pnl = _decimal(portfolio.get("unrealizedPnL"), "clientPortfolio.unrealizedPnL")
+    available_cash = calculate_available_cash(portfolio)
 
     required_fields = {
-        "positionID",
-        "instrumentID",
+        "positionId",
+        "instrumentId",
         "isBuy",
         "openRate",
         "stopLossRate",
         "amount",
         "leverage",
         "units",
-        "settlementTypeID",
+        "settlementTypeId",
         "isNoStopLoss",
     }
     normalized_positions: list[Mapping[str, Any]] = []
@@ -170,7 +195,7 @@ def normalize_account_snapshot(payload: Mapping[str, Any]) -> EtoroAccountSnapsh
                 f"Posición {index} incompleta: faltan {', '.join(missing)}"
             )
 
-        for id_field in ("positionID", "instrumentID"):
+        for id_field in ("positionId", "instrumentId"):
             value = position[id_field]
             if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
                 raise EtoroAPIError(f"{id_field} inválido en posición {index}")
@@ -180,7 +205,7 @@ def normalize_account_snapshot(payload: Mapping[str, Any]) -> EtoroAccountSnapsh
         if not isinstance(position["isNoStopLoss"], bool):
             raise EtoroAPIError(f"isNoStopLoss inválido en posición {index}")
 
-        settlement_type = position["settlementTypeID"]
+        settlement_type = position["settlementTypeId"]
         if (
             isinstance(settlement_type, bool)
             or not isinstance(settlement_type, int)
@@ -206,7 +231,8 @@ def normalize_account_snapshot(payload: Mapping[str, Any]) -> EtoroAccountSnapsh
         normalized_positions.append(dict(position))
 
     return EtoroAccountSnapshot(
-        account_currency="USD",
+        account_currency=account_currency,
+        account_currency_source="bot_configuration",
         available_cash=available_cash,
         unrealized_pnl=unrealized_pnl,
         positions=tuple(normalized_positions),
@@ -324,6 +350,11 @@ class EtoroReadOnlyClient:
 
     def get_account_pnl(self) -> EtoroResponse:
         return self._request("GET", "/api/v1/trading/info/real/pnl")
+
+    def get_account_snapshot(self, account_currency: str) -> EtoroAccountSnapshot:
+        """Fetch and validate the snapshot using the bot-configured currency."""
+        response = self.get_account_pnl()
+        return normalize_account_snapshot(response.data, account_currency)
 
     def get_rates(self, instrument_ids: list[int]) -> EtoroResponse:
         if not instrument_ids or any(
