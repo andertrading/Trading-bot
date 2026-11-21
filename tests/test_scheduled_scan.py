@@ -185,6 +185,7 @@ class ScheduledScanTests(unittest.TestCase):
             "last_price": 99.5,
             "last_high": 100.0,
             "last_low": 98.8,
+            "data_timestamp": (self.now - timedelta(minutes=15)).isoformat(),
         }
         scan = {
             "timeframes": ["15m"],
