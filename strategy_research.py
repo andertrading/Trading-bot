@@ -371,6 +371,16 @@ def main():
     coverage_rows, coverage_summary = _snapshot_coverage(
         assets, timeframes, snapshot_manifest
     )
+    coverage_summary.update({
+        "oos_calendar_policy": "PER_ASSET_TIMEFRAME_HISTORY_BOUNDS",
+        "oos_portfolio_calendar_comparable": False,
+        "oos_portfolio_note": (
+            "The aggregate OOS portfolio combines asset/timeframe series "
+            "whose history windows and calendar cutoffs differ. Its return "
+            "must not be interpreted as a single synchronized portfolio "
+            "backtest until a common calendar window is available."
+        ),
+    })
     pd.DataFrame(coverage_rows).to_csv(
         "strategy_research_coverage.csv", index=False
     )
@@ -524,6 +534,8 @@ def main():
             "universe_coverage_status": coverage_summary["status"],
             "universe_expected_combinations": coverage_summary["expected_combinations"],
             "universe_available_combinations": coverage_summary["available_combinations"],
+            "oos_calendar_policy": coverage_summary["oos_calendar_policy"],
+            "portfolio_calendar_comparable": False,
             **oos_portfolio["summary"],
         })
 
