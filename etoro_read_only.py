@@ -197,6 +197,7 @@ def normalize_account_snapshot(
     required_fields = {
         "positionId",
         "instrumentId",
+        "mirrorId",
         "isBuy",
         "openRate",
         "stopLossRate",
@@ -223,6 +224,13 @@ def normalize_account_snapshot(
             if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
                 raise EtoroAPIError(f"{id_field} inválido en posición {index}")
 
+        mirror_id = position["mirrorId"]
+        if isinstance(mirror_id, bool) or not isinstance(mirror_id, int) or mirror_id < 0:
+            raise EtoroAPIError(f"mirrorId inválido en posición {index}")
+        if mirror_id != 0:
+            raise EtoroAPIError(
+                "La cuenta contiene posiciones mirror/copy no soportadas; snapshot bloqueado"
+            )
         if not isinstance(position["isBuy"], bool):
             raise EtoroAPIError(f"isBuy inválido en posición {index}")
         if not isinstance(position["isNoStopLoss"], bool):
