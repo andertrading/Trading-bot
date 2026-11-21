@@ -1,0 +1,69 @@
+name: One-off Twelve Data ETF Symbol Discovery
+
+on:
+  push:
+    branches:
+      - oneoff/twelvedata-etf-symbol-search-20261121
+
+permissions:
+  contents: read
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Query Twelve Data symbol catalog
+        env:
+          TWELVE_DATA_API_KEY: ${{ secrets.TWELVE_DATA_API_KEY }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import requests
+
+          api_key = os.environ.get("TWELVE_DATA_API_KEY")
+          if not api_key:
+              raise SystemExit("TWELVE_DATA_API_KEY secret is missing")
+
+          output = {}
+          for symbol in ("CSPX", "CNDX"):
+              response = requests.get(
+                  "https://api.twelvedata.com/symbol_search",
+                  params={
+                      "symbol": symbol,
+                      "outputsize": 120,
+                      "show_plan": "true",
+                      "apikey": api_key,
+                  },
+                  timeout=25,
+              )
+              response.raise_for_status()
+              payload = response.json()
+              if payload.get("status") != "ok":
+                  raise SystemExit(
+                      f"Symbol search failed for {symbol}: "
+                      f"{payload.get('message', payload)}"
+                  )
+              output[symbol] = payload.get("data", [])
+              print(f"{symbol}: {len(output[symbol])} matches")
+              for item in output[symbol]:
+                  print(json.dumps(item, ensure_ascii=False))
+
+          with open("twelvedata_etf_symbol_search.json", "w", encoding="utf-8") as f:
+              json.dump(output, f, ensure_ascii=False, indent=2)
+          PY
+
+      - name: Upload symbol discovery results
+        uses: actions/upload-artifact@v4
+        with:
+          name: twelvedata-etf-symbol-search-2026-11-21
+          retention-days: 14
+          path: twelvedata_etf_symbol_search.json
