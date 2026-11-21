@@ -11,11 +11,13 @@ from etoro_read_only import (
     EtoroReadOnlyClient,
     EtoroResponse,
     EtoroCostEstimate,
+    EtoroInstrumentEligibility,
     calculate_available_cash,
     normalize_realtime_quotes,
     normalize_account_snapshot,
     resolve_unique_instrument,
     normalize_cost_estimate,
+    normalize_instrument_eligibility,
     validate_what_if_payload,
 )
 
@@ -587,6 +589,130 @@ class CostEstimateValidationTests(unittest.TestCase):
             self.now,
         )
         self.assertEqual(estimate.instrument_id, 123)
+
+
+class InstrumentEligibilityTests(unittest.TestCase):
+    def setUp(self):
+        self.now = datetime(2026, 11, 21, 12, 0, 0, tzinfo=timezone.utc)
+        self.item = {
+            "instrumentId": 101,
+            "symbol": "AAPL",
+            "minPositionExposure": 50,
+            "maxUnitsPerOrder": 10000,
+            "allowOpenPosition": True,
+            "allowClosePosition": True,
+            "allowPartialClosePosition": True,
+            "allowMitOrders": True,
+            "allowEntryOrders": False,
+            "allowExitOrders": False,
+            "allowTrailingStopLoss": True,
+            "unitsQuantityType": "FractionalUnits",
+            "orderFillBehaviorType": "BestEffort",
+            "allowedOrderQuantityType": "Both",
+            "tradeUnitType": "Units",
+            "leverageConfigs": [{
+                "settlementType": "CFD",
+                "direction": "LONG",
+                "leverageValues": [1, 2, 5],
+                "isPotential": False,
+                "minPositionAmount": 50,
+                "allowEditStopLoss": True,
+                "minStopLossPercentage": 5,
+                "maxStopLossPercentage": 50,
+                "defaultStopLossPercentage": 50,
+                "allowEditTakeProfit": True,
+                "minTakeProfitPercentage": 5,
+                "maxTakeProfitPercentage": 1000,
+                "defaultTakeProfitPercentage": 1000,
+                "allowStopLossTakeProfit": True,
+            }],
+        }
+        self.response = EtoroResponse({
+            "currency": "USD",
+            "eligibilities": [self.item],
+            "notFoundInstrumentIds": [],
+            "notFoundSymbols": [],
+        }, 200, {})
+
+    def test_complete_eligibility_is_normalized_without_inventing_permissions(self):
+        result = normalize_instrument_eligibility(self.response, [101])
+        self.assertIsInstance(result[101], EtoroInstrumentEligibility)
+        self.assertTrue(result[101].allow_open_position)
+        self.assertEqual(result[101].min_position_exposure, Decimal("50"))
+        self.assertEqual(result[101].leverage_configs[0]["settlementType"], "CFD")
+        self.assertEqual(result[101].leverage_configs[0]["leverageValues"], [1, 2, 5])
+
+    def test_client_eligibility_request_is_batched_and_read_only(self):
+        session = Mock()
+        session.request.return_value = FakeResponse(data=self.response.data)
+        client = EtoroReadOnlyClient("app-key", "user-key", session=session)
+        result = client.get_validated_instrument_eligibility([101])
+        self.assertEqual(result[101].symbol, "AAPL")
+        args, kwargs = session.request.call_args
+        self.assertEqual(args[0], "POST")
+        self.assertTrue(args[1].endswith("/api/v2/trading/info/eligibility"))
+        self.assertEqual(kwargs["json"], {"instrumentIds": [101], "currency": "USD"})
+
+    def test_invalid_eligibility_request_is_rejected_without_network(self):
+        session = Mock()
+        client = EtoroReadOnlyClient("app-key", "user-key", session=session)
+        with self.assertRaises(ValueError):
+            client.get_instrument_eligibility([])
+        with self.assertRaises(ValueError):
+            client.get_instrument_eligibility([101, 101])
+        with self.assertRaises(ValueError):
+            client.get_instrument_eligibility(list(range(1, 102)))
+        with self.assertRaises(ValueError):
+            client.get_instrument_eligibility([101], currency="EUR")
+        with self.assertRaises(EtoroAPIError):
+            client._request(
+                "POST",
+                "/api/v2/trading/info/eligibility",
+                json_body={"instrumentIds": [101], "currency": "USD", "write": True},
+            )
+        session.request.assert_not_called()
+
+    def test_missing_not_found_or_duplicate_instruments_fail_closed(self):
+        missing = dict(self.response.data, eligibilities=[])
+        with self.assertRaises(EtoroAPIError):
+            normalize_instrument_eligibility(EtoroResponse(missing, 200, {}), [101])
+        not_found = dict(self.response.data, notFoundInstrumentIds=[101])
+        with self.assertRaises(EtoroAPIError):
+            normalize_instrument_eligibility(EtoroResponse(not_found, 200, {}), [101])
+        duplicate = dict(self.response.data, eligibilities=[self.item, self.item])
+        with self.assertRaises(EtoroAPIError):
+            normalize_instrument_eligibility(EtoroResponse(duplicate, 200, {}), [101])
+
+    def test_wrong_currency_or_invalid_leverage_config_is_rejected(self):
+        wrong_currency = dict(self.response.data, currency="EUR")
+        with self.assertRaises(EtoroAPIError):
+            normalize_instrument_eligibility(EtoroResponse(wrong_currency, 200, {}), [101])
+        bad_config = dict(self.item)
+        bad_config["leverageConfigs"] = [dict(
+            self.item["leverageConfigs"][0],
+            direction="SIDEWAYS",
+        )]
+        invalid = dict(self.response.data, eligibilities=[bad_config])
+        with self.assertRaises(EtoroAPIError):
+            normalize_instrument_eligibility(EtoroResponse(invalid, 200, {}), [101])
+
+    def test_non_openable_instrument_can_be_reported_without_leverage_configs(self):
+        item = dict(
+            self.item,
+            allowOpenPosition=False,
+            minPositionExposure=None,
+            maxUnitsPerOrder=None,
+            leverageConfigs=[],
+        )
+        response = EtoroResponse({
+            "currency": "USD",
+            "eligibilities": [item],
+            "notFoundInstrumentIds": [],
+            "notFoundSymbols": [],
+        }, 200, {})
+        result = normalize_instrument_eligibility(response, [101])
+        self.assertFalse(result[101].allow_open_position)
+        self.assertEqual(result[101].leverage_configs, ())
 
 
 class AccountSnapshotTests(unittest.TestCase):
