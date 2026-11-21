@@ -15,7 +15,7 @@ permissions:
 jobs:
   yahoo-etf-diagnostic:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - name: Descargar repositorio
         uses: actions/checkout@v4
@@ -31,7 +31,6 @@ jobs:
         run: |
           python - <<'PY'
           from datetime import datetime, timedelta, timezone
-          import sys
           import time
           import numpy as np
           import pandas as pd
@@ -47,14 +46,23 @@ jobs:
           INTERVALS = {"15m": ("15m", 60), "1d": ("1d", 3650)}
           session = requests.Session()
           session.headers.update({
-              "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120.0 Safari/537.36"
+              "User-Agent": (
+                  "Mozilla/5.0 (X11; Linux x86_64) "
+                  "AppleWebKit/537.36 (KHTML, like Gecko) "
+                  "Chrome/131.0.0.0 Safari/537.36"
+              ),
+              "Accept": "application/json,text/plain,*/*",
           })
           failures = []
+          rate_limited = False
           print("DIAGNÓSTICO ETF: comparación LSE frente a SIX")
           print("No se modifica PROVIDER_MAP ni config.py.")
+          print("Pausa de 30 s entre consultas; ante HTTP 429 se espera y se reintenta una sola vez.")
           print("=" * 78)
 
           for label, (symbol, expected_currency, exchange) in SYMBOLS.items():
+              if rate_limited:
+                  break
               for interval, (yahoo_interval, lookback_days) in INTERVALS.items():
                   now = datetime.now(timezone.utc)
                   params = {
@@ -64,10 +72,44 @@ jobs:
                       "events": "history",
                       "includeAdjustedClose": "true",
                   }
-                  print(f"\n{label} | {symbol} | {exchange} | {interval}")
+                  print(f"\n{label} | {symbol} | {exchange} | {interval}", flush=True)
                   try:
-                      response = session.get(f"{BASE}/{symbol}", params=params, timeout=30)
-                      print(f"HTTP: {response.status_code}")
+                      response = session.get(
+                          f"{BASE}/{symbol}",
+                          params=params,
+                          timeout=30,
+                      )
+                      print(f"HTTP inicial: {response.status_code}", flush=True)
+
+                      if response.status_code == 429:
+                          retry_after = response.headers.get("Retry-After", "")
+                          try:
+                              wait_seconds = int(retry_after)
+                          except (TypeError, ValueError):
+                              wait_seconds = 90
+                          wait_seconds = min(max(wait_seconds, 60), 180)
+                          print(
+                              f"Yahoo ha limitado las peticiones. "
+                              f"Retry-After={retry_after or 'no indicado'}. "
+                              f"Esperando {wait_seconds} s antes de un único reintento.",
+                              flush=True,
+                          )
+                          time.sleep(wait_seconds)
+                          response = session.get(
+                              f"{BASE}/{symbol}",
+                              params=params,
+                              timeout=30,
+                          )
+                          print(f"HTTP tras reintento: {response.status_code}", flush=True)
+                          if response.status_code == 429:
+                              print(
+                                  "BLOQUEO PERSISTENTE HTTP 429. "
+                                  "Se detienen las consultas para no intensificar el límite.",
+                                  flush=True,
+                              )
+                              rate_limited = True
+                              break
+
                       response.raise_for_status()
                       chart = response.json().get("chart", {})
                       if chart.get("error"):
@@ -94,8 +136,8 @@ jobs:
                           "Close": quote.get("close", []),
                           "Volume": quote.get("volume", []),
                       }, index=pd.to_datetime(timestamps, unit="s", utc=True))
-                      # Excluir solo la vela aún en curso. Las velas cerradas
-                      # defectuosas se informan; nunca se reparan ni se ocultan.
+                      # Excluir solo la vela aún en curso; las cerradas defectuosas
+                      # se informan y nunca se reparan ni se ocultan.
                       if interval == "15m":
                           df = df[df.index <= pd.Timestamp(now - timedelta(minutes=15))]
                       else:
@@ -127,15 +169,20 @@ jobs:
                           failures.append(f"{symbol} {interval}: histórico vacío")
                   except Exception as exc:
                       failures.append(f"{symbol} {interval}: {type(exc).__name__}: {exc}")
-                      print(f"ERROR: {type(exc).__name__}: {exc}")
-                  time.sleep(2)
+                      print(f"ERROR: {type(exc).__name__}: {exc}", flush=True)
+
+                  if not rate_limited:
+                      time.sleep(30)
 
           print("\n" + "=" * 78)
           print("RESUMEN")
           for failure in failures:
               print("FALLO:", failure)
+          if rate_limited:
+              print("RESULTADO INCONCLUSO: Yahoo mantiene el bloqueo HTTP 429.")
+              raise SystemExit(2)
           if failures:
-              print("El diagnóstico ha terminado con incidencias que requieren revisión.")
-          else:
-              print("Todas las cotizaciones y temporalidades superan las comprobaciones básicas.")
+              print("El diagnóstico ha terminado con incidencias de datos.")
+              raise SystemExit(1)
+          print("Todas las cotizaciones y temporalidades superan las comprobaciones básicas.")
           PY
