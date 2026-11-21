@@ -30,14 +30,14 @@ The code uses public eToro fee information as a **baseline estimate**, not as pr
 The model also supports:
 - Full market bid/ask spread in basis points, charged as half-spread on entry and exit.
 - FX conversion when quote currency differs from account currency.
-- Instrument-specific CFD overnight costs supplied as the broker's actual billable fee units.
+- CFD financing: for leveraged/short stock and ETF CFDs, the published 6.4% annual rate plus the currency benchmark, divided by 365 and multiplied by broker-billable nights (including the x3 weekend charge); for crypto CFDs, the instrument-specific USD-per-unit nightly fee. Unleveraged BUY stock/ETF CFDs have no overnight fee; crypto CFD overnight fees remain applicable to Spanish clients.
 - One-off deposit/withdrawal FX conversion, calculated separately from trade-level FX when the source and account currencies differ.
 
 The model deliberately does **not** invent a market spread, FX fee or CFD financing rate. Even if a spread estimate is entered, historical OHLC-to-eToro bid/ask execution-price parity remains unverified, so `costs_complete` remains false until that basis is validated. Missing components are listed in each trade row.
 
 Funding conversion is a one-off account-funding cost, not a per-trade cost. It has a separate estimator and is not deducted from each trade's R. The current model leaves it unpriced until the actual source currency, deposit method, account currency and applicable conversion fee are known.
 
-The eToro public fee schedule says stock commissions vary by country and exchange, crypto fees may vary by Club level, conversion fees depend on location/payment method/Club level, and CFD financing rates can change. It also warns that some unleveraged BUY orders in stocks and ETFs can still be executed as CFDs because of product restrictions. The Spanish page states that new Spanish users have not been able to trade CFDs since 2 August 2024. The bot therefore keeps CFD availability and each instrument's actual execution type unconfirmed until the order ticket labels it REAL or CFD.
+The eToro public fee schedule says stock commissions vary by country and exchange, crypto fees may vary by Club level, conversion fees depend on location/payment method/Club level, and CFD financing rates can change. The current overnight schedule states that non-leveraged BUY stock/ETF positions do not incur overnight fees, while crypto CFDs incur nightly fees (with a stated German-client exception). It also warns that some unleveraged BUY orders in stocks and ETFs can still be executed as CFDs because of product restrictions. The Spanish page states that new Spanish users have not been able to trade CFDs since 2 August 2024. The bot therefore keeps CFD availability and each instrument's actual execution type unconfirmed until the order ticket labels it REAL or CFD.
 
 ## Backtest interpretation
 
