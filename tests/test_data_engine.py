@@ -1122,7 +1122,7 @@ class TestTwelveDataAdjustmentMode(unittest.TestCase):
 
                 self.assertIsNotNone(result)
                 self.assertEqual(
-                    request.call_args.kwargs["params"]["adjust"],
+                    request.call_args.args[0]["adjust"],
                     expected_adjust,
                 )
 
