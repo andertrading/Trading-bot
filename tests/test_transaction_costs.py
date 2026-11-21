@@ -10,6 +10,7 @@ class TestEtoroTransactionCosts(unittest.TestCase):
             patch.object(costs, "ETORO_EXECUTION_TYPES_CONFIRMED", True),
             patch.object(costs, "ETORO_FEE_SCHEDULE_CONFIRMED", True),
             patch.object(costs, "ETORO_ACCOUNT_CURRENCY_CONFIRMED", True),
+            patch.object(costs, "ETORO_EXECUTION_PRICE_BASIS_CONFIRMED", True),
         )
 
     def test_real_stock_uses_conservative_two_dollar_fee_each_side(self):
@@ -86,9 +87,42 @@ class TestEtoroTransactionCosts(unittest.TestCase):
         self.assertAlmostEqual(result["commission_cost"], 0.315)
         self.assertIn("cfd_overnight_fee_missing", result["unpriced_costs"])
 
+    def test_unverified_execution_price_basis_prevents_complete_costs(self):
+        with patch.object(costs, "ETORO_EXECUTION_TYPES_CONFIRMED", True), \
+             patch.object(costs, "ETORO_FEE_SCHEDULE_CONFIRMED", True), \
+             patch.object(costs, "ETORO_ACCOUNT_CURRENCY_CONFIRMED", True), \
+             patch.object(costs, "ETORO_EXECUTION_PRICE_BASIS_CONFIRMED", False):
+            result = costs.estimate_etoro_trade_costs(
+                "AAPL", 100.0, 110.0, 1.0, market_spread_bps=10
+            )
+        self.assertFalse(result["complete"])
+        self.assertIn(
+            "historical_ohlc_to_etoro_execution_price_basis_unverified",
+            result["unpriced_costs"],
+        )
+
+    def test_funding_conversion_is_separate_from_trade_fx(self):
+        same_currency = costs.estimate_funding_conversion_cost(
+            1000.0, "USD", "USD"
+        )
+        missing = costs.estimate_funding_conversion_cost(
+            1000.0, "EUR", "USD"
+        )
+        priced = costs.estimate_funding_conversion_cost(
+            1000.0,
+            "EUR",
+            "USD",
+            fx_rate=1.1,
+            conversion_fee_pct=0.005,
+        )
+        self.assertTrue(same_currency["complete"])
+        self.assertEqual(same_currency["conversion_cost_target_currency"], 0.0)
+        self.assertIn("funding_fx_rate_or_fee_missing", missing["unpriced_costs"])
+        self.assertAlmostEqual(priced["conversion_cost_target_currency"], 5.5)
+
     def test_all_cost_components_can_be_complete_when_confirmed(self):
         patches = self.confirmed_model()
-        with patches[0], patches[1], patches[2]:
+        with patches[0], patches[1], patches[2], patches[3]:
             result = costs.estimate_etoro_trade_costs(
                 "AAPL",
                 100.0,
