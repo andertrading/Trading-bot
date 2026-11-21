@@ -907,8 +907,13 @@ class EtoroReadOnlyClient:
                 or isinstance(client_id, bool)
                 or not isinstance(client_id, int)
                 or client_id <= 0
+                or params != {
+                    "positionLevel": "Normal",
+                    "orderLevel": "Normal",
+                    "mirrorLevel": "None",
+                }
             ):
-                raise EtoroAPIError("CID inválido para el desglose de posiciones")
+                raise EtoroAPIError("CID o parámetros inválidos para el desglose de posiciones")
         elif client_id is not None:
             raise EtoroAPIError("CID no permitido para este endpoint")
         if path == "/api/v2/trading/info/costs":
@@ -1068,6 +1073,11 @@ class EtoroReadOnlyClient:
         return self._request(
             "GET",
             "/api/v2/trading/info/instrument-breakdown",
+            params={
+                "positionLevel": "Normal",
+                "orderLevel": "Normal",
+                "mirrorLevel": "None",
+            },
             client_id=client_id,
         )
 
