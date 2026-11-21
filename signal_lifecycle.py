@@ -280,7 +280,7 @@ class UpstashSignalStateStore:
         }
 
     def _get_raw(self):
-        endpoint = f"{self.url}/get/{quote(self.key, safe='')}"
+        endpoint = f"{self.url}/get/{quote(self.key, safe=':')}"
         response = requests.get(
             endpoint, headers=self._headers, timeout=self.timeout
         )
@@ -291,7 +291,7 @@ class UpstashSignalStateStore:
         return payload.get("result")
 
     def _set_raw(self, value: str) -> None:
-        endpoint = f"{self.url}/set/{quote(self.key, safe='')}"
+        endpoint = f"{self.url}/set/{quote(self.key, safe=':')}"
         response = requests.post(
             endpoint,
             data=value.encode("utf-8"),
