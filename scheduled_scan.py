@@ -276,10 +276,13 @@ def run_scheduled_scan(timeframe: str) -> dict:
             store.update(updated)
             transitions += 1
             if updated.get("alert_sent"):
-                updated = _notify_lifecycle_event(
-                    store, updated, event, alerts_enabled
-                )
-            elif not updated.get("alert_sent"):
+                # Do not send a newer event ahead of an older queued event.
+                # The retry pass will deliver the queue in chronological order.
+                if alerts_enabled and pending_events and pending_events[0] == event:
+                    updated = _notify_lifecycle_event(
+                        store, updated, event, alerts_enabled
+                    )
+            else:
                 updated = _set_pending_notification_events(updated, [])
                 store.update(updated)
             continue
