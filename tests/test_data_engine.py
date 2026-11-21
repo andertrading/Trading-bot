@@ -1995,6 +1995,11 @@ class TestAutomatedScanSchedulingHelpers(unittest.TestCase):
         with patch.object(engine, "datetime", FrozenDateTimeDuringSession):
             self.assertTrue(engine.is_intraday_market_open("AAPL"))
 
+
+    def test_intraday_scan_allows_brief_post_close_data_publication_window(self):
+        now = datetime(2026, 11, 19, 21, 3, tzinfo=timezone.utc)
+        self.assertTrue(engine.is_intraday_market_open("AAPL", now=now))
+
     def test_intraday_scan_skips_after_us_close(self):
         with patch.object(engine, "datetime", FrozenDateTimeAfterClose):
             self.assertFalse(engine.is_intraday_market_open("AAPL"))
