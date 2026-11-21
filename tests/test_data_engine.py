@@ -1053,6 +1053,81 @@ class TestIntradayGaps(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------
+# HUECOS EN HISTÓRICOS DIARIOS
+# ---------------------------------------------------------------------
+
+class TestDailyGaps(unittest.TestCase):
+
+    def make_daily(self, dates):
+        return make_ohlcv(
+            pd.to_datetime([f"{day}T00:00:00Z" for day in dates])
+        )
+
+    def test_accepts_consecutive_crypto_daily_candles(self):
+        df = self.make_daily([
+            "2026-11-16",
+            "2026-11-17",
+            "2026-11-18",
+        ])
+        self.assertFalse(engine._has_daily_gaps(df, "BTC"))
+
+    def test_rejects_missing_crypto_daily_candle(self):
+        df = self.make_daily([
+            "2026-11-16",
+            "2026-11-18",
+        ])
+        self.assertTrue(engine._has_daily_gaps(df, "BTC"))
+
+    def test_accepts_us_weekend_gap(self):
+        df = self.make_daily([
+            "2026-11-20",
+            "2026-11-23",
+        ])
+        self.assertFalse(engine._has_daily_gaps(df, "TSLA"))
+
+    def test_rejects_missing_us_trading_session(self):
+        df = self.make_daily([
+            "2026-11-18",
+            "2026-11-20",
+        ])
+        self.assertTrue(engine._has_daily_gaps(df, "TSLA"))
+
+    def test_accepts_london_weekend_gap(self):
+        df = self.make_daily([
+            "2026-11-20",
+            "2026-11-23",
+        ])
+        self.assertFalse(engine._has_daily_gaps(df, "CSPX"))
+
+    def test_rejects_missing_london_trading_session(self):
+        df = self.make_daily([
+            "2026-11-18",
+            "2026-11-20",
+        ])
+        self.assertTrue(engine._has_daily_gaps(df, "CSPX"))
+
+    def test_accepts_uk_christmas_substitute_holidays(self):
+        df = self.make_daily([
+            "2026-12-24",
+            "2026-12-29",
+        ])
+        self.assertFalse(engine._has_daily_gaps(df, "CNDX"))
+
+    def test_rejects_duplicate_daily_timestamps(self):
+        df = self.make_daily([
+            "2026-11-18",
+            "2026-11-19",
+        ])
+        df = pd.concat([df, df.iloc[[-1]]])
+        self.assertTrue(engine._has_daily_gaps(df, "CSPX"))
+
+    def test_rejects_empty_daily_history(self):
+        self.assertTrue(
+            engine._has_daily_gaps(pd.DataFrame(), "CSPX")
+        )
+
+
+# ---------------------------------------------------------------------
 # CALENDARIOS DE MERCADO
 # ---------------------------------------------------------------------
 
