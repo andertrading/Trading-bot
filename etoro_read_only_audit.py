@@ -15,7 +15,7 @@ from config import ACCOUNT_CURRENCY, ASSETS
 from etoro_read_only import (
     EtoroConfigurationError,
     EtoroReadOnlyClient,
-    resolve_unique_instrument,
+    resolve_unique_instrument_by_symbol,
 )
 from etoro_position_risk import calculate_account_stop_risk_from_client
 
