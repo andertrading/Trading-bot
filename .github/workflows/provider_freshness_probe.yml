@@ -1,0 +1,139 @@
+name: Provider Freshness Probe
+
+on:
+  push:
+    branches:
+      - research/history-calendar-audit-20261121
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      TWELVE_DATA_API_KEY: ${{ secrets.TWELVE_DATA_API_KEY }}
+    steps:
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Probe live provider timestamps without exposing credentials
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import time
+          from datetime import datetime, timezone
+          from urllib.parse import urlencode
+          from urllib.request import Request, urlopen
+
+          key = os.environ.get("TWELVE_DATA_API_KEY")
+          if not key:
+              raise SystemExit("TWELVE_DATA_API_KEY secret is missing")
+
+          now = datetime.now(timezone.utc)
+          results = []
+
+          def parse_stamp(value):
+              stamp = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+              if stamp.tzinfo is None:
+                  stamp = stamp.replace(tzinfo=timezone.utc)
+              return stamp.astimezone(timezone.utc)
+
+          def request_json(url, params=None):
+              if params:
+                  url += "?" + urlencode(params)
+              req = Request(url, headers={"User-Agent": "TradingBot-Research-Freshness/1.0"})
+              with urlopen(req, timeout=30) as response:
+                  return json.loads(response.read().decode("utf-8"))
+
+          def check(label, provider, latest, threshold_hours):
+              age_hours = (now - latest).total_seconds() / 3600
+              ok = age_hours <= threshold_hours
+              results.append({
+                  "series": label,
+                  "provider": provider,
+                  "latest_timestamp_utc": latest.isoformat(),
+                  "age_hours": round(age_hours, 2),
+                  "threshold_hours": threshold_hours,
+                  "fresh": ok,
+              })
+              print(
+                  f"{label}: latest={latest.isoformat()} "
+                  f"age_hours={age_hours:.2f} threshold={threshold_hours} "
+                  f"status={'FRESH' if ok else 'STALE'}"
+              )
+
+          twelve = [
+              ("AAPL 15m", "AAPL", "15min", 72),
+              ("AAPL 1d", "AAPL", "1day", 96),
+              ("BTC 15m", "BTC/USD", "15min", 0.75),
+              ("BTC 1d", "BTC/USD", "1day", 48),
+          ]
+          for index, (label, symbol, interval, threshold) in enumerate(twelve):
+              payload = request_json(
+                  "https://api.twelvedata.com/time_series",
+                  {
+                      "symbol": symbol,
+                      "interval": interval,
+                      "outputsize": 2,
+                      "timezone": "UTC",
+                      "apikey": key,
+                  },
+              )
+              values = payload.get("values") or []
+              if not values or not values[0].get("datetime"):
+                  raise SystemExit(
+                      f"{label}: provider returned no timestamp "
+                      f"(code={payload.get('code')}, message={payload.get('message')})"
+                  )
+              check(label, "Twelve Data", parse_stamp(values[0]["datetime"]), threshold)
+              if index < len(twelve) - 1:
+                  time.sleep(9)
+
+          yahoo = [
+              ("CSPX 15m", "CSPX.L", "15m", 72, 60),
+              ("CSPX 1d", "CSPX.L", "1d", 96, 400),
+          ]
+          for label, symbol, interval, threshold, days in yahoo:
+              params = {
+                  "period1": int((now.timestamp()) - days * 86400),
+                  "period2": int(now.timestamp()),
+                  "interval": interval,
+                  "events": "history",
+                  "includeAdjustedClose": "true",
+              }
+              payload = request_json(
+                  f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}",
+                  params,
+              )
+              chart = payload.get("chart") or {}
+              if chart.get("error"):
+                  raise SystemExit(f"{label}: Yahoo error: {chart['error']}")
+              series = chart.get("result") or []
+              timestamps = series[0].get("timestamp") if series else None
+              if not timestamps:
+                  raise SystemExit(f"{label}: Yahoo returned no timestamps")
+              check(label, "Yahoo Finance", datetime.fromtimestamp(timestamps[-1], timezone.utc), threshold)
+
+          report = {
+              "generated_at_utc": now.isoformat(),
+              "status": "FRESH" if all(item["fresh"] for item in results) else "STALE",
+              "results": results,
+          }
+          with open("provider_freshness.json", "w", encoding="utf-8") as output:
+              json.dump(report, output, indent=2)
+          if report["status"] != "FRESH":
+              raise SystemExit("One or more live provider series are stale")
+          print("All representative provider series are fresh.")
+          PY
+      - name: Upload freshness report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: provider-freshness-probe
+          retention-days: 14
+          if-no-files-found: warn
+          path: provider_freshness.json
