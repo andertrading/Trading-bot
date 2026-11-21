@@ -637,6 +637,99 @@ def _last_completed_daily_session_date(asset, now_utc):
     )
 
 
+def is_intraday_market_open(asset, now=None):
+    """Return whether an asset has completed intraday bars available to scan."""
+    if _asset_config(asset) is None:
+        return False
+    if asset in CRYPTO_ASSETS:
+        return True
+
+    if now is None:
+        now_utc = datetime.now(timezone.utc)
+    elif isinstance(now, str):
+        now_utc = datetime.fromisoformat(now.replace("Z", "+00:00"))
+    else:
+        now_utc = now
+
+    if now_utc.tzinfo is None:
+        raise ValueError("now must include a timezone")
+    now_utc = now_utc.astimezone(timezone.utc)
+
+    market_tz, opening, _ = _session_for_asset(asset)
+    now_local = now_utc.astimezone(market_tz)
+    session_date = now_local.date()
+
+    if not _is_trading_day(session_date, asset):
+        return False
+
+    closing = _market_close_time(asset, session_date)
+    first_completed_bar = datetime.combine(
+        session_date, opening, tzinfo=market_tz
+    ) + timedelta(minutes=15)
+
+    close_dt = datetime.combine(
+        session_date, closing, tzinfo=market_tz
+    )
+    return first_completed_bar <= now_local < close_dt
+
+
+def signal_expiry_at(
+    asset,
+    interval,
+    generated_at=None,
+    data_timestamp=None,
+    validity_bars=2,
+):
+    """Compute expiry after a fixed number of *completed* bars.
+
+    Daily equity/ETF expiry uses the existing US/London holiday and early-close
+    calendars. Crypto daily bars use UTC day boundaries.
+    """
+    if isinstance(validity_bars, bool) or not isinstance(validity_bars, int):
+        raise ValueError("validity_bars must be a positive integer")
+    if validity_bars <= 0:
+        raise ValueError("validity_bars must be a positive integer")
+    if _asset_config(asset) is None:
+        raise ValueError("unknown or disabled asset")
+
+    def to_utc(value):
+        if value is None:
+            return datetime.now(timezone.utc)
+        if isinstance(value, str):
+            value = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+        if not isinstance(value, datetime):
+            value = pd.Timestamp(value).to_pydatetime()
+        if value.tzinfo is None:
+            raise ValueError("timestamps must include a timezone")
+        return value.astimezone(timezone.utc)
+
+    generated = to_utc(generated_at)
+
+    if interval == "15m":
+        candle_start = to_utc(data_timestamp) if data_timestamp is not None else generated
+        return candle_start + timedelta(minutes=15 * (validity_bars + 1))
+
+    if interval != "1d":
+        raise ValueError("unsupported signal timeframe")
+
+    if asset in CRYPTO_ASSETS:
+        last_completed = _last_completed_daily_session_date(asset, generated)
+        expiry_date = last_completed + timedelta(days=validity_bars + 1)
+        return datetime.combine(expiry_date, datetime_time.min, tzinfo=timezone.utc)
+
+    last_completed = _last_completed_daily_session_date(asset, generated)
+    next_session = last_completed
+    for _ in range(validity_bars):
+        next_session += timedelta(days=1)
+        while not _is_trading_day(next_session, asset):
+            next_session += timedelta(days=1)
+
+    market_tz, _, _ = _session_for_asset(asset)
+    closing = _market_close_time(asset, next_session)
+    expiry = datetime.combine(next_session, closing, tzinfo=market_tz)
+    return (expiry + timedelta(minutes=30)).astimezone(timezone.utc)
+
+
 def _remove_incomplete_candle(df, interval, asset=None):
     if df is None or df.empty:
         return df
