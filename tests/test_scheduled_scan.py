@@ -182,6 +182,17 @@ class ScheduledScanTests(unittest.TestCase):
         self.assertTrue(next(iter(store.state["signals"].values()))["alert_sent"])
         send_message.assert_called_once()
 
+
+    def test_lifecycle_notifications_include_the_same_signal_id(self):
+        signal = {
+            "signal_id": "abcdef1234567890",
+            "asset": "BTC",
+            "timeframe": "15m",
+            "expires_at": "2026-11-21T12:30:00+00:00",
+        }
+        message = scheduled_scan._lifecycle_message(signal, "SIGNAL_EXPIRED")
+        self.assertIn("ID: <code>abcdef123456</code>", message)
+
     def test_invalid_timeframe_is_rejected_before_network_access(self):
         with self.assertRaises(ValueError):
             scheduled_scan.run_scheduled_scan("5m")
