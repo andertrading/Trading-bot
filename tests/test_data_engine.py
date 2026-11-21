@@ -1460,6 +1460,51 @@ class TestEarlyMarketClose(unittest.TestCase):
         frame = make_ohlcv(index)
         self.assertFalse(engine._has_intraday_gaps(frame, "TSLA"))
 
+    def test_out_of_session_bars_are_removed_on_early_close(self):
+        regular = pd.date_range(
+            "2024-12-24T14:30:00Z",
+            periods=14,
+            freq="15min",
+        )
+        provider_extras = pd.DatetimeIndex([
+            "2024-12-24T18:00:00Z",
+            "2024-12-24T20:45:00Z",
+        ])
+        frame = make_ohlcv(regular.append(provider_extras).sort_values())
+
+        filtered = engine._filter_out_of_session_intraday(frame, "TSLA")
+
+        self.assertEqual(len(filtered), 14)
+        self.assertEqual(
+            filtered.index[-1].tz_convert("America/New_York").time(),
+            engine.datetime_time(12, 45),
+        )
+        self.assertFalse(engine._has_intraday_gaps(filtered, "TSLA"))
+
+    def test_genuine_gap_inside_session_is_not_hidden_by_filter(self):
+        regular = pd.date_range(
+            "2024-12-24T14:30:00Z",
+            periods=14,
+            freq="15min",
+        ).delete(5)
+        provider_extras = pd.DatetimeIndex([
+            "2024-12-24T18:00:00Z",
+        ])
+        frame = make_ohlcv(regular.append(provider_extras).sort_values())
+
+        filtered = engine._filter_out_of_session_intraday(frame, "TSLA")
+
+        self.assertEqual(len(filtered), 13)
+        self.assertTrue(engine._has_intraday_gaps(filtered, "TSLA"))
+
+    def test_bars_on_market_holidays_are_not_silently_removed(self):
+        frame = make_ohlcv(pd.DatetimeIndex(["2024-12-25T14:30:00Z"]))
+
+        filtered = engine._filter_out_of_session_intraday(frame, "TSLA")
+
+        self.assertEqual(len(filtered), 1)
+        self.assertEqual(filtered.index[0].date(), date(2024, 12, 25))
+
     def test_friday_after_thanksgiving_has_early_close(self):
         with patch.object(
             engine,
