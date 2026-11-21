@@ -1693,22 +1693,25 @@ def _download_coinbase_crypto_history(
         twelvedata_repair_used = False
 
         if len(missing) and os.getenv("TWELVE_DATA_API_KEY"):
-            # Coinbase omits buckets with no published candle. Request only
-            # those exact missing intervals from Twelve Data in USD, retaining
-            # the original Coinbase bars everywhere else.
-            missing_groups = []
+            # Coinbase omits buckets with no published candle. Retry only
+            # 25-day windows containing missing timestamps, then copy only
+            # those exact USD candles into the Coinbase primary history.
+            repair_windows = {}
+            window_duration = pd.Timedelta(days=25)
             for stamp in missing:
-                if (
-                    not missing_groups
-                    or stamp != missing_groups[-1][-1] + pd.Timedelta(minutes=15)
-                ):
-                    missing_groups.append([stamp])
-                else:
-                    missing_groups[-1].append(stamp)
+                offset_seconds = (stamp - start_utc).total_seconds()
+                window_number = int(
+                    offset_seconds // window_duration.total_seconds()
+                )
+                window_start = start_utc + window_duration * window_number
+                window_end = min(window_start + window_duration, end_utc)
+                repair_windows.setdefault(
+                    (window_start, window_end), []
+                ).append(stamp)
 
-            for group in missing_groups:
-                repair_start = group[0] - pd.Timedelta(minutes=15)
-                repair_end = group[-1] + pd.Timedelta(minutes=15)
+            for (repair_start, repair_end), missing_group in sorted(
+                repair_windows.items()
+            ):
                 repair = _download_twelvedata(
                     asset,
                     ASSETS[asset],
@@ -1719,7 +1722,7 @@ def _download_coinbase_crypto_history(
                 )
                 if repair is None or repair.empty:
                     continue
-                repair = repair.loc[repair.index.isin(group)]
+                repair = repair.loc[repair.index.isin(missing_group)]
                 if not repair.empty:
                     combined = pd.concat([combined, repair]).sort_index()
                     combined = combined.loc[
