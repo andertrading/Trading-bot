@@ -202,7 +202,7 @@ class ReadOnlyAuditTests(unittest.TestCase):
             def search_instrument_by_symbol(self, symbol, page_size=100):
                 self.search_calls.append(symbol)
                 if symbol == "CSPX":
-                    return EtoroResponse({}, 404, {})
+                    raise EtoroAPIError("eToro devolvió HTTP 404")
                 if symbol == "CSPX.L":
                     return EtoroResponse({
                         "results": [{
