@@ -147,11 +147,9 @@ DISABLED_ASSETS = {
     "OIL": "CL=F",
 }
 
-# IMPORTANTE:
-# Las comisiones de entrada configuradas en ASSETS son estimaciones
-# provisionales. No deben considerarse verificadas con eToro.
-# También están pendientes de confirmar las comisiones de cierre,
-# spreads y conversiones de divisa.
+# El modelo de costes eToro está centralizado en transaction_costs.py.
+# Las tarifas públicas son estimaciones base; no equivalen al ticket
+# personalizado de la cuenta ni confirman el tipo REAL/CFD.
 
 # Costes pendientes de confirmar.
 CLOSE_FEES_CONFIRMED = False
