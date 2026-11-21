@@ -1687,36 +1687,17 @@ def _download_yahoo_alternate_daily(
             )
             return None
 
-        timestamps = result.get("timestamp") or []
-        quotes = result.get("indicators", {}).get("quote") or []
-        if not timestamps or not quotes:
-            logger.error("Cotización alternativa vacía para %s", asset)
-            return None
-        quote = quotes[0]
-        index = pd.to_datetime(timestamps, unit="s", utc=True, errors="coerce")
-        if index.isna().any():
-            logger.error("Fechas alternativas inválidas para %s", asset)
-            return None
-
-        local_index = pd.DatetimeIndex(index).tz_convert(ZoneInfo(timezone_name))
-        session_dates = [value.date().isoformat() for value in local_index]
-        normalized_index = pd.DatetimeIndex(
-            pd.to_datetime(session_dates, utc=True)
+        dataframe = _download_yahoo_daily_history(
+            ticker,
+            start,
+            end,
         )
-        dataframe = pd.DataFrame(
-            {
-                "Open": quote.get("open", []),
-                "High": quote.get("high", []),
-                "Low": quote.get("low", []),
-                "Close": quote.get("close", []),
-                "Volume": quote.get("volume", []),
-            },
-            index=normalized_index,
-        )
-        dataframe = dataframe[~dataframe.index.duplicated(keep="last")].sort_index()
-        if dataframe.empty:
+        if dataframe is None or dataframe.empty:
             logger.error("Histórico alternativo vacío para %s", asset)
             return None
+        dataframe = dataframe[
+            ~dataframe.index.duplicated(keep="last")
+        ].sort_index()
         logger.info(
             "YAHOO ALTERNATE OK | %s | %s | %s velas | currency=%s",
             asset,
@@ -1845,8 +1826,8 @@ def _patch_incoherent_daily_ohlc_from_alternate(
     return patched, metadata
 
 
-def _download_yahoo_repaired_daily(ticker, start, end):
-    """Download split-adjusted daily OHLC with yfinance's repair pass."""
+def _download_yahoo_daily_history(ticker, start, end):
+    """Download split-adjusted daily OHLC without yfinance's repair heuristics."""
     try:
         dataframe = yf.Ticker(ticker).history(
             start=start,
@@ -1854,7 +1835,7 @@ def _download_yahoo_repaired_daily(ticker, start, end):
             interval="1d",
             auto_adjust=False,
             actions=True,
-            repair=True,
+            repair=False,
             timeout=25,
         )
     except Exception:
@@ -2066,30 +2047,15 @@ def _download_yahoo(asset, config, interval):
             )
             return None
 
-        df = pd.DataFrame(
-            {
-                "Open": quote.get("open", []),
-                "High": quote.get("high", []),
-                "Low": quote.get("low", []),
-                "Close": quote.get("close", []),
-                "Volume": quote.get("volume", []),
-            },
-            index=index,
-        )
         repair_metadata = None
         if _yahoo_repair_enabled(interval):
-            primary_timezone = meta.get("exchangeTimezoneName")
-            if not primary_timezone:
-                logger.error("Zona horaria de Yahoo no verificable para %s", asset)
-                return None
-            primary_local_index = pd.DatetimeIndex(df.index).tz_convert(
-                ZoneInfo(primary_timezone)
+            df = _download_yahoo_daily_history(
+                ticker,
+                start,
+                now,
             )
-            primary_dates = [
-                value.date().isoformat() for value in primary_local_index
-            ]
-            df.index = pd.DatetimeIndex(pd.to_datetime(primary_dates, utc=True))
-
+            if df is None:
+                return None
             if _invalid_ohlc_mask(df).any():
                 alternate = _download_yahoo_alternate_daily(
                     asset,
@@ -2114,6 +2080,17 @@ def _download_yahoo(asset, config, interval):
                 )
                 if repair_metadata is None:
                     return None
+        else:
+            df = pd.DataFrame(
+                {
+                    "Open": quote.get("open", []),
+                    "High": quote.get("high", []),
+                    "Low": quote.get("low", []),
+                    "Close": quote.get("close", []),
+                    "Volume": quote.get("volume", []),
+                },
+                index=index,
+            )
 
         # Yahoo puede incluir una vela todavía abierta con OHLC nulo.
         # Se excluye por timestamp ANTES de validar precios; las velas

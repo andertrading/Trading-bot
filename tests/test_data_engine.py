@@ -2125,9 +2125,9 @@ class TestAutomatedScanSchedulingHelpers(unittest.TestCase):
 
 
 
-class TestYahooRepairDownload(unittest.TestCase):
+class TestYahooDailyHistoryDownload(unittest.TestCase):
     @patch.object(engine.yf, "Ticker")
-    def test_repaired_daily_download_uses_yfinance_repair_and_utc_dates(self, ticker):
+    def test_daily_history_disables_yfinance_repair_heuristics_and_normalizes_dates(self, ticker):
         index = pd.DatetimeIndex(
             ["2025-01-02 00:00:00", "2025-01-03 00:00:00"],
             tz="Europe/London",
@@ -2135,14 +2135,14 @@ class TestYahooRepairDownload(unittest.TestCase):
         frame = make_ohlcv(index)
         ticker.return_value.history.return_value = frame
 
-        result = engine._download_yahoo_repaired_daily(
+        result = engine._download_yahoo_daily_history(
             "CSPX.L",
             datetime(2025, 1, 1, tzinfo=timezone.utc),
             datetime(2025, 1, 5, tzinfo=timezone.utc),
         )
 
         ticker.return_value.history.assert_called_once()
-        self.assertTrue(
+        self.assertFalse(
             ticker.return_value.history.call_args.kwargs["repair"]
         )
         self.assertEqual(str(result.index.tz), "UTC")
@@ -2150,99 +2150,10 @@ class TestYahooRepairDownload(unittest.TestCase):
             result.index[0],
             pd.Timestamp("2025-01-02 00:00:00", tz="UTC"),
         )
-        self.assertEqual(list(result.columns), ["Open", "High", "Low", "Close", "Volume"])
-
-class TestAlternateDailyOHLCRepair(unittest.TestCase):
-    def setUp(self):
-        self.index = pd.date_range(
-            "2025-01-02",
-            periods=3,
-            freq="B",
-            tz="UTC",
+        self.assertEqual(
+            list(result.columns),
+            ["Open", "High", "Low", "Close", "Volume"],
         )
-        self.primary = make_ohlcv(self.index)
-        self.alternate = make_ohlcv(self.index)
-
-    def test_repairs_only_incoherent_bar_from_same_date_alternate(self):
-        primary = self.primary.copy()
-        primary.loc[self.index[1], "High"] = 100.0
-        alternate = self.alternate.copy()
-        alternate.loc[self.index[1], "Open"] = 100.2
-        alternate.loc[self.index[1], "High"] = 103.0
-        alternate.loc[self.index[1], "Low"] = 99.0
-        alternate.loc[self.index[1], "Close"] = 101.2
-
-        repaired, metadata = engine._patch_incoherent_daily_ohlc_from_alternate(
-            primary, alternate, "CSPX", "CSSPX.SW"
-        )
-
-        self.assertIsNotNone(repaired)
-        self.assertEqual(metadata["ohlc_repair_count"], 1)
-        self.assertEqual(metadata["ohlc_repair_source_ticker"], "CSSPX.SW")
-        self.assertAlmostEqual(
-            repaired.loc[self.index[1], "Close"], 101.2
-        )
-        self.assertFalse(engine._invalid_ohlc_mask(repaired).any())
-        self.assertEqual(repaired.loc[self.index[0], "Close"], 101.0)
-
-    def test_rejects_repair_when_alternate_date_is_missing(self):
-        primary = self.primary.copy()
-        primary.loc[self.index[1], "High"] = 100.0
-        alternate = self.alternate.drop(index=self.index[1])
-
-        repaired, metadata = engine._patch_incoherent_daily_ohlc_from_alternate(
-            primary, alternate, "CSPX", "CSSPX.SW"
-        )
-
-        self.assertIsNone(repaired)
-        self.assertIsNone(metadata)
-
-    def test_rejects_repair_when_cross_listing_close_deviation_is_too_large(self):
-        primary = self.primary.copy()
-        primary.loc[self.index[1], "High"] = 100.0
-        alternate = self.alternate.copy()
-        alternate.loc[self.index[1], "Close"] = 103.0
-        alternate.loc[self.index[1], "High"] = 104.0
-
-        repaired, metadata = engine._patch_incoherent_daily_ohlc_from_alternate(
-            primary, alternate, "CSPX", "CSSPX.SW"
-        )
-
-        self.assertIsNone(repaired)
-        self.assertIsNone(metadata)
-
-    def test_no_repair_is_needed_for_coherent_primary_history(self):
-        repaired, metadata = engine._patch_incoherent_daily_ohlc_from_alternate(
-            self.primary, None, "CSPX", None
-        )
-
-        self.assertIsNotNone(repaired)
-        self.assertEqual(metadata["ohlc_repair_count"], 0)
-        self.assertIsNone(metadata["ohlc_repair_source_ticker"])
-
-
-class TestExtendedDailyFullHistoryGapValidation(unittest.TestCase):
-    def test_extended_daily_mode_checks_gaps_across_entire_history(self):
-        index = pd.bdate_range(
-            "2022-01-03",
-            "2026-11-20",
-            tz="UTC",
-        )
-        missing_date = pd.Timestamp("2022-03-01", tz="UTC")
-        index = index.delete(index.get_loc(missing_date))
-        frame = make_ohlcv(index)
-
-        with patch.dict(
-            os.environ,
-            {"BACKTEST_EXTENDED_DAILY_HISTORY": "true"},
-        ):
-            self.assertTrue(engine._has_daily_gaps(frame, "CSPX"))
-
-        with patch.dict(
-            os.environ,
-            {"BACKTEST_EXTENDED_DAILY_HISTORY": "false"},
-        ):
-            self.assertFalse(engine._has_daily_gaps(frame, "CSPX"))
 
 
 class TestExtendedDailyYahooCleaning(unittest.TestCase):
