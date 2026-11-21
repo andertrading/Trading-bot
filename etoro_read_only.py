@@ -458,7 +458,8 @@ def validate_what_if_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
         raise ValueError(f"Campos no permitidos en costes hipotéticos: {sorted(unknown)}")
     if payload.get("action") != "open":
         raise ValueError("Solo se permite action='open'")
-    if payload.get("transaction") not in {"buy", "sellShort"}:
+    transaction = payload.get("transaction")
+    if not isinstance(transaction, str) or transaction not in {"buy", "sellShort"}:
         raise ValueError("transaction debe ser buy o sellShort")
 
     has_id = "instrumentId" in payload and payload["instrumentId"] is not None
@@ -473,10 +474,10 @@ def validate_what_if_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
         raise ValueError("symbol debe ser un texto no vacío")
 
     settlement = payload.get("settlementType")
-    if settlement not in WHAT_IF_SETTLEMENT_TYPES:
+    if not isinstance(settlement, str) or settlement not in WHAT_IF_SETTLEMENT_TYPES:
         raise ValueError("settlementType no está confirmado o no está permitido")
     order_type = payload.get("orderType")
-    if order_type not in WHAT_IF_ORDER_TYPES:
+    if not isinstance(order_type, str) or order_type not in WHAT_IF_ORDER_TYPES:
         raise ValueError("orderType no está confirmado o no está permitido")
 
     leverage = payload.get("leverage")
@@ -492,6 +493,8 @@ def validate_what_if_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
     size = _decimal(payload[size_field], size_field)
     if size <= 0:
         raise ValueError(f"{size_field} debe ser positivo")
+    if settlement == "realFutures" and size_field != "contracts":
+        raise ValueError("realFutures requiere contracts")
     if size_field == "contracts":
         if settlement != "realFutures" or size != size.to_integral_value():
             raise ValueError("contracts solo admite enteros para realFutures")
@@ -509,9 +512,12 @@ def validate_what_if_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
 
     if "takeProfitRate" in payload and _decimal(payload["takeProfitRate"], "takeProfitRate") <= 0:
         raise ValueError("takeProfitRate debe ser positivo")
-    if payload.get("stopLossType") not in {None, "fixed", "trailing"}:
+    stop_loss_type = payload.get("stopLossType")
+    if stop_loss_type is not None and (
+        not isinstance(stop_loss_type, str) or stop_loss_type not in {"fixed", "trailing"}
+    ):
         raise ValueError("stopLossType no permitido")
-    if payload.get("stopLossType") == "trailing" and "stopLossRate" not in payload:
+    if stop_loss_type == "trailing" and "stopLossRate" not in payload:
         raise ValueError("El stop trailing requiere stopLossRate")
 
     if order_type == "mit":
@@ -561,7 +567,9 @@ def normalize_cost_estimate(
     if symbol is not None and not isinstance(symbol, str):
         raise EtoroAPIError("symbol inválido en respuesta de costes")
     if expected_symbol is not None and (
-        not isinstance(symbol, str) or symbol.casefold() != expected_symbol.casefold()
+        not isinstance(expected_symbol, str)
+        or not isinstance(symbol, str)
+        or symbol.casefold() != expected_symbol.casefold()
     ):
         raise EtoroAPIError("La respuesta de costes corresponde a otro símbolo")
 
@@ -573,7 +581,7 @@ def normalize_cost_estimate(
         if not isinstance(item, Mapping):
             raise EtoroAPIError(f"Componente de coste inválido: {index}")
         cost_type = item.get("costType")
-        if cost_type not in WHAT_IF_COST_TYPES or cost_type in costs:
+        if not isinstance(cost_type, str) or cost_type not in WHAT_IF_COST_TYPES or cost_type in costs:
             raise EtoroAPIError(f"Tipo de coste desconocido o duplicado: {cost_type}")
         if item.get("currency") != "USD":
             raise EtoroAPIError(f"Divisa de coste no confirmada para {cost_type}")
