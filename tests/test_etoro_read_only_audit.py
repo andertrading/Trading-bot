@@ -48,7 +48,7 @@ class FakeAuditClient:
             }]
         else:
             items = []
-        return EtoroResponse({"items": items}, 200, {})
+        return EtoroResponse({"items": items, "totalItems": len(items)}, 200, {})
 
     def get_realtime_quotes(self, instrument_ids, now_utc, max_age_seconds):
         self.quote_calls.append((list(instrument_ids), now_utc, max_age_seconds))
