@@ -36,7 +36,10 @@ jobs:
           import pandas as pd
           import requests
 
-          from data_engine import is_data_fresh
+          from data_engine import (
+              _last_completed_daily_session_date,
+              is_data_fresh,
+          )
 
           API_KEY = os.environ.get("EODHD_API_KEY", "").strip()
           BASE = "https://eodhd.com/api"
@@ -171,6 +174,17 @@ jobs:
                   df = df.set_index("date").sort_index()
                   if df.index.has_duplicates:
                       raise RuntimeError("fechas diarias duplicadas")
+
+                  # No evaluar la vela de hoy si la sesión aún no ha terminado.
+                  last_completed_date = _last_completed_daily_session_date(
+                      asset,
+                      datetime.now(timezone.utc),
+                  )
+                  df = df[df.index.date <= last_completed_date]
+                  if df.empty:
+                      raise RuntimeError(
+                          "sin velas diarias cerradas después de excluir la sesión actual"
+                      )
 
                   for column in ("open", "high", "low", "close"):
                       df[column] = pd.to_numeric(
