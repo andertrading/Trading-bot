@@ -228,9 +228,22 @@ def calculate_account_gross_stop_risk_usd(
     """Aggregate gross stop risk only when every position has a valid quote."""
     if not isinstance(positions, Mapping) or not isinstance(quotes, Mapping):
         raise EtoroAPIError("Posiciones y cotizaciones deben ser mapas")
+    if not positions:
+        return {
+            "positions": [],
+            "gross_stop_risk_usd": Decimal("0"),
+            "risk_usd": Decimal("0"),
+            "status": "COMPLETE_NO_OPEN_POSITIONS",
+            "complete": True,
+            "reason": "No hay posiciones abiertas que valorar.",
+            "currency": "USD",
+        }
+
     results = []
     for position_id, position in positions.items():
-        instrument_id = position.get("instrumentId") if isinstance(position, Mapping) else None
+        if not isinstance(position, Mapping) or position.get("positionId") != position_id:
+            raise EtoroAPIError(f"El identificador de posición no coincide: {position_id}")
+        instrument_id = position.get("instrumentId")
         quote = quotes.get(instrument_id)
         if quote is None:
             raise EtoroAPIError(f"Falta cotización para la posición {position_id}")
