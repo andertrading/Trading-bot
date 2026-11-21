@@ -252,16 +252,21 @@ def _previous_weekday(day):
 
 def _us_early_close_dates(year):
     """
-    Devuelve las fechas estadounidenses con cierre anticipado
-    que se contemplan expresamente en este calendario.
+    Fechas habituales de cierre anticipado de los mercados estadounidenses.
 
-    Incluye el viernes posterior a Thanksgiving.
+    Incluye el viernes posterior a Thanksgiving, el 3 de julio cuando
+    realmente es sesión bursátil y Nochebuena cuando es sesión bursátil.
+    Los festivos observados siguen excluidos por _is_trading_day().
     """
-
     thanksgiving = _nth_weekday(year, 11, 3, 4)
-
-    return {
+    candidates = {
         thanksgiving + timedelta(days=1),
+        date(year, 7, 3),
+        date(year, 12, 24),
+    }
+    return {
+        day for day in candidates
+        if day.weekday() < 5 and day not in _us_holidays(year)
     }
 
 
@@ -269,8 +274,8 @@ def _market_close_time(asset, session_date):
     """
     Devuelve la hora de cierre aplicable a una sesión concreta.
 
-    Para Estados Unidos contempla el cierre anticipado del viernes
-    posterior a Thanksgiving.
+    Para Estados Unidos contempla cierres anticipados habituales:
+    viernes posterior a Thanksgiving, 3 de julio y Nochebuena.
     """
 
     _, _, regular_close = _session_for_asset(asset)

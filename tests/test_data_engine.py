@@ -1438,6 +1438,28 @@ class TestMarketTimezones(unittest.TestCase):
 
 class TestEarlyMarketClose(unittest.TestCase):
 
+    def test_us_early_close_calendar_includes_christmas_eve_and_july_third(self):
+        self.assertEqual(
+            engine._market_close_time("TSLA", date(2024, 12, 24)),
+            engine.datetime_time(13, 0),
+        )
+        self.assertEqual(
+            engine._market_close_time("TSLA", date(2025, 7, 3)),
+            engine.datetime_time(13, 0),
+        )
+
+    def test_us_early_close_calendar_does_not_mark_observed_holiday_as_session(self):
+        self.assertNotIn(date(2026, 7, 3), engine._us_early_close_dates(2026))
+
+    def test_christmas_eve_short_session_is_not_rejected_as_missing_final_candle(self):
+        index = pd.date_range(
+            "2024-12-24T14:30:00Z",
+            periods=14,
+            freq="15min",
+        )
+        frame = make_ohlcv(index)
+        self.assertFalse(engine._has_intraday_gaps(frame, "TSLA"))
+
     def test_friday_after_thanksgiving_has_early_close(self):
         with patch.object(
             engine,
