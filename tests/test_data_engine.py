@@ -2538,6 +2538,7 @@ class TestCoinbaseExactCryptoGapRepair(unittest.TestCase):
         class Response:
             def __init__(self, payload):
                 self.payload = payload
+                self.status_code = 200
 
             def raise_for_status(self):
                 return None
