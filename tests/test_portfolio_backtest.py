@@ -118,6 +118,24 @@ class TestPortfolioBacktest(unittest.TestCase):
         self.assertAlmostEqual(result["summary"]["ending_equity_usd"], 1010.0)
         self.assertFalse(result["summary"]["costs_included"])
 
+    def test_simultaneous_exits_are_aggregated_for_drawdown(self):
+        winning = self.make_trade(
+            asset="AAPL",
+            result_R=1.0,
+        )
+        losing = self.make_trade(
+            asset="MSFT",
+            result_R=-1.0,
+        )
+        result = simulate_portfolio(
+            [winning, losing],
+            capital_usd=1000.0,
+        )
+
+        self.assertEqual(result["summary"]["trades_accepted"], 2)
+        self.assertAlmostEqual(result["summary"]["ending_equity_usd"], 1000.0)
+        self.assertAlmostEqual(result["summary"]["max_drawdown_usd"], 0.0)
+
     def test_invalid_capital_fails_closed(self):
         with self.assertRaises(ValueError):
             simulate_portfolio([], capital_usd=0)
