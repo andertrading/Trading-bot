@@ -260,6 +260,8 @@ class ScheduledScanTests(unittest.TestCase):
         }
         message = scheduled_scan._lifecycle_message(signal, "SIGNAL_EXPIRED")
         self.assertIn("ID: <code>abcdef123456</code>", message)
+        self.assertIn("No abras una nueva operación", message)
+        self.assertIn("no es una instrucción para cerrar", message)
 
     def test_invalid_timeframe_is_rejected_before_network_access(self):
         with self.assertRaises(ValueError):
