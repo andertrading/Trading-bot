@@ -7,10 +7,45 @@ from strategy_research import (
     _out_of_sample_trades,
     _snapshot_coverage,
     _broker_cost_sensitivity_rows,
+    _history_calendar_coverage,
 )
 
 
 class TestCommonCalendarOutOfSampleSplit(unittest.TestCase):
+
+
+    def test_history_calendar_coverage_detects_non_overlapping_series(self):
+        assets = [("BTC", "BTC"), ("CSPX", "CSPX")]
+        _, summary = _history_calendar_coverage(
+            {
+                ("BTC", "15m"): ("2025-01-01T00:00:00Z", "2025-12-31T00:00:00Z"),
+                ("CSPX", "15m"): ("2026-01-01T00:00:00Z", "2026-10-01T00:00:00Z"),
+                ("BTC", "1d"): ("2025-01-01T00:00:00Z", "2025-12-31T00:00:00Z"),
+                ("CSPX", "1d"): ("2025-01-01T00:00:00Z", "2025-12-31T00:00:00Z"),
+            },
+            assets, ("15m", "1d"),
+        )
+        self.assertFalse(summary["by_timeframe"]["15m"]["common_window_exists"])
+        self.assertTrue(summary["by_timeframe"]["1d"]["common_window_exists"])
+        self.assertEqual(summary["all_timeframes"]["status"], "NO_COMMON_CALENDAR_WINDOW")
+
+    def test_history_calendar_coverage_reports_shared_window_and_missing_pair(self):
+        rows, summary = _history_calendar_coverage(
+            {
+                ("BTC", "15m"): ("2025-01-01T00:00:00Z", "2025-12-31T00:00:00Z"),
+                ("CSPX", "15m"): ("2025-03-01T00:00:00Z", "2025-10-01T00:00:00Z"),
+            },
+            [("BTC", "BTC"), ("CSPX", "CSPX"), ("SOL", "SOL")],
+            ("15m",),
+        )
+        result = summary["all_timeframes"]
+        self.assertEqual(result["status"], "PARTIAL_UNIVERSE")
+        self.assertEqual(result["common_start_utc"], "2025-03-01T00:00:00+00:00")
+        self.assertEqual(result["common_end_utc"], "2025-10-01T00:00:00+00:00")
+        self.assertEqual(result["missing_history_bounds"], [
+            {"asset": "SOL", "timeframe": "15m"}
+        ])
+        self.assertEqual(len(rows), 3)
 
     def test_snapshot_coverage_explicitly_reports_missing_universe_pair(self):
         assets = [(name, name) for name in ("BTC", "SOL")]
