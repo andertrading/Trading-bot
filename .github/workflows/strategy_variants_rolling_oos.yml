@@ -322,4 +322,7 @@ jobs:
             strategy_research_synchronized_broker_cost_scenarios.csv
             strategy_research_net_aware_portfolio.csv
             strategy_research_synchronized_calendar.csv
+            strategy_research_core_history_calendar_coverage.csv
+            strategy_research_core_synchronized_calendar.csv
+            strategy_research_core_net_aware_portfolio.csv
             provider_freshness.json
