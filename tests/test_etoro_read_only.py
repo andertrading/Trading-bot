@@ -1,4 +1,5 @@
 import unittest
+from types import SimpleNamespace
 from decimal import Decimal
 from datetime import datetime, timezone
 from unittest.mock import Mock, patch
@@ -638,6 +639,7 @@ class InstrumentEligibilityTests(unittest.TestCase):
         result = normalize_instrument_eligibility(self.response, [101])
         self.assertIsInstance(result[101], EtoroInstrumentEligibility)
         self.assertTrue(result[101].allow_open_position)
+        self.assertTrue(result[101].supports_long)
         self.assertEqual(result[101].min_position_exposure, Decimal("50"))
         self.assertEqual(result[101].leverage_configs[0]["settlementType"], "CFD")
         self.assertEqual(result[101].leverage_configs[0]["leverageValues"], [1, 2, 5])
@@ -712,6 +714,7 @@ class InstrumentEligibilityTests(unittest.TestCase):
         }, 200, {})
         result = normalize_instrument_eligibility(response, [101])
         self.assertFalse(result[101].allow_open_position)
+        self.assertFalse(result[101].supports_long)
         self.assertEqual(result[101].leverage_configs, ())
 
 
