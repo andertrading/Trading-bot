@@ -9,9 +9,10 @@ from etoro_read_only_audit import run_audit
 
 
 class FakeAuditClient:
-    def __init__(self, *, account_ok=True, missing_symbols=()):
+    def __init__(self, *, account_ok=True, missing_symbols=(), rejected_fields=()):
         self.account_ok = account_ok
         self.missing_symbols = set(missing_symbols)
+        self.rejected_fields = set(rejected_fields)
         self.search_calls = []
         self.quote_calls = []
 
@@ -28,9 +29,11 @@ class FakeAuditClient:
             has_unbounded_stop_risk=False,
         )
 
-    def search_instruments(self, filters):
+    def search_instruments(self, filters, *, page_size=100, page_number=1):
         self.search_calls.append(dict(filters))
         field, value = next(iter(filters.items()))
+        if field in self.rejected_fields:
+            raise RuntimeError("simulated unsupported search filter")
         symbol = value
         if symbol in self.missing_symbols:
             items = []
@@ -105,6 +108,22 @@ class ReadOnlyAuditTests(unittest.TestCase):
         self.assertFalse(report["instrument_resolution"][0]["candidate_found"])
         self.assertIsNone(report["instrument_resolution"][0]["instrument_id"])
         self.assertEqual(client.quote_calls, [])
+
+
+    def test_search_continues_after_first_filter_error(self):
+        client = FakeAuditClient(rejected_fields={"internalSymbolFull"})
+        report = run_audit(client, self.assets, "USD", self.now)
+        self.assertTrue(report["instrument_resolution"][0]["candidate_found"])
+        self.assertEqual(
+            report["instrument_resolution"][0]["resolution_status"], "RESOLVED"
+        )
+        self.assertEqual(
+            client.search_calls,
+            [
+                {"internalSymbolFull": "TSLA"},
+                {"displayname": "Tesla"},
+            ],
+        )
 
     def test_account_snapshot_failure_is_redacted_and_blocks_overall_pass(self):
         client = FakeAuditClient(account_ok=False)
