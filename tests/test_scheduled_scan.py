@@ -284,6 +284,77 @@ class ScheduledScanTests(unittest.TestCase):
             "SIGNAL_EXPIRED",
         )
 
+    @patch.object(scheduled_scan.Bot, "send_telegram_message", side_effect=[False, False, True, True])
+    def test_multiple_failed_lifecycle_events_are_queued_and_retried_in_order(self, send):
+        store = MemoryStore("url", "token")
+        signal = {
+            "signal_id": "queued-events",
+            "asset": "BTC",
+            "timeframe": "15m",
+            "expires_at": "2026-11-21T12:30:00+00:00",
+            "alert_sent": True,
+            "pending_notification_event": None,
+        }
+
+        first = scheduled_scan._notify_lifecycle_event(
+            store, signal, "SIGNAL_INVALIDATED", alerts_enabled=True
+        )
+        second = scheduled_scan._notify_lifecycle_event(
+            store, first, "SIGNAL_INVALIDATED_STOP_LEVEL", alerts_enabled=True
+        )
+
+        self.assertEqual(
+            second["pending_notification_events"],
+            ["SIGNAL_INVALIDATED", "SIGNAL_INVALIDATED_STOP_LEVEL"],
+        )
+        self.assertEqual(
+            second["pending_notification_event"], "SIGNAL_INVALIDATED"
+        )
+
+        state = store.load()
+        refreshed = scheduled_scan._retry_pending_notifications(
+            store, state, "15m", alerts_enabled=True
+        )
+        updated = refreshed["signals"]["queued-events"]
+
+        self.assertEqual(send.call_count, 4)
+        self.assertEqual(updated["pending_notification_events"], [])
+        self.assertIsNone(updated["pending_notification_event"])
+        self.assertEqual(
+            updated["last_notification_event"], "SIGNAL_INVALIDATED_STOP_LEVEL"
+        )
+
+    @patch.object(scheduled_scan.Bot, "send_telegram_message", side_effect=[False, False, False])
+    def test_retry_failure_keeps_entire_notification_queue_in_order(self, send):
+        store = MemoryStore("url", "token")
+        signal = {
+            "signal_id": "queued-failure",
+            "asset": "BTC",
+            "timeframe": "15m",
+            "expires_at": "2026-11-21T12:30:00+00:00",
+            "alert_sent": True,
+            "pending_notification_event": "SIGNAL_INVALIDATED",
+            "pending_notification_events": [
+                "SIGNAL_INVALIDATED",
+                "SIGNAL_INVALIDATED_STOP_LEVEL",
+            ],
+        }
+        store.upsert(signal)
+        refreshed = scheduled_scan._retry_pending_notifications(
+            store, store.load(), "15m", alerts_enabled=True
+        )
+        updated = refreshed["signals"]["queued-failure"]
+
+        self.assertEqual(send.call_count, 1)
+        self.assertEqual(
+            updated["pending_notification_events"],
+            ["SIGNAL_INVALIDATED", "SIGNAL_INVALIDATED_STOP_LEVEL"],
+        )
+        self.assertEqual(
+            store.state["signals"]["queued-failure"]["pending_notification_events"],
+            ["SIGNAL_INVALIDATED", "SIGNAL_INVALIDATED_STOP_LEVEL"],
+        )
+
     @patch.object(scheduled_scan.Bot, "send_telegram_message", return_value=True)
     def test_successful_retry_refreshes_scan_snapshot(self, send):
         store = MemoryStore("url", "token")
