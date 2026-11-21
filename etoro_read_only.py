@@ -145,6 +145,28 @@ def normalize_account_snapshot(
     positions = portfolio.get("positions")
     if not isinstance(positions, list):
         raise EtoroAPIError("Falta la lista explícita de posiciones")
+    mirrors = portfolio.get("mirrors")
+    if not isinstance(mirrors, list):
+        raise EtoroAPIError("Falta la lista explícita de mirrors")
+    if mirrors:
+        raise EtoroAPIError(
+            "La cuenta contiene mirrors/copy trading no soportados; snapshot bloqueado"
+        )
+
+    pending_orders = portfolio.get("ordersForOpen")
+    if not isinstance(pending_orders, list):
+        raise EtoroAPIError("Falta la lista explícita de órdenes pendientes")
+    for index, order in enumerate(pending_orders):
+        if not isinstance(order, Mapping):
+            raise EtoroAPIError(f"Orden pendiente inválida: {index}")
+        mirror_id = _one_key(order, ("mirrorId", "mirrorID"), f"mirrorId[{index}]")
+        try:
+            if int(mirror_id) != 0:
+                raise EtoroAPIError(
+                    "La cuenta contiene órdenes pendientes mirror/copy no soportadas"
+                )
+        except (TypeError, ValueError):
+            raise EtoroAPIError(f"mirrorId inválido en orden {index}") from None
 
     unrealized_pnl = _decimal(portfolio.get("unrealizedPnL"), "clientPortfolio.unrealizedPnL")
     available_cash = calculate_available_cash(portfolio)
