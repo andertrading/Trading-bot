@@ -31,6 +31,7 @@ logging.basicConfig(
 def _send_signal_report(scan_result: dict, candidate: dict, signal: dict) -> bool:
     report_candidate = dict(candidate)
     report_candidate["expires_at"] = signal["expires_at"]
+    report_candidate["strategy_validated"] = STRATEGY_VALIDATED
 
     report_scan = dict(scan_result)
     report_scan.update({
