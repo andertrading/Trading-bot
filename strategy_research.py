@@ -557,6 +557,8 @@ def main():
     ]
     if failed_pairs:
         coverage_summary["status"] = "PARTIAL"
+    for portfolio_row in oos_portfolio_rows:
+        portfolio_row["universe_coverage_status"] = coverage_summary["status"]
     pd.DataFrame(coverage_rows).to_csv(
         "strategy_research_coverage.csv", index=False
     )
