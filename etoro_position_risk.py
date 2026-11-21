@@ -160,6 +160,18 @@ def calculate_position_gross_stop_risk_usd(
     if position.get("stopLossType") != "fixed":
         raise EtoroAPIError("El stop no es fijo; se requiere validar la semántica del trailing stop")
 
+    rate_time = _utc_datetime(position.get("rateTimestamp"), f"position[{position_id}].rateTimestamp")
+    if (
+        not isinstance(quote.timestamp, datetime)
+        or quote.timestamp.tzinfo is None
+        or quote.timestamp.utcoffset() != timedelta(0)
+        or abs((quote.timestamp - rate_time).total_seconds()) > 30
+        or quote.bid <= 0
+        or quote.ask <= 0
+        or quote.ask < quote.bid
+    ):
+        raise EtoroAPIError("La cotización ejecutable no es válida o no está sincronizada con la posición")
+
     direction = position.get("direction")
     if direction not in {"long", "short"}:
         raise EtoroAPIError("Dirección de posición no reconocida")
@@ -216,10 +228,6 @@ def calculate_account_gross_stop_risk_usd(
     """Aggregate gross stop risk only when every position has a valid quote."""
     if not isinstance(positions, Mapping) or not isinstance(quotes, Mapping):
         raise EtoroAPIError("Posiciones y cotizaciones deben ser mapas")
-    if set(positions) != set(quotes_by_position for quotes_by_position in positions):
-        # Quotes are keyed by instrument, so completeness is checked below.
-        pass
-
     results = []
     for position_id, position in positions.items():
         instrument_id = position.get("instrumentId") if isinstance(position, Mapping) else None
