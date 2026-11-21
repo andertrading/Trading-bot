@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch
 
 import Bot
 
@@ -32,7 +33,7 @@ class TestTelegramResearchReport(unittest.TestCase):
             "results": [self.candidate],
         }
 
-    @unittest.mock.patch.object(Bot, "send_telegram_message", side_effect=[True, True])
+    @patch.object(Bot, "send_telegram_message", side_effect=[True, True])
     @unittest.mock.patch.object(Bot, "send_telegram_photo", return_value=True)
     @unittest.mock.patch.object(Bot, "generate_candidate_chart", return_value=b"chart")
     def test_legacy_notification_sends_full_text_before_short_chart_caption(
