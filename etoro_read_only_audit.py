@@ -62,6 +62,25 @@ def _resolve_asset(
     return None, (failure_codes[-1] if failure_codes else "NO_EXACT_CANDIDATE")
 
 
+def _account_snapshot_status(exc: Exception) -> str:
+    """Return a redacted diagnostic code; never expose account/API payloads."""
+    message = str(exc)
+    known_failures = (
+        ("Falta clientPortfolio", "MISSING_CLIENT_PORTFOLIO"),
+        ("Falta la lista explícita de posiciones", "MISSING_POSITIONS"),
+        ("Falta la lista explícita de mirrors", "MISSING_MIRRORS"),
+        ("Falta la lista explícita de órdenes pendientes", "MISSING_PENDING_ORDERS"),
+        ("Falta la lista explícita de órdenes Market-if-touched", "MISSING_MIT_ORDERS"),
+        ("clientPortfolio.unrealizedPnL", "INVALID_UNREALIZED_PNL"),
+        ("Campo numérico inválido", "INVALID_NUMERIC_FIELD"),
+        ("Campo numérico no finito", "NON_FINITE_NUMERIC_FIELD"),
+    )
+    for marker, code in known_failures:
+        if marker in message:
+            return code
+    return type(exc).__name__.upper()
+
+
 def _fee_class(instrument_type: Any) -> str | None:
     if not isinstance(instrument_type, str):
         return None
@@ -83,11 +102,14 @@ def run_audit(
 ) -> dict[str, Any]:
     """Run account schema, exact instrument and realtime quote checks."""
     snapshot = None
+    account_snapshot_status = "NOT_VALIDATED"
     try:
         snapshot = client.get_account_snapshot(account_currency)
         account_valid = True
-    except Exception:
+        account_snapshot_status = "VALIDATED"
+    except Exception as exc:
         account_valid = False
+        account_snapshot_status = _account_snapshot_status(exc)
 
     enabled_assets = {
         symbol: asset
@@ -162,7 +184,7 @@ def run_audit(
     instrument_report = [
         {
             "symbol": symbol,
-            "expected_asset_type": asset.get("type"),
+            "expected_asset_type": enabled_assets[symbol].get("type"),
             "candidate_found": symbol in resolved,
             "resolution_status": resolution_status[symbol],
             "instrument_id": (
@@ -187,6 +209,7 @@ def run_audit(
     return {
         "audit_scope": "read-only diagnostics; not authorization to trade",
         "account_snapshot_schema_valid": account_valid,
+        "account_snapshot_status": account_snapshot_status,
         "instrument_resolution": instrument_report,
         "instrument_eligibility_validated": eligibility_valid,
         "complete_realtime_quotes_validated": quotes_valid,

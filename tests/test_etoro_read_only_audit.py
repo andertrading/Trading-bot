@@ -4,7 +4,8 @@ from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import Mock
 
-from etoro_read_only import EtoroAccountSnapshot, EtoroResponse
+from config import ASSETS
+from etoro_read_only import EtoroAPIError, EtoroAccountSnapshot, EtoroResponse
 from etoro_read_only_audit import run_audit
 
 
@@ -129,9 +130,32 @@ class ReadOnlyAuditTests(unittest.TestCase):
         client = FakeAuditClient(account_ok=False)
         report = run_audit(client, self.assets, "USD", self.now)
         self.assertFalse(report["account_snapshot_schema_valid"])
+        self.assertEqual(report["account_snapshot_status"], "RUNTIMEERROR")
         self.assertFalse(report["gross_position_stop_risk_diagnostic_validated"])
         self.assertFalse(report["overall_pass"])
         self.assertNotIn("private account data", str(report))
+
+    def test_account_schema_failure_exposes_only_a_safe_diagnostic_code(self):
+        class SchemaFailingClient(FakeAuditClient):
+            def get_account_snapshot(self, account_currency):
+                raise EtoroAPIError("Falta clientPortfolio; private payload omitted")
+
+        report = run_audit(SchemaFailingClient(), self.assets, "USD", self.now)
+        self.assertEqual(report["account_snapshot_status"], "MISSING_CLIENT_PORTFOLIO")
+        self.assertNotIn("private payload", str(report))
+
+    def test_expected_asset_types_are_read_from_each_asset_not_last_loop_value(self):
+        client = FakeAuditClient()
+        report = run_audit(client, ASSETS, "USD", self.now)
+        expected = {symbol: asset["type"] for symbol, asset in ASSETS.items() if asset["enabled"]}
+        actual = {
+            item["symbol"]: item["expected_asset_type"]
+            for item in report["instrument_resolution"]
+        }
+        self.assertEqual(actual, expected)
+        self.assertEqual(actual["CSPX"], "ETF")
+        self.assertEqual(actual["TSLA"], "STOCK")
+        self.assertEqual(actual["BTC"], "CRYPTO")
 
     def test_quote_validation_failure_blocks_overall_pass(self):
         client = FakeAuditClient()
