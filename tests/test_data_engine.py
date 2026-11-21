@@ -1985,10 +1985,6 @@ class TestDataTimestamp(unittest.TestCase):
         )
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class TestAutomatedScanSchedulingHelpers(unittest.TestCase):
 
     def test_intraday_scan_skips_before_us_open(self):
@@ -2052,3 +2048,6 @@ class TestAutomatedScanSchedulingHelpers(unittest.TestCase):
         with self.assertRaises(ValueError):
             engine.signal_expiry_at("AAPL", "5m")
 
+
+if __name__ == "__main__":
+    unittest.main()
