@@ -638,7 +638,11 @@ def _last_completed_daily_session_date(asset, now_utc):
 
 
 def is_intraday_market_open(asset, now=None):
-    """Return whether an asset has completed intraday bars available to scan."""
+    """Return whether completed intraday bars are available to scan.
+
+    Includes a five-minute post-close grace period so the final session candle
+    can be fetched after the exchange closes and the provider publishes it.
+    """
     if _asset_config(asset) is None:
         return False
     if asset in CRYPTO_ASSETS:
@@ -670,7 +674,9 @@ def is_intraday_market_open(asset, now=None):
     close_dt = datetime.combine(
         session_date, closing, tzinfo=market_tz
     )
-    return first_completed_bar <= now_local < close_dt
+    return first_completed_bar <= now_local < (
+        close_dt + timedelta(minutes=5)
+    )
 
 
 def signal_expiry_at(
