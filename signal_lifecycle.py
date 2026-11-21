@@ -110,6 +110,18 @@ def build_signal_record(result: dict, generated_at: datetime | str,
     )
     risk_pct = abs(entry - stop) / entry * 100
     reward_pct = abs(target - entry) / entry * 100
+    minimum_rr = float(result.get("minimum_risk_reward", 2.0))
+    minimum_remaining = float(
+        result.get("minimum_remaining_risk_fraction", 0.5)
+    )
+    if not math.isfinite(minimum_rr) or minimum_rr <= 0:
+        raise ValueError("minimum_risk_reward must be positive")
+    if (
+        not math.isfinite(minimum_remaining)
+        or minimum_remaining <= 0
+        or minimum_remaining > 1
+    ):
+        raise ValueError("minimum_remaining_risk_fraction must be in (0, 1]")
 
     record = {
         "schema_version": SCHEMA_VERSION,
@@ -129,10 +141,8 @@ def build_signal_record(result: dict, generated_at: datetime | str,
             )
         ).isoformat(),
         "validity_minutes": effective_validity_minutes,
-        "minimum_risk_reward": float(result.get("minimum_risk_reward", 2.0)),
-        "minimum_remaining_risk_fraction": float(
-            result.get("minimum_remaining_risk_fraction", 0.5)
-        ),
+        "minimum_risk_reward": minimum_rr,
+        "minimum_remaining_risk_fraction": minimum_remaining,
         "data_timestamp": _as_utc(candle_timestamp).isoformat(),
         "entry_reference": entry,
         "stop": stop,
@@ -209,6 +219,7 @@ def advance_signal(
     conditions_valid: bool = True,
     latest_high: float | None = None,
     latest_low: float | None = None,
+    latest_data_timestamp: datetime | str | None = None,
 ) -> tuple[dict, str | None]:
     """
     Advance entry validity and market-level monitoring independently.
@@ -258,11 +269,21 @@ def advance_signal(
     expired_now = entry_status == "PENDING" and current >= expires
     event = None
 
+    # Never evaluate the candle that created the signal: its high/low
+    # happened before the alert could be acted on. Only later completed
+    # candles may advance the signal lifecycle.
+    price_data_is_new = True
+    signal_data_timestamp = updated.get("data_timestamp")
+    if latest_data_timestamp is not None and signal_data_timestamp:
+        price_data_is_new = (
+            _as_utc(latest_data_timestamp) > _as_utc(signal_data_timestamp)
+        )
+
     # Use the completed candle's high/low so intrabar stop/target touches
     # are not missed merely because the candle later closed back inside.
     high = None
     low = None
-    if latest_high is not None or latest_low is not None:
+    if price_data_is_new and (latest_high is not None or latest_low is not None):
         fallback = (
             _positive_number(latest_price, "latest_price")
             if latest_price is not None
@@ -280,7 +301,7 @@ def advance_signal(
         )
         if high is not None and low is not None and high < low:
             raise ValueError("latest_high must be greater than or equal to latest_low")
-    elif latest_price is not None:
+    elif price_data_is_new and latest_price is not None:
         price = _positive_number(latest_price, "latest_price")
         high = price
         low = price
@@ -320,7 +341,7 @@ def advance_signal(
         elif not conditions_valid:
             updated["status"] = "INVALIDATED"
             event = "SIGNAL_INVALIDATED"
-        elif latest_price is not None:
+        elif price_data_is_new and latest_price is not None:
             price = _positive_number(latest_price, "latest_price")
             if not _entry_zone_is_valid(updated, price):
                 updated["status"] = "INVALIDATED"
