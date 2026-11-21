@@ -232,6 +232,29 @@ def normalize_account_snapshot(
     for index, position in enumerate(positions):
         if not isinstance(position, Mapping):
             raise EtoroAPIError(f"Posición inválida: {index}")
+
+        # eToro's published Position schema uses legacy acronym casing
+        # (positionID, instrumentID, CID, mirrorID, settlementTypeID).
+        # Normalize only these documented aliases; reject conflicting duplicates.
+        position = dict(position)
+        field_aliases = {
+            "positionId": ("positionId", "positionID"),
+            "instrumentId": ("instrumentId", "instrumentID"),
+            "cid": ("cid", "CID"),
+            "mirrorId": ("mirrorId", "mirrorID"),
+            "settlementTypeId": ("settlementTypeId", "settlementTypeID"),
+        }
+        for canonical, aliases in field_aliases.items():
+            present = [name for name in aliases if name in position]
+            if len(present) > 1 and any(
+                position[name] != position[present[0]] for name in present[1:]
+            ):
+                raise EtoroAPIError(
+                    f"Campos duplicados incompatibles en posición {index}: {canonical}"
+                )
+            if present and canonical not in position:
+                position[canonical] = position[present[0]]
+
         missing = sorted(required_fields.difference(position))
         if missing:
             raise EtoroAPIError(
