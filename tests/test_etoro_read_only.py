@@ -729,6 +729,7 @@ class AccountSnapshotTests(unittest.TestCase):
                 "positions": [{
                     "positionId": 10,
                     "instrumentId": 20,
+                    "cid": 123,
                     "mirrorId": 0,
                     "isBuy": True,
                     "openRate": "100",
