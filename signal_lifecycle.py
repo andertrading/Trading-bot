@@ -259,13 +259,7 @@ def advance_signal(
         monitoring_expires = expires + monitoring_window
         updated["monitoring_expires_at"] = monitoring_expires.isoformat()
 
-    if current >= monitoring_expires:
-        updated["monitor_status"] = "ENDED"
-        updated["last_checked_at"] = current.isoformat()
-        updated["last_event"] = "SIGNAL_MONITORING_ENDED"
-        updated["position_status"] = "UNKNOWN"
-        return updated, None
-
+    monitoring_expired = current >= monitoring_expires
     expired_now = entry_status == "PENDING" and current >= expires
     event = None
 
@@ -334,6 +328,16 @@ def advance_signal(
         if entry_status == "PENDING":
             updated["status"] = "EXPIRED" if expired_now else "TARGET_REACHED"
         event = "TARGET_LEVEL_REACHED"
+    elif monitoring_expired:
+        updated["monitor_status"] = "ENDED"
+        if entry_status == "PENDING" and expired_now:
+            updated["status"] = "EXPIRED"
+            event = "SIGNAL_EXPIRED"
+        else:
+            updated["last_checked_at"] = current.isoformat()
+            updated["last_event"] = "SIGNAL_MONITORING_ENDED"
+            updated["position_status"] = "UNKNOWN"
+            return updated, None
     elif entry_status == "PENDING":
         if expired_now:
             updated["status"] = "EXPIRED"
