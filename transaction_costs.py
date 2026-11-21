@@ -47,7 +47,7 @@ def estimate_etoro_trade_costs(
     market_spread_bps=None,
     quote_to_account=None,
     fx_conversion_fee_pct=None,
-    overnight_charge_units=0.0,
+    overnight_charge_units=None,
     leverage=1.0,
     side="BUY",
     country_code="ES",
@@ -57,7 +57,8 @@ def estimate_etoro_trade_costs(
     market_spread_bps is the full bid/ask spread in basis points. The model
     charges half the spread on entry and half on exit.
     overnight_charge_units must reflect the broker's billable fee units
-    (including any 3x weekend charge where applicable).
+    (including any 3x weekend charge where applicable). It defaults to None
+    so omitted CFD financing data is reported as unpriced, never as zero cost.
     """
     result = {
         "valid": False,
