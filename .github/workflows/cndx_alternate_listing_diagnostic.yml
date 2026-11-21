@@ -1,0 +1,57 @@
+name: One-off CNDX Alternate Listing Diagnostic
+
+on:
+  push:
+    branches:
+      - oneoff/cndx-alternate-listing-diagnostic-20261121
+
+permissions:
+  contents: read
+
+jobs:
+  diagnostic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install requests
+        run: python -m pip install requests
+      - name: Compare alternate listings around the missing session
+        run: |
+          python - <<'PY'
+          import requests
+          import pandas as pd
+          from datetime import datetime, timezone
+
+          start = int(datetime(2025, 10, 20, tzinfo=timezone.utc).timestamp())
+          end = int(datetime(2025, 10, 29, tzinfo=timezone.utc).timestamp())
+          for ticker in ("CNDX.L", "CSNDX.SW", "CNDX.AS", "CSNDX.MI", "SXRV.DE", "EURUSD=X"):
+              try:
+                  response = requests.get(
+                      f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}",
+                      params={"period1": start, "period2": end, "interval": "1d", "events": "history"},
+                      headers={"User-Agent": "Mozilla/5.0"},
+                      timeout=20,
+                  )
+                  response.raise_for_status()
+                  result = response.json()["chart"]["result"][0]
+                  meta = result.get("meta", {})
+                  timezone_name = meta.get("exchangeTimezoneName", "UTC")
+                  timestamps = result.get("timestamp") or []
+                  quote = (result.get("indicators", {}).get("quote") or [{}])[0]
+                  local_dates = pd.to_datetime(timestamps, unit="s", utc=True).tz_convert(timezone_name)
+                  rows = {}
+                  for i, dt in enumerate(local_dates):
+                      key = dt.date().isoformat()
+                      if key in {"2025-10-23", "2025-10-24", "2025-10-27"}:
+                          rows[key] = {
+                              k: (quote.get(k) or [None] * len(timestamps))[i]
+                              for k in ("open", "high", "low", "close", "volume")
+                          }
+                  print(ticker, "currency=", meta.get("currency"), "exchange=", meta.get("fullExchangeName"), "timezone=", timezone_name, "rows=", rows)
+              except Exception as exc:
+                  print(ticker, "ERROR", type(exc).__name__, str(exc)[:200])
+          PY
