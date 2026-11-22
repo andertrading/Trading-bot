@@ -130,7 +130,8 @@ def audit_asset(session, asset, spec, token, start, end):
         result["status"] = (
             "PASS"
             if result["coverage_ratio"] is not None
-            and result["coverage_ratio"] >= 0.995
+            and result["coverage_ratio"] == 1.0
+            and not result["missing_dates"]
             and result["duplicate_rows"] == 0
             and result["invalid_ohlc_rows"] == 0
             and not result["unexpected_dates"]
