@@ -63,7 +63,8 @@
         "quote_to_account_rate": null,
         "confirmed": true,
         "source": "USD quote and USD account currency; FX trade conversion not required",
-        "observed_at": null
+        "observed_at": null,
+        "conversion_fee_unit": "PERCENT"
       }
     },
     "CNDX": {
@@ -126,7 +127,8 @@
         "quote_to_account_rate": null,
         "confirmed": true,
         "source": "USD quote and USD account currency; FX trade conversion not required",
-        "observed_at": null
+        "observed_at": null,
+        "conversion_fee_unit": "PERCENT"
       }
     },
     "TSLA": {
@@ -189,7 +191,8 @@
         "quote_to_account_rate": null,
         "confirmed": true,
         "source": "USD quote and USD account currency; FX trade conversion not required",
-        "observed_at": null
+        "observed_at": null,
+        "conversion_fee_unit": "PERCENT"
       }
     },
     "NVDA": {
@@ -252,7 +255,8 @@
         "quote_to_account_rate": null,
         "confirmed": true,
         "source": "USD quote and USD account currency; FX trade conversion not required",
-        "observed_at": null
+        "observed_at": null,
+        "conversion_fee_unit": "PERCENT"
       }
     },
     "AAPL": {
@@ -315,7 +319,8 @@
         "quote_to_account_rate": null,
         "confirmed": true,
         "source": "USD quote and USD account currency; FX trade conversion not required",
-        "observed_at": null
+        "observed_at": null,
+        "conversion_fee_unit": "PERCENT"
       }
     },
     "MSFT": {
@@ -378,7 +383,8 @@
         "quote_to_account_rate": null,
         "confirmed": true,
         "source": "USD quote and USD account currency; FX trade conversion not required",
-        "observed_at": null
+        "observed_at": null,
+        "conversion_fee_unit": "PERCENT"
       }
     },
     "TTWO": {
@@ -441,7 +447,8 @@
         "quote_to_account_rate": null,
         "confirmed": true,
         "source": "USD quote and USD account currency; FX trade conversion not required",
-        "observed_at": null
+        "observed_at": null,
+        "conversion_fee_unit": "PERCENT"
       }
     },
     "BTC": {
@@ -504,7 +511,8 @@
         "quote_to_account_rate": null,
         "confirmed": true,
         "source": "USD quote and USD account currency; FX trade conversion not required",
-        "observed_at": null
+        "observed_at": null,
+        "conversion_fee_unit": "PERCENT"
       }
     },
     "ETH": {
@@ -567,7 +575,8 @@
         "quote_to_account_rate": null,
         "confirmed": true,
         "source": "USD quote and USD account currency; FX trade conversion not required",
-        "observed_at": null
+        "observed_at": null,
+        "conversion_fee_unit": "PERCENT"
       }
     },
     "SOL": {
@@ -630,7 +639,8 @@
         "quote_to_account_rate": null,
         "confirmed": true,
         "source": "USD quote and USD account currency; FX trade conversion not required",
-        "observed_at": null
+        "observed_at": null,
+        "conversion_fee_unit": "PERCENT"
       }
     },
     "XLM": {
@@ -693,7 +703,8 @@
         "quote_to_account_rate": null,
         "confirmed": true,
         "source": "USD quote and USD account currency; FX trade conversion not required",
-        "observed_at": null
+        "observed_at": null,
+        "conversion_fee_unit": "PERCENT"
       }
     },
     "XRP": {
@@ -756,7 +767,8 @@
         "quote_to_account_rate": null,
         "confirmed": true,
         "source": "USD quote and USD account currency; FX trade conversion not required",
-        "observed_at": null
+        "observed_at": null,
+        "conversion_fee_unit": "PERCENT"
       }
     }
   }
