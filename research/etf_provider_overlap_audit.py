@@ -13,6 +13,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import exchange_calendars as xcals
 import requests
 import yfinance as yf
 
@@ -266,6 +267,27 @@ def load_yfinance_daily(ticker, start, end):
     return frame.sort_index()
 
 
+def exchange_calendar_coverage(frame, calendar_name="XLON"):
+    if frame is None or frame.empty:
+        return {"expected_sessions": 0, "observed_sessions": 0, "missing_sessions": None}
+    calendar = xcals.get_calendar(calendar_name)
+    start = pd.Timestamp(min(frame.index))
+    end = pd.Timestamp(max(frame.index))
+    sessions = calendar.sessions_in_range(start, end)
+    expected = {session.date() for session in sessions}
+    observed = {pd.Timestamp(day).date() for day in frame.index}
+    missing = sorted(expected - observed)
+    extra = sorted(observed - expected)
+    return {
+        "expected_sessions": len(expected),
+        "observed_sessions": len(observed),
+        "missing_sessions": [str(day) for day in missing],
+        "extra_sessions": [str(day) for day in extra],
+        "coverage_ratio": round(len(expected.intersection(observed)) / len(expected), 6)
+            if expected else None,
+    }
+
+
 def ohlc_integrity(frame):
     """Count structurally invalid OHLC rows without silently dropping them."""
     required = ["Open", "High", "Low", "Close"]
@@ -513,6 +535,7 @@ def compare(asset, eod, yahoo, exchange, alternate, yahoo_yf, alternate_yf, twel
         "five_year_lse_six_last_date": str(full_lse_six.index.max()),
         "six_yfinance_vs_eodhd_price_abs_pct_error": six_errors,
         "alternate_repair_assessment": alternate_repair_assessment,
+        "eodhd_calendar_coverage": exchange_calendar_coverage(eod),
         "twelvedata_independent_source": twelvedata_metrics,
         "yfinance_missing_session_diagnostics": {
             "chart_only_vs_yfinance_dates": [str(day) for day in chart_only_vs_yfinance],
