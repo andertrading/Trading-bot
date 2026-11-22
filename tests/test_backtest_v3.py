@@ -387,6 +387,89 @@ class TestBacktestV3(unittest.TestCase):
         self.assertFalse(fields["costs_complete"])
         self.assertIn("live_market_bid_ask_spread_missing", fields["unpriced_costs"])
 
+    def test_registry_incomplete_overrides_legacy_complete_cost_flag(self):
+        with (
+            patch.object(
+                backtest_v3,
+                "estimate_etoro_trade_costs",
+                return_value={
+                    "complete": True,
+                    "known_costs_total": 0.0,
+                    "commission_cost": 0.0,
+                    "market_spread_cost": 0.0,
+                    "fx_conversion_cost": 0.0,
+                    "overnight_cost": 0.0,
+                    "unpriced_costs": [],
+                    "assumptions": [],
+                },
+            ),
+            patch.object(
+                backtest_v3,
+                "estimate_verified_registry_trade_costs",
+                return_value={
+                    "valid": True,
+                    "complete": False,
+                    "registry_status": "COSTS_UNVERIFIED",
+                    "known_costs_total": None,
+                    "unpriced_costs": ["round_trip_fee_evidence_missing"],
+                },
+            ),
+        ):
+            fields = backtest_v3._estimate_backtest_cost_fields(
+                "AAPL",
+                {
+                    "entry": 100.0, "exit": 110.0, "stop": 95.0, "score": 90,
+                    "entry_time": "2026-11-20T10:00:00",
+                    "exit_time": "2026-11-20T11:00:00",
+                },
+            )
+        self.assertFalse(fields["costs_complete"])
+        self.assertEqual(fields["registry_costs_status"], "COSTS_UNVERIFIED")
+        self.assertIsNone(fields["verified_costs_total_usd"])
+        self.assertIn("round_trip_fee_evidence_missing", fields["unpriced_costs"])
+
+    def test_verified_registry_costs_produce_separate_net_result(self):
+        with (
+            patch.object(
+                backtest_v3,
+                "estimate_etoro_trade_costs",
+                return_value={
+                    "complete": False,
+                    "known_costs_total": 0.0,
+                    "commission_cost": 0.0,
+                    "market_spread_cost": None,
+                    "fx_conversion_cost": 0.0,
+                    "overnight_cost": None,
+                    "unpriced_costs": ["live_market_bid_ask_spread_missing"],
+                    "assumptions": [],
+                },
+            ),
+            patch.object(
+                backtest_v3,
+                "estimate_verified_registry_trade_costs",
+                return_value={
+                    "valid": True,
+                    "complete": True,
+                    "registry_status": "ELIGIBLE",
+                    "known_costs_total": 1.0,
+                    "unpriced_costs": [],
+                },
+            ),
+        ):
+            fields = backtest_v3._estimate_backtest_cost_fields(
+                "AAPL",
+                {
+                    "entry": 100.0, "exit": 110.0, "stop": 95.0, "score": 90,
+                    "entry_time": "2026-11-20T10:00:00",
+                    "exit_time": "2026-11-20T11:00:00",
+                },
+            )
+        self.assertTrue(fields["costs_complete"])
+        self.assertEqual(fields["registry_costs_status"], "ELIGIBLE")
+        self.assertAlmostEqual(fields["verified_costs_total_usd"], 1.0)
+        self.assertAlmostEqual(fields["verified_net_pnl_usd"], 4.0)
+        self.assertAlmostEqual(fields["verified_result_R"], 1.6)
+
     def test_metrics_report_known_fee_adjusted_results_separately(self):
         metrics = backtest_v3.calculate_metrics([
             {
@@ -407,6 +490,8 @@ class TestBacktestV3(unittest.TestCase):
         self.assertAlmostEqual(metrics["known_fee_adjusted_average_R"], 0.15)
         self.assertEqual(metrics["trades_with_complete_costs"], 0)
         self.assertEqual(metrics["trades_with_unpriced_costs"], 2)
+        self.assertIsNone(metrics["verified_cost_adjusted_total_R"])
+        self.assertEqual(metrics["trades_with_verified_costs"], 0)
 
     def test_run_backtest_rejects_invalid_history_before_indicators(self):
         data = self.make_execution_data()
