@@ -34,6 +34,8 @@ class AssetEconomicRegistryTests(unittest.TestCase):
         self.assertIn("execution_type_evidence_missing", result["blockers"])
         self.assertIn("round_trip_fee_evidence_missing", result["blockers"])
         self.assertIn("observed_bid_ask_spread_evidence_missing", result["blockers"])
+        self.assertIn("spread_treatment_unverified", result["blockers"])
+        self.assertIn("historical_spread_model_not_validated", result["blockers"])
         self.assertIn("minimum_order_rules_evidence_missing", result["blockers"])
 
     def test_confirmed_cfd_is_excluded_from_real_only_mvp(self):
@@ -100,6 +102,30 @@ class AssetEconomicRegistryTests(unittest.TestCase):
         })
         result = classify_registry_asset("CSPX", self.registry)
         self.assertNotIn("execution_price_basis_evidence_missing", result["blockers"])
+
+    def test_spread_treatment_and_historical_scope_are_explicit(self):
+        item = self.registry["assets"]["CSPX"]
+        item["spread"].update({
+            "bid_ask_bps": 10.0,
+            "treatment": "SEPARATE_FROM_PRICES",
+            "evidence_scope": "CURRENT_SNAPSHOT_ONLY",
+            "confirmed": True,
+            "source": "timestamped eToro quote",
+            "observed_at": "2026-11-22T00:00:00Z",
+        })
+        result = classify_registry_asset("CSPX", self.registry)
+        self.assertNotIn("spread_treatment_unverified", result["blockers"])
+        self.assertIn("historical_spread_model_not_validated", result["blockers"])
+
+        item["spread"]["evidence_scope"] = "HISTORICAL_CONSERVATIVE_MODEL"
+        result = classify_registry_asset("CSPX", self.registry)
+        self.assertNotIn("historical_spread_model_not_validated", result["blockers"])
+
+    def test_unknown_spread_treatment_is_rejected_by_schema(self):
+        altered = copy.deepcopy(self.registry)
+        altered["assets"]["CSPX"]["spread"]["treatment"] = "GUESS"
+        with self.assertRaises(ValueError):
+            validate_registry(altered)
 
     def test_registry_rejects_missing_or_extra_assets(self):
         altered = copy.deepcopy(self.registry)
