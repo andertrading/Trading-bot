@@ -38,6 +38,7 @@ ASSETS = {
     "CSPX": {
         "name": "iShares Core S&P 500",
         "yahoo": "CSPX.L",
+        "etoro_symbol": "CSPX.L",
         "type": "ETF",
         "market_calendar": "XLON",
         "currency": "USD",
@@ -48,6 +49,7 @@ ASSETS = {
     "CNDX": {
         "name": "iShares Nasdaq 100",
         "yahoo": "CNDX.L",
+        "etoro_symbol": "CNDX.L",
         "type": "ETF",
         "market_calendar": "XLON",
         "currency": "USD",
