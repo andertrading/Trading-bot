@@ -10,8 +10,10 @@ class TestAssetEconomicEligibility(unittest.TestCase):
             "execution_type": "REAL",
             "execution_type_confirmed": True,
             "fee_schedule_confirmed": True,
+            "close_fees_confirmed": True,
             "execution_price_basis_confirmed": True,
             "market_spread_bps": 4.0,
+            "spreads_confirmed": True,
             "account_currency": "USD",
             "account_currency_confirmed": True,
             "minimum_order_constraints_confirmed": True,
@@ -59,6 +61,28 @@ class TestAssetEconomicEligibility(unittest.TestCase):
         )
         self.assertEqual(result["status"], "COSTS_UNVERIFIED")
         self.assertIn("observed_bid_ask_spread_missing_or_invalid", result["blockers"])
+
+    def test_numeric_spread_without_explicit_measurement_confirmation_blocks(self):
+        values = self.complete_inputs()
+        values["spreads_confirmed"] = False
+        result = eligibility.classify_asset(
+            "TEST",
+            asset_config={"name": "Test", "type": "ETF", "currency": "USD", "enabled": True},
+            **values,
+        )
+        self.assertEqual(result["status"], "COSTS_UNVERIFIED")
+        self.assertIn("bid_ask_spread_measurement_not_confirmed", result["blockers"])
+
+    def test_unconfirmed_round_trip_fees_block_eligibility(self):
+        values = self.complete_inputs()
+        values["close_fees_confirmed"] = False
+        result = eligibility.classify_asset(
+            "TEST",
+            asset_config={"name": "Test", "type": "ETF", "currency": "USD", "enabled": True},
+            **values,
+        )
+        self.assertEqual(result["status"], "COSTS_UNVERIFIED")
+        self.assertIn("round_trip_close_fee_not_confirmed", result["blockers"])
 
     def test_missing_minimum_order_rules_blocks_eligibility(self):
         values = self.complete_inputs()
