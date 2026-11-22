@@ -359,3 +359,6 @@ La comparación es previa a spread y usa hipótesis públicas de eToro, no ticke
 El escaneo por defecto de `Bot.run_scan()` analiza ahora solo `1d`. El workflow programado elimina el cron M15 de cada 15 minutos y conserva únicamente el escaneo diario. M15 sigue disponible mediante una ejecución manual explícita del workflow para investigación/paper; no se elimina su código ni su soporte de pruebas.
 
 Esto reduce a la mitad los análisis del escaneo por defecto y elimina las llamadas recurrentes M15, sin alterar estrategias, reglas de riesgo ni el modo PAPER_ONLY. CI #635 pasó en el head final de esta modificación, incluyendo tests completos y arranque del bot.
+
+
+La descarga de Twelve Data también envía ahora `exchange=NASDAQ` y `mic_code=XNAS` para esos cinco activos, además de comprobar que la respuesta coincide. Así se evita depender únicamente de la resolución por ticker. La documentación de `/time_series` admite ambos filtros. La prueba unitaria verifica los parámetros enviados y CI #637 pasó en el head `00ca39fe49b93d7e00c410685d03efbf7f41d85e`.
