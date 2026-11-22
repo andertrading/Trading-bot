@@ -164,11 +164,10 @@ def classify_registry_asset(symbol: str, registry: dict | None = None) -> dict:
         blockers.append("minimum_order_rules_evidence_missing")
 
     fx = item["fx"]
-    if not fx.get("confirmed"):
-        blockers.append("fx_conversion_evidence_missing")
-    elif fx.get("required"):
+    if fx.get("required"):
         if (
-            not _has_evidence(fx)
+            not fx.get("confirmed")
+            or not _has_evidence(fx)
             or not _valid_number(fx.get("conversion_fee_pct"))
             or not _valid_number(fx.get("quote_to_account_rate"), positive=True)
         ):
