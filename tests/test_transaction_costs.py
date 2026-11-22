@@ -28,7 +28,12 @@ class TestEtoroTransactionCosts(unittest.TestCase):
             "exit": {"model": "PERCENT_NOTIONAL", "value": 0.1, "unit": "PERCENT"},
             **evidence,
         }
-        item["spread"].update({"bid_ask_bps": 10.0, **evidence})
+        item["spread"].update({
+            "bid_ask_bps": 10.0,
+            "treatment": "SEPARATE_FROM_PRICES",
+            "evidence_scope": "HISTORICAL_CONSERVATIVE_MODEL",
+            **evidence,
+        })
         item["price_basis"].update({
             "historical_basis": "split-adjusted, not dividend-adjusted",
             "execution_basis": "broker executable bid/ask quote",
@@ -53,6 +58,25 @@ class TestEtoroTransactionCosts(unittest.TestCase):
         self.assertAlmostEqual(result["exit_commission_cost"], 0.22)
         self.assertAlmostEqual(result["market_spread_cost"], 0.21)
         self.assertAlmostEqual(result["known_costs_total"], 1.43)
+
+    def test_embedded_execution_spread_is_not_charged_twice(self):
+        registry = self._complete_registry()
+        registry["assets"]["CSPX"]["spread"]["treatment"] = "EMBEDDED_IN_EXECUTION_PRICES"
+        result = costs.estimate_verified_registry_trade_costs(
+            "CSPX", 100.0, 110.0, 2.0, registry=registry
+        )
+        self.assertTrue(result["complete"])
+        self.assertEqual(result["market_spread_cost"], 0.0)
+        self.assertAlmostEqual(result["known_costs_total"], 1.22)
+
+    def test_current_snapshot_spread_cannot_validate_historical_costs(self):
+        registry = self._complete_registry()
+        registry["assets"]["CSPX"]["spread"]["evidence_scope"] = "CURRENT_SNAPSHOT_ONLY"
+        result = costs.estimate_verified_registry_trade_costs(
+            "CSPX", 100.0, 110.0, 2.0, registry=registry
+        )
+        self.assertFalse(result["complete"])
+        self.assertIn("historical_spread_model_not_validated", result["unpriced_costs"])
 
     def test_registry_costs_convert_percentage_fees_spread_and_fx_to_account_currency(self):
         registry = self._complete_registry()
