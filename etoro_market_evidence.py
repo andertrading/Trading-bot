@@ -81,6 +81,25 @@ def collect_market_evidence(client: Any, *, symbols: Mapping[str, Mapping[str, A
         except Exception as exc:
             record["errors"].append(f"instrument_resolution: {type(exc).__name__}: {exc}")
 
+    instrument_owners = {}
+    for asset, instrument in resolved.items():
+        instrument_owners.setdefault(instrument["instrumentId"], []).append(asset)
+    duplicate_assets = set()
+    for instrument_id, owners in instrument_owners.items():
+        if len(owners) > 1:
+            duplicate_assets.update(owners)
+            message = (
+                f"instrument_resolution: duplicate eToro instrument ID {instrument_id} "
+                f"resolved for configured assets {', '.join(sorted(owners))}"
+            )
+            for asset in owners:
+                report["assets"][asset]["errors"].append(message)
+    if duplicate_assets:
+        resolved = {
+            asset: instrument for asset, instrument in resolved.items()
+            if asset not in duplicate_assets
+        }
+
     ids = [item["instrumentId"] for item in resolved.values()]
     eligibility_by_id = {}
     if ids:
