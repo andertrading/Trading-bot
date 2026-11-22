@@ -123,21 +123,31 @@ def collect_market_evidence(client: Any, *, symbols: Mapping[str, Mapping[str, A
             if asset not in duplicate_assets
         }
 
-    ids = [item["instrumentId"] for item in resolved.values()]
+    # Isolate eligibility parsing per instrument. A single malformed
+    # leverage configuration must not erase valid records for every other
+    # instrument in the batch.
     eligibility_by_id = {}
-    if ids:
+    for asset, instrument in resolved.items():
+        iid = instrument["instrumentId"]
         try:
-            eligibility_by_id = client.get_validated_instrument_eligibility(ids)
+            eligibility = client.get_validated_instrument_eligibility([iid]).get(iid)
+            if eligibility is None:
+                raise EtoroAPIError(
+                    "La respuesta no contiene la elegibilidad del instrumento solicitado"
+                )
+            eligibility_by_id[iid] = eligibility
         except Exception as exc:
-            message = f"eligibility_batch: {type(exc).__name__}: {exc}"
-            for asset in resolved:
-                report["assets"][asset]["errors"].append(message)
+            report["assets"][asset]["errors"].append(
+                f"eligibility: {type(exc).__name__}: {exc}"
+            )
 
     for asset, instrument in resolved.items():
         record = report["assets"][asset]
         iid = instrument["instrumentId"]
         eligibility = eligibility_by_id.get(iid)
-        if eligibility is None:
+        if eligibility is None and not any(
+            error.startswith("eligibility:") for error in record["errors"]
+        ):
             record["errors"].append(
                 "eligibility: no validated eligibility record returned for resolved instrument"
             )
