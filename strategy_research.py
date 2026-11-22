@@ -155,12 +155,74 @@ def mtf_daily_price_confirmed_pullback(data, asset, timeframe, index=-1):
     return trend_pullback_reclaim(data, asset, timeframe, index)
 
 
+def daily_swing_trend_pullback(data, asset, timeframe, index=-1):
+    """Daily-only swing hypothesis: established trend + EMA20 pullback reclaim.
+
+    Uses only the current and immediately preceding completed daily candles.
+    The common backtest engine supplies next-bar entry and fixed ATR exits.
+    """
+    if timeframe != "1d" or index < 1:
+        return {"action": "NO TRADE"}
+
+    row = data.iloc[index]
+    previous = data.iloc[index - 1]
+    required = (
+        "Close", "Low", "EMA20", "EMA50", "EMA200", "RSI",
+        "MACD", "MACD_SIGNAL", "ATR", "ATR_PERCENT",
+    )
+    values = {key: _number(row, key) for key in required}
+    previous_values = {
+        key: _number(previous, key)
+        for key in ("Close", "EMA20", "RSI")
+    }
+    if any(value is None for value in values.values()):
+        return {"action": "NO TRADE"}
+    if any(value is None for value in previous_values.values()):
+        return {"action": "NO TRADE"}
+
+    established_uptrend = (
+        values["EMA50"] > values["EMA200"]
+        and values["Close"] > values["EMA50"]
+    )
+    pullback_reclaim = (
+        previous_values["Close"] <= previous_values["EMA20"]
+        and values["Close"] > values["EMA20"]
+        and values["Low"] <= values["EMA20"] + 0.20 * values["ATR"]
+    )
+    momentum_recovery = (
+        45 <= values["RSI"] <= 65
+        and values["RSI"] > previous_values["RSI"]
+        and values["MACD"] > values["MACD_SIGNAL"]
+    )
+    volatility_ok = 0 < values["ATR_PERCENT"] <= strategies.MAX_ATR_PERCENT
+
+    if not (
+        established_uptrend
+        and pullback_reclaim
+        and momentum_recovery
+        and volatility_ok
+    ):
+        return {"action": "NO TRADE"}
+
+    return _candidate(
+        data, asset, timeframe, index,
+        [
+            "Daily EMA50 sobre EMA200",
+            "Cierre diario sobre EMA50",
+            "Reclaim EMA20 tras pullback diario",
+            "RSI diario ascendente",
+            "MACD diario alcista",
+        ],
+    )
+
+
 STRATEGIES = {
     "baseline": baseline,
     "trend_pullback_reclaim": trend_pullback_reclaim,
     "trend_continuation": trend_continuation,
     "mtf_daily_trend_pullback": mtf_daily_trend_pullback,
     "mtf_daily_price_confirmed_pullback": mtf_daily_price_confirmed_pullback,
+    "daily_swing_trend_pullback": daily_swing_trend_pullback,
 }
 
 
