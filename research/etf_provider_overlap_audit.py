@@ -8,12 +8,13 @@ from __future__ import annotations
 import json
 import os
 import sys
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import requests
+import yfinance as yf
 
 BASE_EODHD = "https://eodhd.com/api"
 BASE_YAHOO = "https://query1.finance.yahoo.com/v8/finance/chart"
@@ -111,6 +112,43 @@ def load_yahoo(session, asset, spec, start, end, symbol_key="yahoo", expected_ma
     return frame, exchange
 
 
+def load_yfinance_daily(ticker, start, end):
+    """Use the same yfinance options and date normalization as data_engine.py."""
+    start_dt = datetime.combine(start, datetime.min.time(), tzinfo=timezone.utc)
+    end_dt = datetime.combine(end + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc)
+    frame = yf.Ticker(ticker).history(
+        start=start_dt,
+        end=end_dt,
+        interval="1d",
+        auto_adjust=False,
+        actions=True,
+        repair=False,
+        timeout=25,
+    )
+    if frame is None or frame.empty:
+        raise RuntimeError(f"{ticker}: yfinance histórico vacío")
+    index = pd.DatetimeIndex(pd.to_datetime(frame.index, errors="coerce"))
+    if index.isna().any():
+        raise RuntimeError(f"{ticker}: yfinance timestamps inválidos")
+    if index.tz is not None:
+        index = index.tz_localize(None)
+    index = index.normalize().tz_localize("UTC")
+    frame = frame.copy()
+    frame.index = index
+    frame.index.name = "date"
+    required = ["Open", "High", "Low", "Close"]
+    if any(col not in frame.columns for col in required):
+        raise RuntimeError(f"{ticker}: yfinance OHLC incompleto")
+    if "Volume" not in frame.columns:
+        frame["Volume"] = 0.0
+    frame = frame[["Open", "High", "Low", "Close", "Volume"]]
+    for col in frame.columns:
+        frame[col] = pd.to_numeric(frame[col], errors="coerce")
+    if frame.index.has_duplicates:
+        raise RuntimeError(f"{ticker}: yfinance fechas duplicadas")
+    return frame.sort_index()
+
+
 def ohlc_integrity(frame):
     """Count structurally invalid OHLC rows without silently dropping them."""
     required = ["Open", "High", "Low", "Close"]
@@ -154,7 +192,7 @@ def _price_error_metrics(left, right, suffix_left, suffix_right):
     return output
 
 
-def compare(asset, eod, yahoo, exchange, alternate):
+def compare(asset, eod, yahoo, exchange, alternate, yahoo_yf, alternate_yf):
     joined = (
         eod.add_suffix("_eodhd")
         .join(yahoo.add_suffix("_yahoo"), how="inner")
@@ -167,29 +205,36 @@ def compare(asset, eod, yahoo, exchange, alternate):
     if len(joined) < 200:
         raise RuntimeError(f"{asset}: solapamiento insuficiente ({len(joined)} sesiones)")
     metrics = {"asset": asset, "yahoo_exchange": exchange, "overlap_sessions": len(joined)}
-    price_errors = _price_error_metrics(eod, yahoo, "_eodhd", "_yahoo")
-    six_errors = _price_error_metrics(eod, alternate, "_eodhd", "_six")
+    chart_price_errors = _price_error_metrics(eod, yahoo, "_eodhd", "_yahoo_chart")
+    price_errors = _price_error_metrics(eod, yahoo_yf, "_eodhd", "_yahoo_yfinance")
+    six_errors = _price_error_metrics(eod, alternate_yf, "_eodhd", "_six_yfinance")
+    chart_vs_yfinance = _price_error_metrics(yahoo, yahoo_yf, "_yahoo_chart", "_yahoo_yfinance")
     yahoo_integrity = ohlc_integrity(yahoo)
+    yahoo_yfinance_integrity = ohlc_integrity(yahoo_yf)
     eodhd_integrity = ohlc_integrity(eod)
     six_integrity = ohlc_integrity(alternate)
-    # Conservative research gate: no structurally invalid bars, p95 <= 0.5%,
-    # and max absolute OHLC discrepancy <= 1.0% versus the live EODHD source.
+    six_yfinance_integrity = ohlc_integrity(alternate_yf)
+    # Gate the exact yfinance path used by extended backtests, not just Yahoo's chart endpoint.
     blockers = []
-    if yahoo_integrity["invalid_rows"] != 0:
-        blockers.append("yahoo_has_structurally_invalid_ohlc_rows")
+    if yahoo_yfinance_integrity["invalid_rows"] != 0:
+        blockers.append("yfinance_yahoo_has_structurally_invalid_ohlc_rows")
     for col, stats in price_errors.items():
         if stats["p95_abs_pct"] is None or stats["p95_abs_pct"] > 0.5:
-            blockers.append(f"yahoo_{col.lower()}_p95_error_over_0_5pct")
+            blockers.append(f"yfinance_{col.lower()}_p95_error_over_0_5pct")
         if stats["max_abs_pct"] is None or stats["max_abs_pct"] > 1.0:
-            blockers.append(f"yahoo_{col.lower()}_max_error_over_1pct")
+            blockers.append(f"yfinance_{col.lower()}_max_error_over_1pct")
     metrics.update({
         "provider_integrity": {
             "eodhd": eodhd_integrity,
-            "yahoo_lse": yahoo_integrity,
-            "yahoo_six": six_integrity,
+            "yahoo_chart_lse": yahoo_integrity,
+            "yahoo_yfinance_lse": yahoo_yfinance_integrity,
+            "yahoo_chart_six": six_integrity,
+            "yahoo_yfinance_six": six_yfinance_integrity,
         },
         "price_abs_pct_error": price_errors,
-        "six_vs_eodhd_price_abs_pct_error": six_errors,
+        "yahoo_chart_price_abs_pct_error": chart_price_errors,
+        "yahoo_chart_vs_yfinance_price_abs_pct_error": chart_vs_yfinance,
+        "six_yfinance_vs_eodhd_price_abs_pct_error": six_errors,
         "yahoo_research_quality_gate": "PASS" if not blockers else "FAIL",
         "yahoo_research_quality_blockers": blockers,
     })
@@ -252,7 +297,12 @@ def main():
                 session, asset, spec, start, end,
                 symbol_key="alternate", expected_market="swiss",
             )
-            result = compare(asset, eod, yahoo, exchange, alternate)
+            yahoo_yf = load_yfinance_daily(spec["yahoo"], start, end)
+            alternate_yf = load_yfinance_daily(spec["alternate"], start, end)
+            result = compare(
+                asset, eod, yahoo, exchange, alternate,
+                yahoo_yf, alternate_yf,
+            )
             result["alternate_symbol"] = spec["alternate"]
             result["alternate_exchange"] = alternate_exchange
             results.append(result)
