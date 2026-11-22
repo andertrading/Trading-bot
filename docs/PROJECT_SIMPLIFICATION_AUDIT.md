@@ -330,3 +330,16 @@ El gate de metadata exige símbolo y moneda compatibles, tipo de activo correcto
 La bolsa y el MIC recibidos se registran en logs, pero aún no se comparan con un valor esperado independiente por símbolo. No se han inventado códigos ni se ha marcado la identidad exacta del listado como verificada. La identidad completa sigue pendiente hasta disponer de metadatos por instrumento contrastados.
 
 Fuente de esquema de metadata Twelve Data: https://twelvedata.com/docs/ai/ai-data-assistant
+
+
+Para las cinco acciones estadounidenses configuradas (TSLA, NVDA, AAPL, MSFT y TTWO), las páginas de cotización oficiales de Nasdaq confirman que son Nasdaq-listed. Se han fijado en `config.py` los valores esperados `twelvedata_exchange="NASDAQ"` y `twelvedata_mic_code="XNAS"`; el ejemplo oficial de Twelve Data para AAPL muestra precisamente `exchange=NASDAQ` y `mic_code=XNAS`. El gate ahora rechaza discrepancias exactas en esos dos campos. El valor `market_calendar="XNYS"` se mantiene únicamente como calendario de sesiones estadounidense usado por el motor, no como afirmación de que el listado esté en NYSE.
+
+Fuentes de listing:
+- TSLA: https://www.nasdaq.com/market-activity/stocks/tsla
+- NVDA: https://www.nasdaq.com/market-activity/stocks/nvda/real-time
+- AAPL: https://www.nasdaq.com/market-activity/stocks/aapl/latest-real-time-trades
+- MSFT: https://www.nasdaq.com/market-activity/stocks/msft/real-time
+- TTWO: https://www.nasdaq.com/market-activity/stocks/ttwo/real-time
+- Metadata de ejemplo Twelve Data (AAPL / NASDAQ / XNAS): https://twelvedata.com/docs/ai/ai-data-assistant
+
+No se han fijado valores esperados para CSPX/CNDX hasta confirmar el formato exacto de metadata que devuelve Twelve Data para esos símbolos. Tampoco se fuerza un MIC a las criptomonedas.
