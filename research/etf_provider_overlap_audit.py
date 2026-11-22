@@ -157,18 +157,17 @@ def load_twelvedata_daily(session, asset, start, end, token):
     base_params = {
         "symbol": candidate["symbol"],
         "interval": "1day",
-        "start_date": start.isoformat(),
-        "end_date": end.isoformat(),
+        "outputsize": 5000,
         "apikey": token,
     }
     payload = None
     meta = {}
     last_error = None
-    # Some Twelve Data ETF listings resolve by exchange name rather than MIC.
+    # Use one compact full-history request; Basic is limited to 8 credits/minute.
+    # If MIC resolution fails, retry once using the exchange name returned by search.
     variants = [
         {"mic_code": "XLON"},
         {"exchange": candidate.get("exchange", "London Stock Exchange")},
-        {},
     ]
     for selector in variants:
         try:
@@ -209,6 +208,9 @@ def load_twelvedata_daily(session, asset, start, end, token):
     if frame["date"].isna().any():
         raise RuntimeError(f"{asset}: Twelve Data fechas inválidas")
     frame = frame.set_index("date").sort_index()
+    frame = frame.loc[(frame.index >= start) & (frame.index <= end)]
+    if frame.empty:
+        raise RuntimeError(f"{asset}: Twelve Data no devolvió filas dentro de la ventana de cinco años")
     if frame.index.has_duplicates:
         raise RuntimeError(f"{asset}: Twelve Data fechas duplicadas")
     for col in ("open", "high", "low", "close"):
