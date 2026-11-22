@@ -341,26 +341,65 @@ def assess_alternate_repairs(primary, alternate):
         if isinstance(alt, pd.DataFrame) or bool(ohlc_integrity(alternate.loc[[day]])["invalid_rows"]):
             issues.append({"date": str(day), "reason": "alternate_bar_invalid"})
             continue
-        primary_close = pd.to_numeric(
-            pd.Series([primary.at[day, "Close"]]), errors="coerce"
-        ).iloc[0]
-        alternate_close = pd.to_numeric(
-            pd.Series([alt["Close"]]), errors="coerce"
-        ).iloc[0]
+        primary_row = primary.loc[day]
+        trusted = set()
+        values = {}
+        for column in ("Open", "High", "Low", "Close"):
+            value = pd.to_numeric(
+                pd.Series([primary_row[column]]), errors="coerce"
+            ).iloc[0]
+            values[column] = (
+                float(value) if np.isfinite(value) and float(value) > 0 else None
+            )
+            if values[column] is not None:
+                trusted.add(column)
         if (
-            not np.isfinite(primary_close) or primary_close <= 0
-            or not np.isfinite(alternate_close) or alternate_close <= 0
+            values["High"] is not None
+            and any(value is not None and values["High"] < value
+                    for value in (values["Low"], values["Open"], values["Close"]))
         ):
-            issues.append({"date": str(day), "reason": "close_unverifiable"})
+            trusted.discard("High")
+        if (
+            values["Low"] is not None
+            and any(value is not None and values["Low"] > value
+                    for value in (values["High"], values["Open"], values["Close"]))
+        ):
+            trusted.discard("Low")
+        if (
+            values["Open"] is not None and values["High"] is not None
+            and values["Low"] is not None
+            and not values["Low"] <= values["Open"] <= values["High"]
+        ):
+            trusted.discard("Open")
+        if (
+            values["Close"] is not None and values["High"] is not None
+            and values["Low"] is not None
+            and not values["Low"] <= values["Close"] <= values["High"]
+        ):
+            trusted.discard("Close")
+        if not trusted:
+            issues.append({"date": str(day), "reason": "no_trustworthy_primary_ohlc_fields"})
             continue
-        deviation = abs(float(primary_close) / float(alternate_close) - 1.0) * 100.0
-        deviations.append(deviation)
-        if deviation > 0.5:
-            issues.append({
-                "date": str(day),
-                "reason": "close_deviation_over_0_5pct",
-                "close_deviation_pct": round(deviation, 6),
-            })
+        for column in sorted(trusted):
+            alternate_value = pd.to_numeric(
+                pd.Series([alt[column]]), errors="coerce"
+            ).iloc[0]
+            if not np.isfinite(alternate_value) or alternate_value <= 0:
+                issues.append({
+                    "date": str(day), "reason": "alternate_ohlc_field_unverifiable",
+                    "field": column,
+                })
+                continue
+            deviation = abs(values[column] / float(alternate_value) - 1.0) * 100.0
+            if column == "Close":
+                deviations.append(deviation)
+            if deviation > 0.5:
+                issues.append({
+                    "date": str(day),
+                    "reason": "ohlc_field_deviation_over_0_5pct",
+                    "field": column,
+                    "deviation_pct": round(deviation, 6),
+                })
     if len(invalid) > maximum_repairs:
         issues.append({
             "date": None,
