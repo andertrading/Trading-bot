@@ -455,3 +455,6 @@ En la simulación de cartera MTF `mtf_daily_price_confirmed_pullback`, con capit
 - Los dos portfolios de clase son independientes y no deben sumarse como si fueran una sola cartera.
 
 Lectura: **M15 no falla únicamente por el broker**. El edge bruto de la estrategia MTF es insuficiente, y los costes de rotación lo convierten en negativo incluso bajo supuestos de comisión más bajos. Aumentar el capital no arregla una comisión porcentual ni una ventaja bruta demasiado pequeña por operación. Se mantiene M15 como laboratorio; no se habilita para señales operativas.
+
+
+La escala por operación explica el problema: en el baseline M15, el edge bruto medio fue aproximadamente **0,017R por operación cripto** y **0,019R por operación de acciones**. Con el riesgo de referencia de 5 USD por trade, la comisión Bitvavo maker modelada equivale a unos **0,20R por operación cripto**; el escenario eToro de 1 USD por lado en acciones equivale a unos **0,39R por operación**; el escenario eToro cripto de 1% por lado ronda **3,2R por operación**. Son aproximaciones de investigación, sin costes completos, pero muestran que aumentar el capital no corrige las comisiones porcentuales ni un edge tan pequeño.
