@@ -403,3 +403,19 @@ The next sizing implementation must be a clearly labelled virtual/paper calculat
 
 
 Nota de interpretación del modelo de costes: `ETORO_STOCK_REAL_COMMISSION_USD_PER_SIDE=2.0` sigue siendo el escenario superior conservador usado por el estimador genérico. La sensibilidad específica de España usa 1 USD por lado según la tabla pública. Ninguno de los dos valores sustituye la confirmación de residencia contractual y ticket; el registro económico continúa fail-closed.
+
+
+## Corrección crítica: ajuste de splits solicitado no equivale a verificación independiente
+
+Se corrigió un falso positivo en los metadatos. `_attach_market_data_metadata()` marcaba `price_adjustment_verified=True` de forma incondicional, aunque para Twelve Data diario solo se había enviado `adjust=splits` y no se habían reconciliado las velas con factores de splits independientes.
+
+Ahora:
+- Twelve Data diario queda como `price_adjustment_verified=False` y estado `REQUESTED_NOT_INDEPENDENTLY_VERIFIED`.
+- El modo intradía `adjust=none` conserva el estado documentado `DOCUMENTED_RAW_MODE`.
+- El backtest rechaza snapshots e históricos diarios de Twelve Data hasta que exista el estado explícito `INDEPENDENTLY_VERIFIED`.
+- El gate del bot bloquea candidatas diarias de Twelve Data mientras falte esa verificación independiente.
+- Los snapshots antiguos con el flag heredado `True` pero sin evidencia independiente también se rechazan.
+
+Consecuencia para la investigación anterior: el run #110 sigue aportando evidencia de cobertura y ausencia de huecos en las series, pero su campo heredado `price_adjustment_verified=True` era un falso positivo del wrapper y no demuestra que los factores históricos estén bien aplicados. Sus resultados de estrategia se mantienen como exploratorios, no como validación de datos para producción. No se descargaron datos nuevos ni se consumieron créditos para esta corrección.
+
+CI #646 pasó en el head `62d098ac40f0607c1379038dc36b7c92c2ba1189`.
