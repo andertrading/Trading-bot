@@ -73,6 +73,16 @@ class AssetEconomicRegistryTests(unittest.TestCase):
         result = classify_registry_asset("CSPX", self.registry)
         self.assertNotIn("instrument_identity_evidence_missing", result["blockers"])
 
+    def test_future_dated_evidence_is_rejected(self):
+        item = self.registry["assets"]["CSPX"]
+        item["instrument"].update({
+            "confirmed": True,
+            "source": "instrument ticket",
+            "observed_at": "2099-01-01T00:00:00Z",
+        })
+        result = classify_registry_asset("CSPX", self.registry)
+        self.assertIn("instrument_identity_evidence_missing", result["blockers"])
+
     def test_price_basis_requires_historical_execution_and_mapping_definitions(self):
         item = self.registry["assets"]["CSPX"]
         item["price_basis"].update({
