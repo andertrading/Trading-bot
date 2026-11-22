@@ -1216,6 +1216,15 @@ def get_validation_blockers(portfolio_status, asset=None):
             "Cartera no confirmada o riesgo de cartera bloqueado"
         )
 
+    if (
+        isinstance(portfolio_status, dict)
+        and portfolio_status.get("portfolio_source") == "PAPER_FORWARD_ONLY"
+        and portfolio_status.get("costs_status") != "COSTS_CONFIRMED"
+    ):
+        blockers.append(
+            "La cartera virtual prospectiva aún solo contiene resultados brutos; costes netos no confirmados"
+        )
+
     if not STRATEGY_VALIDATED:
         blockers.append(
             "La estrategia no ha superado la validación histórica y walk-forward"
