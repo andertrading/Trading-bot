@@ -286,6 +286,9 @@ def can_add_sized_trade(
         "entry_price_quote": sizing_result.get("entry_price_quote"),
         "quote_to_usd": sizing_result.get("quote_to_usd"),
         "position_notional_usd": sizing_result.get("position_notional_usd"),
+        "cash_required_usd": sizing_result.get("cash_required_usd"),
+        "costs_per_unit_quote": sizing_result.get("costs_per_unit_quote"),
+        "fixed_costs_usd": sizing_result.get("fixed_costs_usd"),
         "available_capital_usd": sizing_result.get("available_capital_usd"),
     }
     if any(not _is_finite_number(value) for value in cash_fields.values()):
@@ -300,6 +303,9 @@ def can_add_sized_trade(
     quote_to_usd = float(cash_fields["quote_to_usd"])
     position_notional_usd = float(cash_fields["position_notional_usd"])
     available_capital_usd = float(cash_fields["available_capital_usd"])
+    cash_required_usd = float(cash_fields["cash_required_usd"])
+    costs_per_unit_quote = float(cash_fields["costs_per_unit_quote"])
+    cash_fixed_costs_usd = float(cash_fields["fixed_costs_usd"])
     effective_capital = (
         INITIAL_CAPITAL_USD if capital_usd is None else capital_usd
     )
@@ -310,6 +316,9 @@ def can_add_sized_trade(
         or entry_price_quote <= 0
         or quote_to_usd <= 0
         or position_notional_usd <= 0
+        or cash_required_usd <= 0
+        or costs_per_unit_quote < 0
+        or cash_fixed_costs_usd < 0
         or available_capital_usd <= 0
         or available_capital_usd > float(effective_capital) + 1e-8
     ):
@@ -322,14 +331,21 @@ def can_add_sized_trade(
     recomputed_notional_usd = (
         position_size * entry_price_quote * quote_to_usd
     )
+    recomputed_cash_required_usd = (
+        position_size * (entry_price_quote + costs_per_unit_quote)
+        * quote_to_usd + cash_fixed_costs_usd
+    )
     tolerance = max(1e-8, abs(position_notional_usd) * 1e-8)
+    cash_tolerance = max(1e-8, abs(cash_required_usd) * 1e-8)
     if (
         abs(recomputed_notional_usd - position_notional_usd) > tolerance
+        or abs(recomputed_cash_required_usd - cash_required_usd) > cash_tolerance
         or position_notional_usd > available_capital_usd + tolerance
+        or cash_required_usd > available_capital_usd + cash_tolerance
     ):
         return {
             "allowed": False,
-            "reason": "El nominal de la posición no cuadra con la cantidad/precio o supera el efectivo disponible.",
+            "reason": "El nominal o el efectivo total requerido no cuadran con la cantidad, precio y costes o superan el efectivo disponible.",
             "currency": "USD",
         }
 
@@ -365,6 +381,12 @@ def can_add_sized_trade(
     reported_risk = float(reported_risk)
     position_risk = float(position_risk)
     fixed_costs = float(fixed_costs)
+    if abs(fixed_costs - cash_fixed_costs_usd) > max(1e-8, abs(fixed_costs) * 1e-8):
+        return {
+            "allowed": False,
+            "reason": "Los costes fijos usados en el riesgo y en el efectivo disponible no coinciden.",
+            "currency": "USD",
+        }
     if (
         reported_risk <= 0
         or position_risk < 0
@@ -388,6 +410,7 @@ def can_add_sized_trade(
         **admission,
         "proposed_total_reserved_risk_usd": total_reserved_risk_usd,
         "proposed_position_notional_usd": position_notional_usd,
+        "proposed_cash_required_usd": cash_required_usd,
         "available_capital_usd": available_capital_usd,
         "admission_scope": "SIMULACION_NO_VALIDADA",
         "live_execution_authorized": False,
