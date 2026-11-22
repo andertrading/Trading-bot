@@ -269,12 +269,12 @@ class TestBotValidation(unittest.TestCase):
     def test_unconfirmed_fx_blocks_different_currency_asset(self):
         eur_config = dict(Bot.ASSETS["AAPL"])
         eur_config["currency"] = "EUR"
-        with patch.object(Bot, "FX_CONVERSION_CONFIRMED", False), \\
-             patch.dict(Bot.ASSETS, {"AAPL": eur_config}):
-            result = Bot.apply_validation_gate(
-                self.candidate,
-                {"status": "OK"},
-            )
+        with patch.object(Bot, "FX_CONVERSION_CONFIRMED", False):
+            with patch.dict(Bot.ASSETS, {"AAPL": eur_config}):
+                result = Bot.apply_validation_gate(
+                    self.candidate,
+                    {"status": "OK"},
+                )
 
         self.assertIn(
             "Conversión de divisa pendiente de confirmar",
