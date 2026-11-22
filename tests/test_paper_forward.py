@@ -127,4 +127,5 @@ class PaperForwardTests(unittest.TestCase):
         self.assertAlmostEqual(summary["realized_gross_pnl_usd"], 5.0)
 
 
-if __ (unittest.main())
+if __name__ == "__main__":
+    unittest.main()
