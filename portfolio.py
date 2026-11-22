@@ -289,9 +289,15 @@ def can_add_sized_trade(
         "cash_required_usd": sizing_result.get("cash_required_usd"),
         "costs_per_unit_quote": sizing_result.get("costs_per_unit_quote"),
         "fixed_costs_usd": sizing_result.get("fixed_costs_usd"),
+        "minimum_order_notional_usd": sizing_result.get("minimum_order_notional_usd"),
+        "fractional_allowed": sizing_result.get("fractional_allowed"),
         "available_capital_usd": sizing_result.get("available_capital_usd"),
     }
-    if any(not _is_finite_number(value) for value in cash_fields.values()):
+    if any(
+        not _is_finite_number(value)
+        for key, value in cash_fields.items()
+        if key != "fractional_allowed"
+    ):
         return {
             "allowed": False,
             "reason": "Faltan datos verificables para comprobar el nominal frente al efectivo disponible.",
@@ -306,6 +312,8 @@ def can_add_sized_trade(
     cash_required_usd = float(cash_fields["cash_required_usd"])
     costs_per_unit_quote = float(cash_fields["costs_per_unit_quote"])
     cash_fixed_costs_usd = float(cash_fields["fixed_costs_usd"])
+    minimum_order_notional_usd = float(cash_fields["minimum_order_notional_usd"])
+    fractional_allowed = cash_fields["fractional_allowed"]
     effective_capital = (
         INITIAL_CAPITAL_USD if capital_usd is None else capital_usd
     )
@@ -365,12 +373,30 @@ def can_add_sized_trade(
         or cash_required_usd <= 0
         or costs_per_unit_quote < 0
         or cash_fixed_costs_usd < 0
+        or minimum_order_notional_usd <= 0
+        or not isinstance(fractional_allowed, bool)
         or available_capital_usd <= 0
         or available_capital_usd > float(effective_capital) + 1e-8
     ):
         return {
             "allowed": False,
             "reason": "El efectivo disponible o los datos de nominal no son válidos.",
+            "currency": "USD",
+        }
+
+    if (
+        not fractional_allowed
+        and not math.isclose(position_size, round(position_size), rel_tol=0.0, abs_tol=1e-8)
+    ):
+        return {
+            "allowed": False,
+            "reason": "El instrumento no admite unidades fraccionarias y la cantidad no es entera.",
+            "currency": "USD",
+        }
+    if position_notional_usd + 1e-8 < minimum_order_notional_usd:
+        return {
+            "allowed": False,
+            "reason": "El nominal propuesto es inferior al mínimo confirmado del instrumento.",
             "currency": "USD",
         }
 
@@ -456,6 +482,8 @@ def can_add_sized_trade(
         **admission,
         "proposed_total_reserved_risk_usd": total_reserved_risk_usd,
         "proposed_position_notional_usd": position_notional_usd,
+        "minimum_order_notional_usd": minimum_order_notional_usd,
+        "fractional_allowed": fractional_allowed,
         "proposed_cash_required_usd": cash_required_usd,
         "available_capital_usd": available_capital_usd,
         "open_notional_usd": open_notional_usd,

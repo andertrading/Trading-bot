@@ -75,6 +75,8 @@ class TestRiskManager(unittest.TestCase):
             stop=95,
             score=85,
                 available_capital_usd=1000,
+                minimum_order_notional_usd=1,
+                fractional_allowed=True,
             quote_to_usd=1,
             portfolio_risk_usd=0,
             costs_per_unit_quote=0,
@@ -91,6 +93,8 @@ class TestRiskManager(unittest.TestCase):
                 stop=95,
                 score=85,
                 available_capital_usd=1000,
+                minimum_order_notional_usd=1,
+                fractional_allowed=True,
                 quote_to_usd=1,
                 costs_per_unit_quote=0,
                 fixed_costs_quote=0,
@@ -106,6 +110,8 @@ class TestRiskManager(unittest.TestCase):
                 stop=95,
                 score=85,
                 available_capital_usd=1000,
+                minimum_order_notional_usd=1,
+                fractional_allowed=True,
                 quote_to_usd=None,
                 portfolio_risk_usd=0,
                 costs_per_unit_quote=0,
@@ -121,6 +127,8 @@ class TestRiskManager(unittest.TestCase):
                 stop=95,
                 score=85,
                 available_capital_usd=1000,
+                minimum_order_notional_usd=1,
+                fractional_allowed=True,
                 quote_to_usd=1,
                 portfolio_risk_usd=0,
             )
@@ -134,6 +142,8 @@ class TestRiskManager(unittest.TestCase):
                 stop=95,
                 score=85,
                 available_capital_usd=1000,
+                minimum_order_notional_usd=1,
+                fractional_allowed=True,
                 quote_to_usd=1,
                 portfolio_risk_usd=0,
                 costs_per_unit_quote=0,
@@ -152,6 +162,8 @@ class TestRiskManager(unittest.TestCase):
                         stop=95,
                         score=85,
                 available_capital_usd=1000,
+                minimum_order_notional_usd=1,
+                fractional_allowed=True,
                         quote_to_usd=1,
                         portfolio_risk_usd=0,
                         costs_per_unit_quote=0,
@@ -166,6 +178,8 @@ class TestRiskManager(unittest.TestCase):
                 stop=95,
                 score=85,
                 available_capital_usd=1000,
+                minimum_order_notional_usd=1,
+                fractional_allowed=True,
                 capital_usd=1000,
                 quote_to_usd=1,
                 portfolio_risk_usd=0,
@@ -189,6 +203,8 @@ class TestRiskManager(unittest.TestCase):
                 stop=95,
                 score=85,
                 available_capital_usd=1000,
+                minimum_order_notional_usd=1,
+                fractional_allowed=True,
                 capital_usd=1000,
                 quote_to_usd=1,
                 portfolio_risk_usd=0,
@@ -215,6 +231,8 @@ class TestRiskManager(unittest.TestCase):
                         stop=95,
                         score=85,
                 available_capital_usd=1000,
+                minimum_order_notional_usd=1,
+                fractional_allowed=True,
                         quote_to_usd=1,
                         portfolio_risk_usd=0,
                         costs_per_unit_quote=0,
@@ -242,6 +260,8 @@ class TestRiskManager(unittest.TestCase):
                         stop=95,
                         score=85,
                 available_capital_usd=1000,
+                minimum_order_notional_usd=1,
+                fractional_allowed=True,
                         quote_to_usd=1,
                         portfolio_risk_usd=0,
                         costs_per_unit_quote=value,
@@ -260,6 +280,8 @@ class TestRiskManager(unittest.TestCase):
                 stop=95,
                 score=85,
                 available_capital_usd=1000,
+                minimum_order_notional_usd=1,
+                fractional_allowed=True,
                 capital_usd=1000,
                 quote_to_usd=1,
                 portfolio_risk_usd=0,
@@ -283,6 +305,8 @@ class TestRiskManager(unittest.TestCase):
                 entry=100,
                 stop=95,
                 score=85,
+                minimum_order_notional_usd=1,
+                fractional_allowed=True,
                 quote_to_usd=1,
                 portfolio_risk_usd=0,
                 costs_per_unit_quote=0,
@@ -300,6 +324,8 @@ class TestRiskManager(unittest.TestCase):
                 score=85,
                 capital_usd=1000,
                 available_capital_usd=250,
+                minimum_order_notional_usd=1,
+                fractional_allowed=True,
                 quote_to_usd=1,
                 portfolio_risk_usd=0,
                 costs_per_unit_quote=1,
@@ -319,6 +345,64 @@ class TestRiskManager(unittest.TestCase):
         )
         self.assertLess(result["total_reserved_risk_usd"], result["risk_amount_usd"])
 
+    def test_non_fractional_instrument_rounds_quantity_down_to_whole_units(self):
+        with patch("risk_manager.ALLOW_POSITION_SIZING", True):
+            result = calculate_position_size(
+                entry=100,
+                stop=99.99,
+                score=85,
+                capital_usd=1000,
+                available_capital_usd=250,
+                quote_to_usd=1,
+                portfolio_risk_usd=0,
+                costs_per_unit_quote=0,
+                fixed_costs_quote=0,
+                minimum_order_notional_usd=1,
+                fractional_allowed=False,
+            )
+
+        self.assertEqual(result["status"], "SIMULACION_NO_VALIDADA")
+        self.assertEqual(result["position_size"], 2.0)
+        self.assertAlmostEqual(result["position_notional_usd"], 200.0)
+
+    def test_minimum_order_notional_blocks_undersized_position(self):
+        with patch("risk_manager.ALLOW_POSITION_SIZING", True):
+            result = calculate_position_size(
+                entry=100,
+                stop=99.99,
+                score=85,
+                capital_usd=1000,
+                available_capital_usd=250,
+                quote_to_usd=1,
+                portfolio_risk_usd=0,
+                costs_per_unit_quote=0,
+                fixed_costs_quote=0,
+                minimum_order_notional_usd=300,
+                fractional_allowed=True,
+            )
+
+        self.assertEqual(result["status"], "BLOCKED")
+        self.assertIn("inferior al mínimo", result["reason"])
+
+    def test_missing_fractional_rule_blocks_position_size(self):
+        with patch("risk_manager.ALLOW_POSITION_SIZING", True):
+            result = calculate_position_size(
+                entry=100,
+                stop=95,
+                score=85,
+                capital_usd=1000,
+                available_capital_usd=1000,
+                quote_to_usd=1,
+                portfolio_risk_usd=0,
+                costs_per_unit_quote=0,
+                fixed_costs_quote=0,
+                minimum_order_notional_usd=1,
+                fractional_allowed=None,
+            )
+
+        self.assertEqual(result["status"], "BLOCKED")
+        self.assertIn("fraccionarias", result["reason"])
+
     def test_available_cash_cannot_exceed_virtual_capital(self):
         with patch("risk_manager.ALLOW_POSITION_SIZING", True):
             result = calculate_position_size(
@@ -327,6 +411,8 @@ class TestRiskManager(unittest.TestCase):
                 score=85,
                 capital_usd=1000,
                 available_capital_usd=1001,
+                minimum_order_notional_usd=1,
+                fractional_allowed=True,
                 quote_to_usd=1,
                 portfolio_risk_usd=0,
                 costs_per_unit_quote=0,
@@ -342,6 +428,8 @@ class TestRiskManager(unittest.TestCase):
                 stop=95,
                 score=85,
                 available_capital_usd=1000,
+                minimum_order_notional_usd=1,
+                fractional_allowed=True,
                 capital_usd=1000,
                 quote_to_usd=1,
                 portfolio_risk_usd=0,
@@ -365,6 +453,8 @@ class TestRiskManager(unittest.TestCase):
                 stop=95,
                 score=85,
                 available_capital_usd=1000,
+                minimum_order_notional_usd=1,
+                fractional_allowed=True,
                 capital_usd=1000,
                 quote_to_usd=1,
                 portfolio_risk_usd=28,
@@ -397,6 +487,8 @@ class TestRiskManager(unittest.TestCase):
                     stop=95,
                     score=85,
                 available_capital_usd=1000,
+                minimum_order_notional_usd=1,
+                fractional_allowed=True,
                     capital_usd=1000,
                     quote_to_usd=1,
                     portfolio_risk_usd=0,

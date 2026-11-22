@@ -438,6 +438,8 @@ class TestBotValidation(unittest.TestCase):
             "entry_price_quote": 100.0,
             "quote_to_usd": 1.0,
             "position_notional_usd": 100.0,
+            "minimum_order_notional_usd": 1.0,
+            "fractional_allowed": True,
             "cash_required_usd": 101.0,
             "costs_per_unit_quote": 0.0,
             "available_capital_usd": 1000.0,
@@ -542,6 +544,8 @@ class TestBotValidation(unittest.TestCase):
             "entry_price_quote": 100.0,
             "quote_to_usd": 1.0,
             "position_notional_usd": 100.0,
+            "minimum_order_notional_usd": 1.0,
+            "fractional_allowed": True,
             "cash_required_usd": 101.0,
             "costs_per_unit_quote": 0.0,
             "available_capital_usd": 1000.0,
@@ -589,6 +593,8 @@ class TestBotValidation(unittest.TestCase):
             "entry_price_quote": 100.0,
             "quote_to_usd": 1.0,
             "position_notional_usd": 100.0,
+            "minimum_order_notional_usd": 1.0,
+            "fractional_allowed": True,
             "cash_required_usd": 101.0,
             "costs_per_unit_quote": 0.0,
             "available_capital_usd": 1000.0,
@@ -632,6 +638,8 @@ class TestBotValidation(unittest.TestCase):
             "entry_price_quote": 100.0,
             "quote_to_usd": 1.0,
             "position_notional_usd": 100.0,
+            "minimum_order_notional_usd": 1.0,
+            "fractional_allowed": True,
             "cash_required_usd": 101.0,
             "costs_per_unit_quote": 0.0,
             "available_capital_usd": 1000.0,
@@ -770,6 +778,146 @@ class TestBotValidation(unittest.TestCase):
         self.assertEqual(status["status"], "BLOCKED")
         self.assertFalse(status["positions_confirmed"])
         self.assertEqual(status["portfolio_source"], "PAPER_FORWARD_ONLY")
+
+    def test_verified_cost_sizing_pipeline_is_wired_to_paper_cash(self):
+        candidate = {
+            "action": "BUY CANDIDATE",
+            "asset": "AAPL",
+            "timeframe": "1d",
+            "score": 85,
+            "status": "PENDING_VALIDATION",
+            "entry_reference": 100.0,
+            "stop": 95.0,
+            "target": 110.0,
+            "data_valid": True,
+            "data_timestamp": datetime.now(timezone.utc).isoformat(),
+            "data_age_minutes": 0.0,
+            "data_provider": "yahoo",
+        }
+        portfolio = {
+            "status": "OK",
+            "capital_usd": 1000.0,
+            "available_capital_usd": 1000.0,
+            "current_portfolio_risk_usd": 0.0,
+            "open_positions": [],
+            "positions_confirmed": True,
+            "portfolio_source": "PAPER_FORWARD_ONLY",
+            "costs_status": "COSTS_CONFIRMED",
+        }
+        unit_costs = {
+            "valid": True,
+            "complete": True,
+            "costs_per_unit_quote": 0.2,
+            "fixed_costs_quote": 1.0,
+            "quote_to_usd": 1.0,
+            "minimum_order_notional_usd": 1.0,
+            "fractional_allowed": True,
+            "unpriced_costs": [],
+        }
+        sizing = {
+            "status": "SIMULACION_NO_VALIDADA",
+            "validated": False,
+            "risk_amount_usd": 7.5,
+            "position_risk_usd": 6.5,
+            "fixed_costs_usd": 1.0,
+            "total_reserved_risk_usd": 7.5,
+            "position_size": 1.25,
+            "entry_price_quote": 100.0,
+            "quote_to_usd": 1.0,
+            "position_notional_usd": 125.0,
+            "minimum_order_notional_usd": 1.0,
+            "fractional_allowed": True,
+            "cash_required_usd": 126.25,
+            "costs_per_unit_quote": 0.2,
+            "available_capital_usd": 1000.0,
+            "capital_usd": 1000.0,
+        }
+        with (
+            patch.object(Bot, "ALLOW_POSITION_SIZING", True),
+            patch.object(Bot, "CLOSE_FEES_CONFIRMED", True),
+            patch.object(Bot, "SPREADS_CONFIRMED", True),
+            patch.object(Bot, "ETORO_EXECUTION_PRICE_BASIS_CONFIRMED", True),
+            patch.object(Bot, "ETORO_EXECUTION_TYPES_CONFIRMED", True),
+            patch.object(Bot, "ETORO_FEE_SCHEDULE_CONFIRMED", True),
+            patch.object(Bot, "ETORO_ACCOUNT_CURRENCY_CONFIRMED", True),
+            patch.object(Bot, "FX_CONVERSION_CONFIRMED", True),
+            patch.object(Bot, "STRATEGY_VALIDATED", True),
+            patch.object(Bot, "classify_asset_economic", return_value={
+                "status": "ELIGIBLE", "blockers": [],
+            }),
+            patch.object(Bot, "estimate_verified_registry_unit_costs", return_value=unit_costs),
+            patch.object(Bot, "calculate_position_size", return_value=sizing) as calculate,
+        ):
+            result = Bot.apply_validation_gate(candidate, portfolio)
+
+        self.assertEqual(result["validation_status"], "APPROVED")
+        self.assertTrue(result["tradable"])
+        self.assertEqual(result["sizing_result"], sizing)
+        self.assertTrue(result["portfolio_admission"]["allowed"])
+        calculate.assert_called_once_with(
+            entry=100.0,
+            stop=95.0,
+            score=85,
+            capital_usd=1000.0,
+            available_capital_usd=1000.0,
+            quote_to_usd=1.0,
+            portfolio_risk_usd=0.0,
+            costs_per_unit_quote=0.2,
+            fixed_costs_quote=1.0,
+            minimum_order_notional_usd=1.0,
+            fractional_allowed=True,
+        )
+
+    def test_incomplete_verified_unit_costs_prevent_sizing(self):
+        candidate = {
+            "action": "BUY CANDIDATE",
+            "asset": "AAPL",
+            "timeframe": "1d",
+            "score": 85,
+            "entry_reference": 100.0,
+            "stop": 95.0,
+            "target": 110.0,
+            "data_valid": True,
+            "data_timestamp": datetime.now(timezone.utc).isoformat(),
+            "data_age_minutes": 0.0,
+            "data_provider": "yahoo",
+        }
+        portfolio = {
+            "status": "OK",
+            "capital_usd": 1000.0,
+            "available_capital_usd": 1000.0,
+            "current_portfolio_risk_usd": 0.0,
+            "open_positions": [],
+            "positions_confirmed": True,
+        }
+        with (
+            patch.object(Bot, "ALLOW_POSITION_SIZING", True),
+            patch.object(Bot, "CLOSE_FEES_CONFIRMED", True),
+            patch.object(Bot, "SPREADS_CONFIRMED", True),
+            patch.object(Bot, "ETORO_EXECUTION_PRICE_BASIS_CONFIRMED", True),
+            patch.object(Bot, "ETORO_EXECUTION_TYPES_CONFIRMED", True),
+            patch.object(Bot, "ETORO_FEE_SCHEDULE_CONFIRMED", True),
+            patch.object(Bot, "ETORO_ACCOUNT_CURRENCY_CONFIRMED", True),
+            patch.object(Bot, "STRATEGY_VALIDATED", True),
+            patch.object(Bot, "classify_asset_economic", return_value={
+                "status": "ELIGIBLE", "blockers": [],
+            }),
+            patch.object(Bot, "estimate_verified_registry_unit_costs", return_value={
+                "valid": True,
+                "complete": False,
+                "unpriced_costs": ["historical_spread_model_not_validated"],
+            }),
+            patch.object(Bot, "calculate_position_size") as calculate,
+        ):
+            result = Bot.apply_validation_gate(candidate, portfolio)
+
+        self.assertEqual(result["validation_status"], "BLOCKED")
+        self.assertIn(
+            "Bloqueo de coste unitario: historical_spread_model_not_validated",
+            result["validation_reasons"],
+        )
+        calculate.assert_not_called()
+
 
 class TestTwelveDataDailyRequestSuppression(unittest.TestCase):
 
