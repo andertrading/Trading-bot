@@ -1601,7 +1601,9 @@ def _estimate_backtest_cost_fields(asset, trade):
             "registry_unpriced_costs": ";".join(
                 verified_costs.get("unpriced_costs", [])
             ),
-            "unpriced_costs": ";".join(combined_unpriced),
+            "scenario_costs_complete": bool(costs.get("complete", False)),
+            "scenario_unpriced_costs": ";".join(costs.get("unpriced_costs", [])),
+            "unpriced_costs": ";".join(verified_costs.get("unpriced_costs", [])),
             "cost_model_execution_type": execution_type,
             "cost_model_assumptions": "; ".join(costs.get("assumptions", [])),
         }
@@ -1623,6 +1625,8 @@ def _estimate_backtest_cost_fields(asset, trade):
             "verified_net_pnl_usd": None,
             "verified_result_R": None,
             "registry_unpriced_costs": "cost_model_calculation_failed",
+            "scenario_costs_complete": False,
+            "scenario_unpriced_costs": "cost_model_calculation_failed",
             "unpriced_costs": "cost_model_calculation_failed",
             "cost_model_execution_type": ETORO_EXECUTION_TYPES.get(asset, "UNKNOWN"),
             "cost_model_assumptions": "",
@@ -2689,6 +2693,8 @@ def main():
         "verified_net_pnl_usd",
         "verified_result_R",
         "registry_unpriced_costs",
+        "scenario_costs_complete",
+        "scenario_unpriced_costs",
         "result_R",
         "result_R_after_known_fees",
         "costs_complete",
