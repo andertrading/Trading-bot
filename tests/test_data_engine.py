@@ -1053,6 +1053,44 @@ class TestIntradayGaps(unittest.TestCase):
         )
 
 
+class TestTwelveDataInstrumentMetadata(unittest.TestCase):
+
+    def test_accepts_complete_crypto_identity_metadata(self):
+        meta = {
+            "exchange": "Test Crypto Exchange",
+            "mic_code": "TESTX",
+            "type": "Digital Currency",
+        }
+        self.assertTrue(
+            engine._validate_twelvedata_instrument_metadata(
+                "BTC", engine.ASSETS["BTC"], meta
+            )
+        )
+
+    def test_rejects_missing_mic_code(self):
+        meta = {
+            "exchange": "Test Crypto Exchange",
+            "type": "Digital Currency",
+        }
+        self.assertFalse(
+            engine._validate_twelvedata_instrument_metadata(
+                "BTC", engine.ASSETS["BTC"], meta
+            )
+        )
+
+    def test_rejects_wrong_asset_type(self):
+        meta = {
+            "exchange": "Test Crypto Exchange",
+            "mic_code": "TESTX",
+            "type": "Common Stock",
+        }
+        self.assertFalse(
+            engine._validate_twelvedata_instrument_metadata(
+                "BTC", engine.ASSETS["BTC"], meta
+            )
+        )
+
+
 class TestTwelveDataAdjustmentMode(unittest.TestCase):
 
     def test_daily_requests_explicit_split_adjustment_and_intraday_raw(self):
@@ -1096,6 +1134,9 @@ class TestTwelveDataAdjustmentMode(unittest.TestCase):
                     "meta": {
                         "symbol": "BTC/USD",
                         "currency_quote": "USD",
+                        "exchange": "Test Crypto Exchange",
+                        "mic_code": "TESTX",
+                        "type": "Digital Currency",
                     },
                     "values": values,
                 }
