@@ -122,7 +122,21 @@ Because fixed per-side commissions are not proportional to quantity, do not appr
 
 Cash reservation must also include entry-side transaction costs, not only entry notional. Do not reserve the full round-trip fee as cash if the exit-side fee is only payable later; account for the timing explicitly.
 
-### 4. Realized net P&L exactly once
+### 4. Minimum-order and fractional-quantity enforcement
+
+The registry records `minimum_notional` and `fractional_allowed`, but current admission logic only verifies that the evidence fields are present and well-formed. It does not compare a proposed trade's notional/quantity with those constraints. The verified cost estimator also does not enforce them, and `portfolio_backtest.simulate_portfolio()` accepts any positive fractional quantity.
+
+Therefore, an asset-level `ELIGIBLE` status must not be treated as proof that every portfolio allocation is executable. Before accepting a simulated position:
+
+- If fractional quantities are not allowed, round quantity down to a permitted whole-unit increment and recompute stop risk, costs, and cash use.
+- Reject the candidate if the rounded notional is below the confirmed minimum order.
+- Recheck that the rounded position still fits the all-in per-trade and aggregate risk budgets.
+- Include the minimum-notional currency/unit in the registry schema if the universe ever includes quote currencies other than USD.
+- Preserve a rejection reason such as `below_minimum_order` or `fractional_quantity_not_allowed`; never silently round up and breach the risk budget.
+
+This enforcement must occur in the portfolio allocator, not only in the signal-level hypothetical cost report.
+
+### 5. Realized net P&L exactly once
 
 At exit, calculate verified round-trip costs once using the allocated quantity and actual simulated exit price:
 
@@ -134,7 +148,7 @@ Then use net P&L for equity, subsequent risk budgets, return, win rate, profit f
 
 Never subtract `result_R_after_known_fees` or any hypothetical-size cost field from portfolio P&L. That would mix position sizes and can double-count costs.
 
-### 5. Fail-closed net reporting
+### 6. Fail-closed net reporting
 
 A portfolio net metric is valid only when every accepted and closed trade has complete verified costs and verified execution-price basis. If one trade is incomplete:
 
@@ -145,7 +159,7 @@ A portfolio net metric is valid only when every accepted and closed trade has co
 
 The current registry state (0/12 eligible) means this gate must remain closed.
 
-### 6. Stop-gap risk is not a hard maximum
+### 7. Stop-gap risk is not a hard maximum
 
 Even a correct all-in loss calculation at the stop price does not guarantee a hard 1% maximum loss. The backtest explicitly models a gap through the stop by exiting at the next candle's open, which can be materially worse than the stop. Daily swing positions are exposed to overnight/weekend gaps, halts, and liquidity shocks.
 
@@ -156,7 +170,7 @@ Therefore:
 - Add gap-stress scenarios and report the frequency/severity of losses beyond the planned budget.
 - If a guaranteed maximum loss is a non-negotiable requirement, the strategy/instrument must support a genuinely guaranteed stop mechanism with its own verified availability and fee model. Ordinary stop orders do not provide that guarantee.
 
-### 7. Risk-limit semantics
+### 8. Risk-limit semantics
 
 The hard 1% per-trade and 3% aggregate limits must apply to modeled all-in stop loss, not only price movement to the stop. Add tests for simultaneous entries, fixed commissions, variable spread/FX costs, and costs that make a candidate infeasible under the risk budget.
 
@@ -165,6 +179,7 @@ The simulator remains a bar-based approximation: spread measurement and historic
 ## Required test matrix before implementation can be accepted
 
 - Actual portfolio quantity, not hypothetical capital sizing, drives cost calculations.
+- Minimum order and fractional-quantity constraints are enforced on the final allocated quantity.
 - Fixed fees are charged once per side and do not scale with quantity.
 - Percentage fees, spread, and FX scale with the correct entry/exit notionals.
 - Spread is deducted exactly once: separately for reference prices, or embedded in executable bid/ask prices, never both.
