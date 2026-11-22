@@ -243,7 +243,26 @@ def run_scheduled_scan(timeframe: str) -> dict:
 
     now = datetime.now(timezone.utc)
     store.prune(now=now, retention_days=180, max_terminal_records=10000)
-    scan_result = Bot.run_scan(timeframes=[timeframe], include_paper_bars=True)
+    state = store.load()
+    paper_state = state.get("paper_forward")
+    paper_assets = {
+        str(signal.get("asset", "")).upper()
+        for signal in state.get("signals", {}).values()
+        if signal.get("timeframe") == timeframe
+        and signal.get("monitor_status", "ACTIVE") == "ACTIVE"
+    }
+    if isinstance(paper_state, dict):
+        paper_assets.update(
+            str(trade.get("asset", "")).upper()
+            for trade in paper_state.get("trades", {}).values()
+            if trade.get("status") == "OPEN" and trade.get("asset")
+        )
+    paper_assets.discard("")
+    scan_result = Bot.run_scan(
+        timeframes=[timeframe],
+        include_paper_bars=True,
+        paper_assets=sorted(paper_assets),
+    )
     results = scan_result.get("results", [])
     by_asset = {
         item.get("asset"): item
@@ -251,8 +270,6 @@ def run_scheduled_scan(timeframe: str) -> dict:
         if isinstance(item, dict) and item.get("timeframe") == timeframe
     }
 
-    state = store.load()
-    paper_state = state.get("paper_forward")
     if not isinstance(paper_state, dict) or paper_state.get("execution_mode") != "PAPER_ONLY":
         paper_state = new_paper_state()
     paper_bars_processed = 0
