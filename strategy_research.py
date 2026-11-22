@@ -216,6 +216,56 @@ def daily_swing_trend_pullback(data, asset, timeframe, index=-1):
     )
 
 
+def daily_swing_ema_reclaim(data, asset, timeframe, index=-1):
+    """Daily swing: established EMA trend plus a price-only EMA20 reclaim.
+
+    This is a separately specified research hypothesis, not a parameter
+    relaxation loop. It deliberately removes RSI/MACD confirmation to test
+    whether those momentum gates caused the first candidate's low frequency.
+    """
+    if timeframe != "1d" or index < 1:
+        return {"action": "NO TRADE"}
+
+    row = data.iloc[index]
+    previous = data.iloc[index - 1]
+    required = (
+        "Close", "Low", "EMA20", "EMA50", "EMA200", "ATR", "ATR_PERCENT",
+    )
+    values = {key: _number(row, key) for key in required}
+    previous_values = {
+        key: _number(previous, key)
+        for key in ("Close", "EMA20")
+    }
+    if any(value is None for value in values.values()):
+        return {"action": "NO TRADE"}
+    if any(value is None for value in previous_values.values()):
+        return {"action": "NO TRADE"}
+
+    established_uptrend = (
+        values["EMA50"] > values["EMA200"]
+        and values["Close"] > values["EMA50"]
+    )
+    pullback_reclaim = (
+        previous_values["Close"] <= previous_values["EMA20"]
+        and values["Close"] > values["EMA20"]
+        and values["Low"] <= values["EMA20"] + 0.20 * values["ATR"]
+    )
+    volatility_ok = 0 < values["ATR_PERCENT"] <= strategies.MAX_ATR_PERCENT
+
+    if not (established_uptrend and pullback_reclaim and volatility_ok):
+        return {"action": "NO TRADE"}
+
+    return _candidate(
+        data, asset, timeframe, index,
+        [
+            "Daily EMA50 sobre EMA200",
+            "Cierre diario sobre EMA50",
+            "Reclaim EMA20 tras pullback diario",
+            "Confirmación por precio; sin filtro RSI/MACD",
+        ],
+    )
+
+
 STRATEGIES = {
     "baseline": baseline,
     "trend_pullback_reclaim": trend_pullback_reclaim,
@@ -223,6 +273,7 @@ STRATEGIES = {
     "mtf_daily_trend_pullback": mtf_daily_trend_pullback,
     "mtf_daily_price_confirmed_pullback": mtf_daily_price_confirmed_pullback,
     "daily_swing_trend_pullback": daily_swing_trend_pullback,
+    "daily_swing_ema_reclaim": daily_swing_ema_reclaim,
 }
 
 
