@@ -74,7 +74,7 @@ def estimate_etoro_trade_costs(
         "market_spread_cost": None,
         "fx_conversion_cost": 0.0,
         "overnight_cost": None,
-        "known_costs_total": 0.0,
+        "known_costs_total": None,
         "unpriced_costs": [],
         "assumptions": [],
     }
