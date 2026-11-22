@@ -267,8 +267,9 @@ def main():
         "requested_end": str(end),
         "results": results,
         "errors": errors,
-        "provider_research_approved": bool(results) and all(
-            item.get("yahoo_research_quality_gate") == "PASS" for item in results
+        "provider_research_approved": (
+            not errors and len(results) == len(ASSETS) == 2
+            and all(item.get("yahoo_research_quality_gate") == "PASS" for item in results)
         ),
         "interpretation": "Diagnostic only; a completed workflow is not a data-quality pass and does not authorize provider replacement.",
     }
