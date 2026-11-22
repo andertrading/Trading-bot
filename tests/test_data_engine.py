@@ -1102,6 +1102,41 @@ class TestTwelveDataInstrumentMetadata(unittest.TestCase):
             )
         )
 
+    def test_enforces_configured_exact_exchange_and_mic(self):
+        config = dict(engine.ASSETS["TSLA"])
+        config["twelvedata_exchange"] = "NASDAQ"
+        config["twelvedata_mic_code"] = "XNAS"
+        meta = {
+            "exchange": "NASDAQ",
+            "mic_code": "XNAS",
+            "type": "Common Stock",
+            "exchange_timezone": "America/New_York",
+        }
+        self.assertTrue(
+            engine._validate_twelvedata_instrument_metadata(
+                "TSLA", config, meta
+            )
+        )
+
+    def test_rejects_exchange_or_mic_mismatch_when_expected(self):
+        config = dict(engine.ASSETS["TSLA"])
+        config["twelvedata_exchange"] = "NASDAQ"
+        config["twelvedata_mic_code"] = "XNAS"
+        for field, wrong in (("exchange", "NYSE"), ("mic_code", "XNYS")):
+            with self.subTest(field=field):
+                meta = {
+                    "exchange": "NASDAQ",
+                    "mic_code": "XNAS",
+                    "type": "Common Stock",
+                    "exchange_timezone": "America/New_York",
+                }
+                meta[field] = wrong
+                self.assertFalse(
+                    engine._validate_twelvedata_instrument_metadata(
+                        "TSLA", config, meta
+                    )
+                )
+
     def test_rejects_wrong_equity_timezone(self):
         meta = {
             "exchange": "NASDAQ",
