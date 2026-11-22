@@ -45,6 +45,18 @@ Cada activo debe superar una ficha de elegibilidad antes de generar backtests:
 
 Si un campo material no se conoce, el activo queda 'COSTS_UNVERIFIED' y no puede contar como candidato validado. No se sustituye un coste desconocido por cero.
 
+### B.1. Impacto de costes con el capital de referencia de 1.000 USD
+
+Con el límite máximo actual de riesgo, una operación al 1% representa 10 USD de riesgo bruto planificado:
+
+- Acciones con comisión pública de 1 USD por lado: 2 USD de ida y vuelta, equivalentes al 20% de ese riesgo, antes del spread.
+- Acciones con comisión de 2 USD por lado: 4 USD de ida y vuelta, equivalentes al 40% del riesgo, antes del spread.
+- Con un nivel de riesgo del 0,25% (2,50 USD), esas mismas comisiones consumen entre el 80% y el 160% del riesgo planificado.
+- ETF REAL: sin comisión de operación publicada, pero el market spread y cualquier cargo aplicable siguen reduciendo la expectativa.
+- Cripto REAL Bronze/Silver/Gold: 1% por posición en cada lado de la operación según el esquema publicado. Por ejemplo, con stop del 5% y riesgo bruto de 10 USD, el nominal teórico sería 200 USD; una comisión de ida y vuelta del 2% del nominal sería 4 USD (40% del riesgo), antes del spread.
+
+Estos ejemplos son sensibilidad económica, no costes confirmados de los tickets concretos. Refuerzan la prioridad de evaluar ETF REAL primero y mantener cripto fuera del MVP hasta demostrar que su expectativa bruta puede absorber las comisiones. No se debe aumentar el riesgo para compensar costes.
+
 ### C. Reducir el universo de forma controlada
 
 No fijar ahora un nuevo universo definitivo. Evaluar primero los 2 ETF existentes y las acciones existentes, pero priorizar los instrumentos que puedan confirmarse como REAL y cuyo coste total estimado sea pequeño frente al movimiento esperado. Mantener las criptomonedas fuera del MVP de eToro hasta que su comisión por lado, spread y clasificación de ejecución demuestren viabilidad. No borrarlas del repositorio ni del histórico: se quedan en el laboratorio.
