@@ -590,7 +590,7 @@ class RealtimeQuoteValidationTests(unittest.TestCase):
             normalize_realtime_quotes(
                 response,
                 [101],
-                datetime(2026, 11, 23, 15, 0, 0, tzinfo=timezone.utc),
+                datetime(2026, 11, 23, 15, 0, 37, tzinfo=timezone.utc),
                 asset_calendars={101: "XNYS"},
             )
 
