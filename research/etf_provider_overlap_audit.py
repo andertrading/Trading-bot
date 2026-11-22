@@ -18,8 +18,8 @@ import requests
 BASE_EODHD = "https://eodhd.com/api"
 BASE_YAHOO = "https://query1.finance.yahoo.com/v8/finance/chart"
 ASSETS = {
-    "CSPX": {"eodhd": "CSPX.LSE", "yahoo": "CSPX.L", "isin": "IE00B5BMR087"},
-    "CNDX": {"eodhd": "CNDX.LSE", "yahoo": "CNDX.L", "isin": "IE00B53SZB19"},
+    "CSPX": {"eodhd": "CSPX.LSE", "yahoo": "CSPX.L", "alternate": "CSSPX.SW", "isin": "IE00B5BMR087"},
+    "CNDX": {"eodhd": "CNDX.LSE", "yahoo": "CNDX.L", "alternate": "CSNDX.SW", "isin": "IE00B53SZB19"},
 }
 OUT = Path("etf_provider_overlap")
 OUT.mkdir(exist_ok=True)
@@ -72,8 +72,9 @@ def load_eodhd(session, asset, spec, token, start, end):
     return frame
 
 
-def load_yahoo(session, asset, spec, start, end):
-    payload = get_json(session, f"{BASE_YAHOO}/{spec['yahoo']}", {
+def load_yahoo(session, asset, spec, start, end, symbol_key="yahoo", expected_market="london"):
+    symbol = spec[symbol_key]
+    payload = get_json(session, f"{BASE_YAHOO}/{symbol}", {
         "period1": int(pd.Timestamp(start, tz="UTC").timestamp()),
         "period2": int(pd.Timestamp(end + timedelta(days=1), tz="UTC").timestamp()),
         "interval": "1d", "events": "history", "includeAdjustedClose": "true",
@@ -86,10 +87,12 @@ def load_yahoo(session, asset, spec, start, end):
     if str(meta.get("currency", "")).upper() != "USD":
         raise RuntimeError(f"{asset}: Yahoo moneda inesperada")
     exchange = str(meta.get("fullExchangeName") or meta.get("exchangeName") or "")
-    if not exchange or not any(
-        marker in exchange.lower() for marker in ("london", "lse")
-    ):
-        raise RuntimeError(f"{asset}: Yahoo no confirma listing LSE ({exchange or 'sin mercado'})")
+    markers = ("london", "lse") if expected_market == "london" else ("swiss", "six")
+    if not exchange or not any(marker in exchange.lower() for marker in markers):
+        raise RuntimeError(
+            f"{asset}: Yahoo no confirma mercado {expected_market} "
+            f"para {symbol} ({exchange or 'sin mercado'})"
+        )
     quote = (result.get("indicators", {}).get("quote") or [{}])[0]
     timestamps = result.get("timestamp") or []
     if not timestamps:
@@ -108,8 +111,12 @@ def load_yahoo(session, asset, spec, start, end):
     return frame, exchange
 
 
-def compare(asset, eod, yahoo, exchange):
-    joined = eod.add_suffix("_eodhd").join(yahoo.add_suffix("_yahoo"), how="inner")
+def compare(asset, eod, yahoo, exchange, alternate):
+    joined = (
+        eod.add_suffix("_eodhd")
+        .join(yahoo.add_suffix("_yahoo"), how="inner")
+        .join(alternate.add_suffix("_six"), how="left")
+    )
     joined = joined.dropna(subset=[
         "Open_eodhd", "High_eodhd", "Low_eodhd", "Close_eodhd",
         "Open_yahoo", "High_yahoo", "Low_yahoo", "Close_yahoo",
@@ -145,6 +152,18 @@ def compare(asset, eod, yahoo, exchange):
             float(volume_ratio.quantile(0.95)) if not volume_ratio.empty else None
         ),
     })
+    # Explicitly surface extreme LSE-vs-EODHD and SIX-vs-EODHD OHLC discrepancies.
+    for col in ("Open", "High", "Low", "Close"):
+        primary_error = (
+            joined[f"{col}_yahoo"] / joined[f"{col}_eodhd"] - 1.0
+        ).abs() * 100
+        alternate_error = (
+            joined[f"{col}_six"] / joined[f"{col}_eodhd"] - 1.0
+        ).abs() * 100
+        metrics.setdefault("outliers_over_1pct", {})[col] = {
+            "london_dates": [str(x) for x in joined.index[primary_error > 1.0]],
+            "six_dates": [str(x) for x in joined.index[alternate_error > 1.0]],
+        }
     joined.to_csv(OUT / f"{asset.lower()}_overlap.csv", index_label="date")
     return metrics
 
@@ -164,8 +183,17 @@ def main():
     for asset, spec in ASSETS.items():
         try:
             eod = load_eodhd(session, asset, spec, token, start, end)
-            yahoo, exchange = load_yahoo(session, asset, spec, start, end)
-            result = compare(asset, eod, yahoo, exchange)
+            yahoo, exchange = load_yahoo(
+                session, asset, spec, start, end,
+                symbol_key="yahoo", expected_market="london",
+            )
+            alternate, alternate_exchange = load_yahoo(
+                session, asset, spec, start, end,
+                symbol_key="alternate", expected_market="swiss",
+            )
+            result = compare(asset, eod, yahoo, exchange, alternate)
+            result["alternate_symbol"] = spec["alternate"]
+            result["alternate_exchange"] = alternate_exchange
             results.append(result)
             print(json.dumps(result, sort_keys=True))
         except Exception as exc:
