@@ -115,10 +115,13 @@ jobs:
           python - <<'PY'
           import backtest_v3
 
-          expected = len(backtest_v3.get_assets()) * 2
+          assets = backtest_v3.get_assets()
+          timeframes = backtest_v3.get_timeframes()
+          expected = len(assets) * len(timeframes)
           verified = 0
-          for asset, ticker in backtest_v3.get_assets():
-              for interval in ("15m", "1d"):
+
+          for asset, ticker in assets:
+              for interval in timeframes:
                   frame = backtest_v3.download_history(
                       ticker, interval, asset=asset
                   )
@@ -130,11 +133,16 @@ jobs:
                           f"Replay rechazado: {asset} {interval}: {reason}"
                       )
                   verified += 1
+
           if verified != expected:
               raise SystemExit(
                   f"Snapshots reproducidos {verified}/{expected}"
               )
-          print(f"Replay reproducible: {verified}/{expected} históricos")
+
+          print(
+              f"Replay reproducible: {verified}/{expected} históricos "
+              f"({', '.join(timeframes)})"
+          )
           PY
 
       - name: Generar informe técnico ampliado
