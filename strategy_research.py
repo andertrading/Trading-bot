@@ -254,6 +254,21 @@ def _net_portfolio_cost_scenarios():
     ]
 
 
+def _asset_class_universes(asset_names, assets_config=None):
+    """Return deterministic stock/crypto subsets for isolated portfolio tests."""
+    assets_config = assets_config or bt.ASSETS
+    groups = {"US_STOCKS": [], "CRYPTO": []}
+    for asset in sorted({str(name).upper() for name in asset_names}):
+        asset_type = str(
+            assets_config.get(asset, {}).get("type", "")
+        ).upper()
+        if asset_type == "STOCK":
+            groups["US_STOCKS"].append(asset)
+        elif asset_type == "CRYPTO":
+            groups["CRYPTO"].append(asset)
+    return {name: values for name, values in groups.items() if values}
+
+
 def _snapshot_coverage(assets, timeframes, manifest):
     """Compare immutable snapshots with the configured asset/timeframe universe."""
     if not isinstance(manifest, list):
@@ -982,6 +997,7 @@ def main():
     # shared 15m history spans almost the full 700-day snapshot.
     core_synchronized_rows = []
     core_net_portfolio_rows = []
+    mtf_asset_class_net_rows = []
     for timeframe in timeframes:
         core_window = core_calendar_summary["by_timeframe"][
             str(timeframe).lower()
@@ -1068,11 +1084,78 @@ def main():
                         **net_portfolio["summary"],
                     })
 
+            # Isolate stock and crypto economics for the single best-performing
+            # research hypothesis, without allowing one class to subsidize the
+            # other. Each class receives its own independent virtual $1,000.
+            if (
+                strategy_name == "mtf_daily_price_confirmed_pullback"
+                and str(timeframe).lower() == "15m"
+            ):
+                class_universes = _asset_class_universes(core_asset_names)
+                all_cost_scenarios = _net_portfolio_cost_scenarios()
+                for asset_class, class_assets in class_universes.items():
+                    class_asset_set = set(class_assets)
+                    class_trades = [
+                        trade for trade in selected
+                        if str(trade.get("asset", "")).upper() in class_asset_set
+                    ]
+                    if not class_trades:
+                        continue
+                    class_portfolio = bt.simulate_portfolio(
+                        class_trades, capital_usd=bt.INITIAL_CAPITAL_USD
+                    )
+                    if asset_class == "US_STOCKS":
+                        relevant_scenarios = [
+                            item for item in all_cost_scenarios
+                            if item[0] in {
+                                "ETORO_REAL_STOCK_1USD_CRYPTO_1PCT",
+                                "ETORO_REAL_STOCK_2USD_CRYPTO_1PCT",
+                            }
+                        ]
+                    else:
+                        relevant_scenarios = [
+                            item for item in all_cost_scenarios
+                            if item[0] in {
+                                "ETORO_REAL_STOCK_1USD_CRYPTO_1PCT",
+                                "ETORO_STOCKS_BITVAVO_USDC_MAKER_XLM_EUR_MAKER",
+                                "ETORO_STOCKS_BITVAVO_USDC_TAKER_XLM_EUR_TAKER",
+                            }
+                        ]
+                    for broker_scenario, cost_model, fee_model_note in relevant_scenarios:
+                        for spread_bps in (0, 5, 10, 20):
+                            net_class_portfolio = bt.simulate_portfolio(
+                                class_trades,
+                                capital_usd=bt.INITIAL_CAPITAL_USD,
+                                execution_costs={
+                                    **cost_model,
+                                    "spread_bps": spread_bps,
+                                },
+                            )
+                            mtf_asset_class_net_rows.append({
+                                "strategy": strategy_name,
+                                "timeframe": timeframe,
+                                "asset_class": asset_class,
+                                "assets_included": ",".join(class_assets),
+                                "trades_in_class": len(class_trades),
+                                "independent_reference_capital_usd": bt.INITIAL_CAPITAL_USD,
+                                "portfolio_is_additive": False,
+                                "broker_scenario": broker_scenario,
+                                "fee_model_note": fee_model_note,
+                                "spread_bps_scenario": spread_bps,
+                                "gross_ending_equity_usd": class_portfolio["summary"].get(
+                                    "ending_equity_usd"
+                                ),
+                                **net_class_portfolio["summary"],
+                            })
+
     pd.DataFrame(core_synchronized_rows).to_csv(
         "strategy_research_core_synchronized_calendar.csv", index=False
     )
     pd.DataFrame(core_net_portfolio_rows).to_csv(
         "strategy_research_core_net_aware_portfolio.csv", index=False
+    )
+    pd.DataFrame(mtf_asset_class_net_rows).to_csv(
+        "strategy_research_mtf_asset_class_net_portfolio.csv", index=False
     )
 
     pd.DataFrame(synchronized_rows).to_csv(
