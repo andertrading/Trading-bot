@@ -223,3 +223,10 @@ La ruta verificada expresa todos los componentes en moneda de cuenta: las comisi
 
 
 La comisión de conversión FX del registro se expresa también en puntos porcentuales mediante `conversion_fee_unit="PERCENT"`; por ejemplo, `0.2` significa `0.2%`, no `20%` ni una fracción decimal de `0.2`.
+
+
+### Conexión con el backtest y el gate de candidatas
+
+El backtest conserva el ajuste parcial por tarifas públicas como sensibilidad, pero el campo `costs_complete` y las métricas netas verificadas dependen exclusivamente de `estimate_verified_registry_trade_costs`. Añade columnas separadas para coste completo verificado, P&L neto y resultado R neto; si el registro no está completo, esos campos permanecen vacíos y no entran en métricas netas.
+
+El gate de candidatas de `Bot.py` consulta además `asset_economic_eligibility` directamente. Las banderas globales de confirmación ya no pueden convertir un activo `COSTS_UNVERIFIED` en candidato aprobado. La comprobación de coste mostrada al usuario también usa el registro. La aprobación sigue siendo manual y no habilita ejecución automática.
