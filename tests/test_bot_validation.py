@@ -429,7 +429,13 @@ class TestBotValidation(unittest.TestCase):
             "open_positions": [],
             "positions_confirmed": True,
         }
-        candidate = {**self.candidate, "sizing_result": sizing_result}
+        candidate = {
+            **self.candidate,
+            "sizing_result": sizing_result,
+            "data_valid": True,
+            "data_timestamp": "2026-01-01T00:00:00+00:00",
+            "data_age_minutes": 1.0,
+        }
 
         with patch.object(Bot, "ALLOW_POSITION_SIZING", True), \
              patch.object(Bot, "CLOSE_FEES_CONFIRMED", True), \
@@ -488,6 +494,42 @@ class TestBotValidation(unittest.TestCase):
             "round_trip_fee_evidence_missing" in reason
             for reason in result["validation_reasons"]
         ))
+
+    def test_global_flags_and_registry_cannot_bypass_missing_market_data_validation(self):
+        sizing_result = {
+            "status": "SIMULACION_NO_VALIDADA",
+            "validated": False,
+            "risk_amount_usd": 5.0,
+            "position_risk_usd": 4.0,
+            "fixed_costs_usd": 1.0,
+            "total_reserved_risk_usd": 5.0,
+        }
+        portfolio = {
+            "status": "OK",
+            "open_positions": [],
+            "positions_confirmed": True,
+        }
+        candidate = {**self.candidate, "sizing_result": sizing_result}
+        with patch.object(Bot, "ALLOW_POSITION_SIZING", True), \
+             patch.object(Bot, "CLOSE_FEES_CONFIRMED", True), \
+             patch.object(Bot, "SPREADS_CONFIRMED", True), \
+             patch.object(Bot, "FX_CONVERSION_CONFIRMED", True), \
+             patch.object(Bot, "ETORO_EXECUTION_TYPES_CONFIRMED", True), \
+             patch.object(Bot, "ETORO_FEE_SCHEDULE_CONFIRMED", True), \
+             patch.object(Bot, "ETORO_ACCOUNT_CURRENCY_CONFIRMED", True), \
+             patch.object(Bot, "ETORO_EXECUTION_PRICE_BASIS_CONFIRMED", True), \
+             patch.object(Bot, "STRATEGY_VALIDATED", True), \
+             patch.object(Bot, "classify_asset_economic", return_value={
+                 "status": "ELIGIBLE", "blockers": []
+             }):
+            result = Bot.apply_validation_gate(candidate, portfolio)
+        self.assertEqual(result["validation_status"], "BLOCKED")
+        self.assertFalse(result["tradable"])
+        self.assertEqual(result["data_validation_status"], "INVALID")
+        self.assertIn(
+            "Datos de mercado no validados o timestamp de datos no verificable",
+            result["validation_reasons"],
+        )
 
     def test_sized_admission_gate_blocks_unconfirmed_open_positions(self):
         sizing_result = {
