@@ -116,6 +116,29 @@ class PaperForwardTests(unittest.TestCase):
         )
         self.assertAlmostEqual(self.state["open_risk_usd"], 2.5)
 
+    def test_aggregate_cash_reservation_prevents_implicit_leverage(self):
+        fill_bar = bar("2026-11-22T10:15:00+00:00", 99, 101, 98, 100)
+        for index in range(5):
+            process_signal_bar(
+                self.state,
+                signal(f"cash-{index}"),
+                fill_bar,
+            )
+        statuses = [
+            self.state["trades"][f"cash-{index}"]["status"]
+            for index in range(5)
+        ]
+        self.assertEqual(statuses.count("OPEN"), 4)
+        self.assertEqual(statuses.count("REJECTED_NO_LEVERAGE_CASH"), 1)
+        self.assertLessEqual(
+            sum(
+                trade.get("notional_usd", 0.0)
+                for trade in self.state["trades"].values()
+                if trade["status"] == "OPEN"
+            ),
+            self.state["equity_usd"],
+        )
+
     def test_open_trade_exits_at_monitoring_deadline(self):
         item = signal()
         item["monitoring_expires_at"] = "2026-11-22T10:30:00+00:00"
