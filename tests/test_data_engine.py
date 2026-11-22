@@ -2564,6 +2564,13 @@ class TestYahooAlternateDailyOhlcRepair(unittest.TestCase):
         self.bad_date = pd.Timestamp("2026-03-02", tz="UTC")
         self.assert_date_present = self.bad_date in self.index
 
+    def test_only_structurally_invalid_primary_field_is_excluded_from_comparison(self):
+        row = self.primary.loc[self.bad_date].copy()
+        row["Low"] = 101.5
+        trusted = engine._trusted_primary_ohlc_columns(row)
+        self.assertNotIn("Low", trusted)
+        self.assertTrue({"Open", "High", "Close"}.issubset(trusted))
+
     def test_repairs_structurally_invalid_lse_bar_from_same_date_six_bar(self):
         self.assertTrue(self.assert_date_present)
         self.primary.loc[self.bad_date, "Low"] = 101.5
