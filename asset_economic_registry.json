@@ -38,6 +38,8 @@
       },
       "spread": {
         "bid_ask_bps": null,
+        "treatment": null,
+        "evidence_scope": null,
         "confirmed": false,
         "source": null,
         "observed_at": null
@@ -102,6 +104,8 @@
       },
       "spread": {
         "bid_ask_bps": null,
+        "treatment": null,
+        "evidence_scope": null,
         "confirmed": false,
         "source": null,
         "observed_at": null
@@ -166,6 +170,8 @@
       },
       "spread": {
         "bid_ask_bps": null,
+        "treatment": null,
+        "evidence_scope": null,
         "confirmed": false,
         "source": null,
         "observed_at": null
@@ -230,6 +236,8 @@
       },
       "spread": {
         "bid_ask_bps": null,
+        "treatment": null,
+        "evidence_scope": null,
         "confirmed": false,
         "source": null,
         "observed_at": null
@@ -294,6 +302,8 @@
       },
       "spread": {
         "bid_ask_bps": null,
+        "treatment": null,
+        "evidence_scope": null,
         "confirmed": false,
         "source": null,
         "observed_at": null
@@ -358,6 +368,8 @@
       },
       "spread": {
         "bid_ask_bps": null,
+        "treatment": null,
+        "evidence_scope": null,
         "confirmed": false,
         "source": null,
         "observed_at": null
@@ -422,6 +434,8 @@
       },
       "spread": {
         "bid_ask_bps": null,
+        "treatment": null,
+        "evidence_scope": null,
         "confirmed": false,
         "source": null,
         "observed_at": null
@@ -486,6 +500,8 @@
       },
       "spread": {
         "bid_ask_bps": null,
+        "treatment": null,
+        "evidence_scope": null,
         "confirmed": false,
         "source": null,
         "observed_at": null
@@ -550,6 +566,8 @@
       },
       "spread": {
         "bid_ask_bps": null,
+        "treatment": null,
+        "evidence_scope": null,
         "confirmed": false,
         "source": null,
         "observed_at": null
@@ -614,6 +632,8 @@
       },
       "spread": {
         "bid_ask_bps": null,
+        "treatment": null,
+        "evidence_scope": null,
         "confirmed": false,
         "source": null,
         "observed_at": null
@@ -678,6 +698,8 @@
       },
       "spread": {
         "bid_ask_bps": null,
+        "treatment": null,
+        "evidence_scope": null,
         "confirmed": false,
         "source": null,
         "observed_at": null
@@ -742,6 +764,8 @@
       },
       "spread": {
         "bid_ask_bps": null,
+        "treatment": null,
+        "evidence_scope": null,
         "confirmed": false,
         "source": null,
         "observed_at": null
