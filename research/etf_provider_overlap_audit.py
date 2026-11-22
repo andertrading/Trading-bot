@@ -469,6 +469,8 @@ def compare(asset, eod, yahoo, exchange, alternate, yahoo_yf, alternate_yf, twel
     twelvedata_metrics = None
     if twelvedata is not None:
         twelvedata_metrics = {
+            "metadata": twelvedata.attrs.get("twelvedata_search_candidate"),
+            "time_series_metadata": twelvedata.attrs.get("twelvedata_time_series_meta"),
             "integrity": ohlc_integrity(twelvedata),
             "vs_eodhd_price_abs_pct_error": _price_error_metrics(
                 eod, twelvedata, "_eodhd", "_twelvedata"
