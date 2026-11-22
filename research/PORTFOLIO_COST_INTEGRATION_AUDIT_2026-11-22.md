@@ -90,6 +90,7 @@ The repository already contains a potentially useful forward-evidence source in 
 
 - `EtoroReadOnlyClient.get_realtime_quotes()` obtains eToro bid/ask quotes for exact instrument IDs and validates that they are real-time, complete, non-crossed, and fresh (default 30 seconds while the relevant market is open).
 - `get_validated_what_if_costs()` calls the hypothetical-cost endpoint with `action="open"` and validates the returned instrument ID, USD cost components, and freshness (default 300 seconds).
+- `get_validated_instrument_eligibility()` validates account-specific instrument permission, minimum exposure, maximum units, quantity types, and supported long/settlement configurations. This is a more authoritative source for per-account minimum-order and fractional-quantity constraints than manually filling the registry, although it still requires explicit authorization and does not replace historical execution evidence.
 - The quote path uses the market-data rates endpoint; it does not need account positions or balances.
 - The hypothetical-cost endpoint is restricted to opening estimates by the current client validation. It must not be assumed to provide a complete round-trip cost until the response semantics and close-side fees are separately verified.
 - `Bot.py` and `scheduled_scan.py` do not currently call this client; it is not integrated into signal validation or scheduled capture.
