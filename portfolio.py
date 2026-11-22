@@ -312,7 +312,7 @@ def can_add_sized_trade(
     if not positions_confirmed or not isinstance(open_positions, (list, tuple)):
         return {
             "allowed": False,
-            "reason": "No se puede confirmar el efectivo disponible sin la lista de posiciones abiertas.",
+            "reason": "Las posiciones abiertas no están confirmadas; no se puede verificar el efectivo disponible.",
             "currency": "USD",
         }
 
