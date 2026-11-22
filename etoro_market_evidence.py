@@ -248,7 +248,16 @@ def collect_market_evidence(client: Any, *, symbols: Mapping[str, Mapping[str, A
         # exchange is closed, but it cannot support a fresh hypothetical cost
         # estimate. Avoid predictable stale-cost errors until realtime resumes.
         quote_record = record.get("quote")
-        if quote_record is not None and quote_record.get("quote_type") != "realtime":
+        if quote_record is None:
+            record["hypothetical_open_cost"] = {
+                "status": "SKIPPED_NO_REALTIME_QUOTE",
+                "reason": (
+                    "No validated quote is available; hypothetical costs are not "
+                    "requested without a current realtime market snapshot."
+                ),
+            }
+            continue
+        if quote_record.get("quote_type") != "realtime":
             record["hypothetical_open_cost"] = {
                 "status": "SKIPPED_MARKET_CLOSED",
                 "reason": (

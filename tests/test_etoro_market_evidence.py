@@ -110,6 +110,29 @@ class MarketEvidenceTests(unittest.TestCase):
         self.assertEqual(report["summary"]["assets_with_validated_open_costs"], 0)
         self.assertEqual(report["summary"]["status"], "PARTIAL")
 
+    def test_quote_failure_skips_hypothetical_cost_request(self):
+        class QuoteFailureClient(FakeMarketEvidenceClient):
+            def get_realtime_quotes(self, ids, now, asset_calendars=None):
+                self.quote_requests += 1
+                raise EtoroAPIError("Cotización no disponible")
+
+        client = QuoteFailureClient()
+        report = collect_market_evidence(
+            client,
+            symbols={"AAPL": {"market_calendar": "XNYS", "type": "STOCK"}},
+            now_utc=datetime(2026, 11, 22, 12, 0, tzinfo=timezone.utc),
+        )
+
+        asset = report["assets"]["AAPL"]
+        self.assertIsNone(asset["quote"])
+        self.assertEqual(
+            asset["hypothetical_open_cost"]["status"],
+            "SKIPPED_NO_REALTIME_QUOTE",
+        )
+        self.assertEqual(client.cost_payloads, [])
+        self.assertEqual(report["summary"]["assets_with_validated_open_costs"], 0)
+        self.assertEqual(report["summary"]["status"], "PARTIAL")
+
     def test_configured_etoro_symbol_is_used_for_exact_instrument_resolution(self):
         class ExactEtoroSymbolClient(FakeMarketEvidenceClient):
             def __init__(self):
