@@ -585,7 +585,7 @@ class RealtimeQuoteValidationTests(unittest.TestCase):
             self.response.data["results"][0],
             date="2026-11-21T12:00:10Z",
         )]}
-        with self.assertRaises(EtoroAPIError):
+        with self.assertRaisesRegex(EtoroAPIError, "adelantada_segundos"):
             normalize_realtime_quotes(EtoroResponse(future, 200, {}), [101], self.now)
 
     def test_closed_exchange_accepts_only_quote_from_last_completed_session(self):
