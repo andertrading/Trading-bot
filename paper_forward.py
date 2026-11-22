@@ -74,6 +74,15 @@ def _open_risk(state: dict) -> float:
     )
 
 
+def _open_notional(state: dict) -> float:
+    """Reserve aggregate cash for all open long positions; no leverage assumed."""
+    return sum(
+        float(trade.get("notional_usd", 0.0))
+        for trade in state["trades"].values()
+        if trade.get("status") == "OPEN"
+    )
+
+
 def _bar_values(bar: dict) -> tuple[datetime, float, float, float, float]:
     if not isinstance(bar, dict):
         raise ValueError("bar must be a dictionary")
@@ -200,7 +209,7 @@ def process_signal_bar(
                         else:
                             quantity = risk_budget / (fill - stop)
                             notional = quantity * fill
-                            if notional > equity + 1e-9:
+                            if _open_notional(state) + notional > equity + 1e-9:
                                 trade.update({"status": "REJECTED_NO_LEVERAGE_CASH",
                                               "completed_at": timestamp.isoformat()})
                             else:
