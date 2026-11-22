@@ -64,7 +64,8 @@ def classify_asset(
         "asset": asset,
         "name": (config or {}).get("name", asset),
         "asset_type": (config or {}).get("type"),
-        "execution_type": None,
+        "configured_execution_type": None,
+        "execution_type_confirmed": False,
         "status": None,
         "blockers": [],
         "policy": "DAILY_LONG_ONLY_UNLEVERAGED_REAL",
@@ -89,9 +90,10 @@ def classify_asset(
         if execution_type_confirmed is None
         else bool(execution_type_confirmed)
     )
-    result["execution_type"] = (
+    result["configured_execution_type"] = (
         str(configured_execution).upper() if configured_execution else None
     )
+    result["execution_type_confirmed"] = execution_confirmed
 
     if execution_confirmed and (
         configured_execution is None
