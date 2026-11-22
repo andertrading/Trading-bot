@@ -1,0 +1,50 @@
+name: eToro Read-Only Market Evidence
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: etoro-read-only-market-evidence
+  cancel-in-progress: false
+
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      ETORO_API_KEY: ${{ secrets.ETORO_API_KEY }}
+      ETORO_USER_KEY: ${{ secrets.ETORO_USER_KEY }}
+      ETORO_EVIDENCE_OUTPUT: artifacts/etoro_market_evidence.json
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Check credentials without exposing values
+        run: |
+          python - <<'PY'
+          import os
+          missing = [key for key in ("ETORO_API_KEY", "ETORO_USER_KEY") if not os.getenv(key)]
+          if missing:
+              raise SystemExit("Missing GitHub Actions secrets: " + ", ".join(missing))
+          print("eToro credentials are present; values are not displayed.")
+          PY
+      - name: Capture market-only evidence
+        run: python etoro_market_evidence.py --sample-amount-usd 100
+      - name: Upload evidence report
+        if: always() && hashFiles('artifacts/etoro_market_evidence.json') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: etoro-market-evidence
+          path: artifacts/etoro_market_evidence.json
+          if-no-files-found: error
+          retention-days: 30
