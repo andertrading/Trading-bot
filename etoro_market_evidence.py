@@ -220,7 +220,11 @@ def collect_market_evidence(client: Any, *, symbols: Mapping[str, Mapping[str, A
                 "midpoint": str(midpoint),
                 "spread_absolute": str(spread_absolute),
                 "spread_bps": format(spread_bps.normalize(), "f") if spread_bps is not None else None,
-                "spread_evidence_scope": "CURRENT_SNAPSHOT_ONLY",
+                "spread_evidence_scope": (
+                    "CURRENT_SNAPSHOT_ONLY"
+                    if quote.quote_type == "realtime"
+                    else "LAST_COMPLETED_SESSION_ONLY"
+                ),
                 "timestamp": quote.timestamp.isoformat(),
                 "age_seconds": quote_age_seconds,
                 "quote_type": quote.quote_type,
@@ -234,6 +238,20 @@ def collect_market_evidence(client: Any, *, symbols: Mapping[str, Mapping[str, A
             record["hypothetical_open_cost"] = {
                 "status": "SKIPPED",
                 "reason": "No confirmed REAL, LONG, 1x configuration for this account.",
+            }
+            continue
+
+        # A last-session quote is valid historical market evidence while the
+        # exchange is closed, but it cannot support a fresh hypothetical cost
+        # estimate. Avoid predictable stale-cost errors until realtime resumes.
+        quote_record = record.get("quote")
+        if quote_record is not None and quote_record.get("quote_type") != "realtime":
+            record["hypothetical_open_cost"] = {
+                "status": "SKIPPED_MARKET_CLOSED",
+                "reason": (
+                    "The exchange is closed; only the last completed session quote "
+                    "is available. Re-run when realtime quotes resume."
+                ),
             }
             continue
 
@@ -262,10 +280,31 @@ def collect_market_evidence(client: Any, *, symbols: Mapping[str, Mapping[str, A
             record["errors"].append(f"hypothetical_open_cost: {type(exc).__name__}: {exc}")
 
     failures = sum(bool(item["errors"]) for item in report["assets"].values())
+    closed_market_skips = sum(
+        (item.get("hypothetical_open_cost") or {}).get("status") == "SKIPPED_MARKET_CLOSED"
+        for item in report["assets"].values()
+    )
+    validated_open_costs = sum(
+        (item.get("hypothetical_open_cost") or {}).get("scope") == "HYPOTHETICAL_OPEN_ONLY"
+        for item in report["assets"].values()
+    )
+    last_session_quotes = sum(
+        (item.get("quote") or {}).get("quote_type") == "last_session"
+        for item in report["assets"].values()
+    )
     report["summary"] = {
         "configured_assets": len(report["assets"]), "resolved_instruments": len(resolved),
         "assets_with_errors": failures,
-        "status": "COMPLETE" if failures == 0 and len(resolved) == len(report["assets"]) else "PARTIAL",
+        "assets_with_last_session_quotes": last_session_quotes,
+        "assets_with_market_closed_cost_skips": closed_market_skips,
+        "assets_with_validated_open_costs": validated_open_costs,
+        "status": (
+            "COMPLETE"
+            if failures == 0
+            and len(resolved) == len(report["assets"])
+            and closed_market_skips == 0
+            else "PARTIAL"
+        ),
         "net_performance_validation": "NOT_VALIDATED",
     }
     return report
