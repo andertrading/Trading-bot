@@ -229,18 +229,45 @@ class TestPortfolio(unittest.TestCase):
             "position_notional_usd": 100.0,
             "cash_required_usd": 102,
             "costs_per_unit_quote": 0.0,
-            "available_capital_usd": 1000.0,
+            "available_capital_usd": 500.0,
             "total_reserved_risk_usd": 10.0,
         }
         result = can_add_sized_trade(
             sizing,
-            open_positions=[{"risk_usd": 20.0}],
+            open_positions=[{"risk_usd": 20.0, "notional_usd": 500.0}],
             positions_confirmed=True,
             capital_usd=1000,
         )
         self.assertTrue(result["allowed"])
         self.assertAlmostEqual(result["proposed_risk_usd"], 10.0)
         self.assertFalse(result["live_execution_authorized"])
+
+    def test_sized_trade_admission_rejects_cash_above_capital_after_open_notional(self):
+        from portfolio import can_add_sized_trade
+
+        sizing = {
+            "status": "SIMULACION_NO_VALIDADA",
+            "validated": False,
+            "risk_amount_usd": 10.0,
+            "position_risk_usd": 8.0,
+            "fixed_costs_usd": 2.0,
+            "position_size": 1.0,
+            "entry_price_quote": 100.0,
+            "quote_to_usd": 1.0,
+            "position_notional_usd": 100.0,
+            "cash_required_usd": 102.0,
+            "costs_per_unit_quote": 0.0,
+            "available_capital_usd": 500.0,
+            "total_reserved_risk_usd": 10.0,
+        }
+        result = can_add_sized_trade(
+            sizing,
+            open_positions=[{"risk_usd": 10.0, "notional_usd": 600.0}],
+            positions_confirmed=True,
+            capital_usd=1000,
+        )
+        self.assertFalse(result["allowed"])
+        self.assertIn("capital libre", result["reason"])
 
     def test_sized_trade_admission_rejects_missing_cash_evidence(self):
         from portfolio import can_add_sized_trade
@@ -331,12 +358,12 @@ class TestPortfolio(unittest.TestCase):
             "position_notional_usd": 100.0,
             "cash_required_usd": 101,
             "costs_per_unit_quote": 0.0,
-            "available_capital_usd": 1000.0,
+            "available_capital_usd": 900.0,
             "total_reserved_risk_usd": 10.0,
         }
         result = can_add_sized_trade(
             sizing,
-            open_positions=[{"risk_usd": 21.0}],
+            open_positions=[{"risk_usd": 21.0, "notional_usd": 100.0}],
             positions_confirmed=True,
             capital_usd=1000,
         )
