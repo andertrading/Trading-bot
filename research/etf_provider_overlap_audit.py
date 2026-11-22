@@ -112,14 +112,31 @@ def load_yahoo(session, asset, spec, start, end, symbol_key="yahoo", expected_ma
     return frame, exchange
 
 
+def _get_twelvedata_json(session, url, params, stage):
+    response = session.get(url, params=params, timeout=45)
+    if response.status_code >= 400:
+        raise RuntimeError(f"Twelve Data {stage} HTTP {response.status_code}")
+    payload = response.json()
+    if isinstance(payload, dict) and payload.get("status") == "error":
+        raise RuntimeError(
+            f"Twelve Data {stage} API code {payload.get('code', 'unknown')}"
+        )
+    return payload
+
+
 def load_twelvedata_daily(session, asset, start, end, token):
     """Try Twelve Data's existing Basic credential for an independent LSE ETF history."""
-    search = get_json(session, "https://api.twelvedata.com/symbol_search", {
-        "symbol": asset,
-        "outputsize": 50,
-        "show_plan": "true",
-        "apikey": token,
-    })
+    search = _get_twelvedata_json(
+        session,
+        "https://api.twelvedata.com/symbol_search",
+        {
+            "symbol": asset,
+            "outputsize": 50,
+            "show_plan": "true",
+            "apikey": token,
+        },
+        "symbol_search",
+    )
     candidates = [
         item for item in search.get("data", [])
         if str(item.get("mic_code", "")).upper() == "XLON"
@@ -142,7 +159,9 @@ def load_twelvedata_daily(session, asset, start, end, token):
         "end_date": end.isoformat(),
         "apikey": token,
     }
-    payload = get_json(session, "https://api.twelvedata.com/time_series", params)
+    payload = _get_twelvedata_json(
+        session, "https://api.twelvedata.com/time_series", params, "time_series"
+    )
     meta = payload.get("meta", {})
     if (
         str(meta.get("mic_code", "")).upper() != "XLON"
