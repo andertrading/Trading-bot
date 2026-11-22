@@ -304,7 +304,7 @@ def main():
         if report["assets"] and all(
             result.get("status") == "PASS"
             for result in report["assets"].values()
-        ):
+        ) and run_url:
             report["status"] = "PASS"
             report["verification_status"] = "INDEPENDENTLY_VERIFIED"
             report["suggested_config_evidence"] = {
@@ -319,6 +319,13 @@ def main():
                 }
                 for symbol in report["assets"]
             }
+        elif report["assets"] and all(
+            result.get("status") == "PASS"
+            for result in report["assets"].values()
+        ):
+            report["error"] = (
+                "A GitHub Actions run URL is required to create durable evidence"
+            )
 
     report_path.write_text(
         json.dumps(report, indent=2, sort_keys=True),
