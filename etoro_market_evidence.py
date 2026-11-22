@@ -139,7 +139,7 @@ def collect_market_evidence(client: Any, *, symbols: Mapping[str, Mapping[str, A
                 "ask": str(quote.ask),
                 "midpoint": str(midpoint),
                 "spread_absolute": str(spread_absolute),
-                "spread_bps": str(spread_bps) if spread_bps is not None else None,
+                "spread_bps": format(spread_bps.normalize(), "f") if spread_bps is not None else None,
                 "spread_evidence_scope": "CURRENT_SNAPSHOT_ONLY",
                 "timestamp": quote.timestamp.isoformat(),
                 "age_seconds": quote_age_seconds,
