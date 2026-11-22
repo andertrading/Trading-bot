@@ -207,6 +207,9 @@ class PaperForwardTests(unittest.TestCase):
         self.assertEqual(snapshot["available_capital_usd"], 1000.0)
         self.assertEqual(snapshot["open_positions"], [])
         self.assertTrue(snapshot["positions_confirmed"])
+        self.state["costs_status"] = "COSTS_CONFIRMED"
+        snapshot = paper_portfolio_snapshot(self.state)
+        self.assertEqual(snapshot["costs_status"], "NOT_INCLUDED_UNVERIFIED")
 
         process_signal_bar(
             self.state, signal(),
