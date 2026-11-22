@@ -443,3 +443,15 @@ Se ha añadido un auditor manual que compara las velas OHLC de Twelve Data con Y
 Fuentes oficiales:
 - TSLA: https://ir.tesla.com/press-release/tesla-announces-three-one-stock-split
 - NVDA: https://investor.nvidia.com/files/doc_downloads/2024/05/NVIDIA-2024-Stock-Split-FAQ.pdf
+
+
+## Resultado OOS de M15: mantenerlo en laboratorio
+
+El artefacto de investigación del run #110 también contiene 7.940 operaciones M15 fuera de muestra, distribuidas entre cinco familias de estrategia, doce activos y tres folds. Ninguna operación tenía costes completos verificados (`trades_with_complete_costs=0`). Las cifras siguientes son sensibilidades exploratorias, no resultados netos certificados.
+
+En la simulación de cartera MTF `mtf_daily_price_confirmed_pullback`, con capital de referencia independiente de 1.000 USD por clase:
+- **Acciones USA (73 operaciones):** +4,63% bruto, pero -9,97% neto con la hipótesis baja de eToro de 1 USD por lado y spread adicional cero. El escenario de 2 USD por lado cae a -24,71%.
+- **Cripto (70 operaciones):** -0,25% bruto; -42,18% con la hipótesis eToro de 1% por lado. Sustituir solo la comisión cripto por Bitvavo maker (0,05% BTC/ETH/SOL/XRP y 0,15% XLM/EUR) mejora a -5,87% con spread adicional cero, pero empeora a -8,11% con 5 bps y -10,29% con 10 bps. FX, slippage, depósitos/retiros y costes de red siguen excluidos.
+- Los dos portfolios de clase son independientes y no deben sumarse como si fueran una sola cartera.
+
+Lectura: **M15 no falla únicamente por el broker**. El edge bruto de la estrategia MTF es insuficiente, y los costes de rotación lo convierten en negativo incluso bajo supuestos de comisión más bajos. Aumentar el capital no arregla una comisión porcentual ni una ventaja bruta demasiado pequeña por operación. Se mantiene M15 como laboratorio; no se habilita para señales operativas.
