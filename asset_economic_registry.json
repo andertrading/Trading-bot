@@ -43,6 +43,9 @@
         "observed_at": null
       },
       "price_basis": {
+        "historical_basis": null,
+        "execution_basis": null,
+        "mapping_rule": null,
         "confirmed": false,
         "source": null,
         "observed_at": null
@@ -103,6 +106,9 @@
         "observed_at": null
       },
       "price_basis": {
+        "historical_basis": null,
+        "execution_basis": null,
+        "mapping_rule": null,
         "confirmed": false,
         "source": null,
         "observed_at": null
@@ -163,6 +169,9 @@
         "observed_at": null
       },
       "price_basis": {
+        "historical_basis": null,
+        "execution_basis": null,
+        "mapping_rule": null,
         "confirmed": false,
         "source": null,
         "observed_at": null
@@ -223,6 +232,9 @@
         "observed_at": null
       },
       "price_basis": {
+        "historical_basis": null,
+        "execution_basis": null,
+        "mapping_rule": null,
         "confirmed": false,
         "source": null,
         "observed_at": null
@@ -283,6 +295,9 @@
         "observed_at": null
       },
       "price_basis": {
+        "historical_basis": null,
+        "execution_basis": null,
+        "mapping_rule": null,
         "confirmed": false,
         "source": null,
         "observed_at": null
@@ -343,6 +358,9 @@
         "observed_at": null
       },
       "price_basis": {
+        "historical_basis": null,
+        "execution_basis": null,
+        "mapping_rule": null,
         "confirmed": false,
         "source": null,
         "observed_at": null
@@ -403,6 +421,9 @@
         "observed_at": null
       },
       "price_basis": {
+        "historical_basis": null,
+        "execution_basis": null,
+        "mapping_rule": null,
         "confirmed": false,
         "source": null,
         "observed_at": null
@@ -463,6 +484,9 @@
         "observed_at": null
       },
       "price_basis": {
+        "historical_basis": null,
+        "execution_basis": null,
+        "mapping_rule": null,
         "confirmed": false,
         "source": null,
         "observed_at": null
@@ -523,6 +547,9 @@
         "observed_at": null
       },
       "price_basis": {
+        "historical_basis": null,
+        "execution_basis": null,
+        "mapping_rule": null,
         "confirmed": false,
         "source": null,
         "observed_at": null
@@ -583,6 +610,9 @@
         "observed_at": null
       },
       "price_basis": {
+        "historical_basis": null,
+        "execution_basis": null,
+        "mapping_rule": null,
         "confirmed": false,
         "source": null,
         "observed_at": null
@@ -643,6 +673,9 @@
         "observed_at": null
       },
       "price_basis": {
+        "historical_basis": null,
+        "execution_basis": null,
+        "mapping_rule": null,
         "confirmed": false,
         "source": null,
         "observed_at": null
@@ -703,6 +736,9 @@
         "observed_at": null
       },
       "price_basis": {
+        "historical_basis": null,
+        "execution_basis": null,
+        "mapping_rule": null,
         "confirmed": false,
         "source": null,
         "observed_at": null
