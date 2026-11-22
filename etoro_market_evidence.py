@@ -12,6 +12,7 @@ from config import ASSETS
 from etoro_read_only import (
     EtoroAPIError, EtoroConfigurationError, EtoroCostEstimate,
     EtoroInstrumentEligibility, EtoroQuote, EtoroReadOnlyClient,
+    resolve_unique_instrument,
     resolve_unique_instrument_by_symbol,
 )
 
@@ -19,6 +20,7 @@ class EtoroMarketEvidenceClient(EtoroReadOnlyClient):
     """Narrower client: only market search, quotes, eligibility and hypothetical open costs."""
     MARKET_ONLY_ENDPOINTS = frozenset({
         ("GET", "/api/v2/market-data/instruments"),
+        ("GET", "/api/v1/market-data/search"),
         ("GET", "/api/v1/market-data/instruments/rates"),
         ("POST", "/api/v2/trading/info/costs"),
         ("POST", "/api/v2/trading/info/eligibility"),
@@ -42,6 +44,22 @@ def _instrument_type_matches(configured_type: Any, etoro_type: Any) -> bool:
         "CRYPTO": {"crypto", "cryptocurrency"},
     }
     return actual in accepted.get(configured, set())
+
+
+def _resolve_instrument(client: Any, symbol: str) -> Mapping[str, Any]:
+    """Resolve an exact eToro symbol, falling back to the documented v1 search."""
+    try:
+        response = client.search_instrument_by_symbol(symbol)
+        return resolve_unique_instrument_by_symbol(response, symbol)
+    except EtoroAPIError as exc:
+        message = str(exc)
+        # The v2 exact-symbol endpoint may not index every listed ETF. Retry
+        # only a not-found/empty-result case through eToro's v1 exact filter;
+        # never fuzzy-match or silently substitute another instrument.
+        if "HTTP 404" not in message and "encontrados: 0" not in message:
+            raise
+        response = client.search_instruments({"internalSymbolFull": symbol})
+        return resolve_unique_instrument(response, symbol)
 
 
 def _real_unleveraged_long_config(item: EtoroInstrumentEligibility) -> Mapping[str, Any] | None:
@@ -83,8 +101,7 @@ def collect_market_evidence(client: Any, *, symbols: Mapping[str, Mapping[str, A
                   "quote": None, "hypothetical_open_cost": None, "errors": []}
         report["assets"][asset] = record
         try:
-            response = client.search_instrument_by_symbol(asset)
-            instrument = resolve_unique_instrument_by_symbol(response, asset)
+            instrument = _resolve_instrument(client, asset)
             expected_type = symbols[asset].get("type")
             if not _instrument_type_matches(
                 expected_type, instrument.get("instrumentType")
