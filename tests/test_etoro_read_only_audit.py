@@ -12,12 +12,14 @@ from etoro_read_only_audit import _resolution_error_status, run_audit
 class FakeAuditClient:
     def __init__(self, *, account_ok=True, missing_symbols=(), rejected_fields=()):
         self.account_ok = account_ok
+        self.account_snapshot_calls = 0
         self.missing_symbols = set(missing_symbols)
         self.rejected_fields = set(rejected_fields)
         self.search_calls = []
         self.quote_calls = []
 
     def get_account_snapshot(self, account_currency):
+        self.account_snapshot_calls += 1
         if not self.account_ok:
             raise RuntimeError("private account data must not be logged")
         return EtoroAccountSnapshot(
@@ -72,16 +74,11 @@ class ReadOnlyAuditTests(unittest.TestCase):
     def test_success_report_contains_only_public_ids_and_status_flags(self):
         client = FakeAuditClient()
         report = run_audit(client, self.assets, "USD", self.now)
-        self.assertTrue(report["account_snapshot_schema_valid"])
+        self.assertFalse(report["account_portfolio_data_accessed"])
+        self.assertEqual(client.account_snapshot_calls, 0)
         self.assertTrue(report["instrument_eligibility_validated"])
         self.assertTrue(report["complete_realtime_quotes_validated"])
-        self.assertTrue(report["gross_position_stop_risk_diagnostic_validated"])
-        self.assertTrue(report["complete_position_risk_validated"])
         self.assertFalse(report["portfolio_risk_admission_ready"])
-        self.assertEqual(
-            report["position_risk_scope"],
-            "eToro real-account risk only; separate from the bot's virtual paper portfolio",
-        )
         self.assertTrue(report["overall_pass"])
         self.assertEqual(report["instrument_resolution"][0]["instrument_id"], 123)
         self.assertNotIn("available_cash", str(report))
@@ -125,10 +122,9 @@ class ReadOnlyAuditTests(unittest.TestCase):
     def test_account_snapshot_failure_is_redacted_and_blocks_overall_pass(self):
         client = FakeAuditClient(account_ok=False)
         report = run_audit(client, self.assets, "USD", self.now)
-        self.assertFalse(report["account_snapshot_schema_valid"])
-        self.assertEqual(report["account_snapshot_status"], "RUNTIMEERROR")
-        self.assertFalse(report["gross_position_stop_risk_diagnostic_validated"])
-        self.assertFalse(report["overall_pass"])
+        self.assertFalse(report["account_portfolio_data_accessed"])
+        self.assertEqual(client.account_snapshot_calls, 0)
+        self.assertTrue(report["overall_pass"])
         self.assertNotIn("private account data", str(report))
 
     def test_account_schema_failure_exposes_only_a_safe_diagnostic_code(self):
@@ -137,7 +133,9 @@ class ReadOnlyAuditTests(unittest.TestCase):
                 raise EtoroAPIError("Falta clientPortfolio; private payload omitted")
 
         report = run_audit(SchemaFailingClient(), self.assets, "USD", self.now)
-        self.assertEqual(report["account_snapshot_status"], "MISSING_CLIENT_PORTFOLIO")
+        self.assertFalse(report["account_portfolio_data_accessed"])
+        self.assertEqual(client.account_snapshot_calls, 0)
+        self.assertTrue(report["overall_pass"])
         self.assertNotIn("private payload", str(report))
 
     def test_account_diagnostic_codes_classify_http_and_position_schema_failures(self):
@@ -257,17 +255,14 @@ class ReadOnlyAuditTests(unittest.TestCase):
         ):
             report = run_audit(client, self.assets, "USD", self.now)
 
-        self.assertEqual(report["position_risk_diagnostic_status"], "HTTP_503")
         self.assertEqual(report["instrument_eligibility_status"], "HTTP_403")
         self.assertEqual(report["realtime_quotes_status"], "HTTP_429")
-        self.assertFalse(report["gross_position_stop_risk_diagnostic_validated"])
         self.assertFalse(report["instrument_eligibility_validated"])
         self.assertFalse(report["complete_realtime_quotes_validated"])
         self.assertNotIn("private", str(report))
 
     def test_success_report_includes_validated_diagnostic_statuses(self):
         report = run_audit(FakeAuditClient(), self.assets, "USD", self.now)
-        self.assertEqual(report["position_risk_diagnostic_status"], "COMPLETE_NO_OPEN_POSITIONS")
         self.assertEqual(report["instrument_eligibility_status"], "VALIDATED")
         self.assertEqual(report["realtime_quotes_status"], "VALIDATED")
 
