@@ -1923,6 +1923,7 @@ def _patch_incoherent_daily_ohlc_from_alternate(
 
     patched = dataframe.copy()
     maximum_deviation = 0.0
+    maximum_ohlc_deviation = 0.0
     for timestamp in invalid_index:
         if timestamp not in alternate_dataframe.index:
             logger.error(
@@ -1962,6 +1963,7 @@ def _patch_incoherent_daily_ohlc_from_alternate(
                     deviation,
                 )
                 return None, None
+            maximum_ohlc_deviation = max(maximum_ohlc_deviation, deviation)
             if column == "Close":
                 maximum_deviation = max(maximum_deviation, deviation)
 
@@ -1980,6 +1982,7 @@ def _patch_incoherent_daily_ohlc_from_alternate(
         "ohlc_repair_count": len(invalid_index),
         "ohlc_repair_source_ticker": alternate_ticker,
         "ohlc_repair_max_close_deviation_pct": round(maximum_deviation, 6),
+        "ohlc_repair_max_trusted_field_deviation_pct": round(maximum_ohlc_deviation, 6),
         "ohlc_repair_comparison_policy": "all structurally trustworthy primary OHLC fields <= 0.5% deviation",
     }
     logger.warning(
