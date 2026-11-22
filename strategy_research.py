@@ -165,12 +165,13 @@ STRATEGIES = {
 
 
 def _net_portfolio_cost_scenarios():
-    """Commission-only venue sensitivities; spreads remain a separate axis."""
+    """Commission-only sensitivities; spreads remain a separate axis."""
     common = {
         "venue": "ETORO_REAL",
         "stock_fee_per_side_usd": 1.0,
         "crypto_rate_per_side": 0.01,
     }
+    high_stock_fee = {**common, "stock_fee_per_side_usd": 2.0}
     bitvavo_usdc_rates = {
         "BTC": 0.0005,
         "ETH": 0.0005,
@@ -181,11 +182,21 @@ def _net_portfolio_cost_scenarios():
     taker_rates = {**bitvavo_usdc_rates, "XLM": 0.0025}
     return [
         (
-            "ETORO_REAL_STANDARD_CRYPTO_FEE",
+            "ETORO_REAL_STOCK_1USD_CRYPTO_1PCT",
             dict(common),
             (
-                "eToro real stocks: $1 per side; ETFs: $0; crypto: 1% per side. "
-                "Account tier and actual instrument ticket remain to be confirmed."
+                "eToro real stocks: $1 per side lower-fee scenario; ETFs: $0; "
+                "crypto: standard 1% per side. Stock fee depends on residence "
+                "and exchange; account Club tier and ticket remain unconfirmed."
+            ),
+        ),
+        (
+            "ETORO_REAL_STOCK_2USD_CRYPTO_1PCT",
+            dict(high_stock_fee),
+            (
+                "eToro real stocks: $2 per side upper-fee scenario; ETFs: $0; "
+                "crypto: standard 1% per side. Stock fee depends on residence "
+                "and exchange; account Club tier and ticket remain unconfirmed."
             ),
         ),
         (
@@ -195,9 +206,22 @@ def _net_portfolio_cost_scenarios():
                 "crypto_rate_by_asset": maker_rates,
             },
             (
-                "Hybrid commission proxy: eToro real stocks/ETFs; Bitvavo "
-                "BTC/ETH/SOL/XRP-USDC at 0.05% per side and XLM/EUR maker "
-                "at 0.15% per side. EUR/USDC conversion, market spread, "
+                "Hybrid commission proxy: eToro real stocks/ETFs at $1 per "
+                "stock side; Bitvavo BTC/ETH/SOL/XRP-USDC at 0.05% per side "
+                "and XLM/EUR maker at 0.15% per side. FX, market spread, "
+                "slippage, deposit/withdrawal and network costs excluded."
+            ),
+        ),
+        (
+            "ETORO_STOCKS_BITVAVO_USDC_MAKER_XLM_EUR_MAKER_STOCK_2USD",
+            {
+                **high_stock_fee,
+                "crypto_rate_by_asset": maker_rates,
+            },
+            (
+                "Hybrid upper stock-fee proxy: eToro real stocks at $2 per "
+                "side and ETFs at $0; Bitvavo BTC/ETH/SOL/XRP-USDC at 0.05% "
+                "per side and XLM/EUR maker at 0.15% per side. FX, spread, "
                 "slippage, deposit/withdrawal and network costs excluded."
             ),
         ),
@@ -208,9 +232,22 @@ def _net_portfolio_cost_scenarios():
                 "crypto_rate_by_asset": taker_rates,
             },
             (
-                "Hybrid commission proxy: eToro real stocks/ETFs; Bitvavo "
-                "BTC/ETH/SOL/XRP-USDC at 0.05% per side and XLM/EUR taker "
-                "at 0.25% per side. EUR/USDC conversion, market spread, "
+                "Hybrid commission proxy: eToro real stocks/ETFs at $1 per "
+                "stock side; Bitvavo BTC/ETH/SOL/XRP-USDC at 0.05% per side "
+                "and XLM/EUR taker at 0.25% per side. FX, market spread, "
+                "slippage, deposit/withdrawal and network costs excluded."
+            ),
+        ),
+        (
+            "ETORO_STOCKS_BITVAVO_USDC_TAKER_XLM_EUR_TAKER_STOCK_2USD",
+            {
+                **high_stock_fee,
+                "crypto_rate_by_asset": taker_rates,
+            },
+            (
+                "Hybrid upper stock-fee proxy: eToro real stocks at $2 per "
+                "side and ETFs at $0; Bitvavo BTC/ETH/SOL/XRP-USDC at 0.05% "
+                "per side and XLM/EUR taker at 0.25% per side. FX, spread, "
                 "slippage, deposit/withdrawal and network costs excluded."
             ),
         ),
@@ -1219,12 +1256,16 @@ def _broker_cost_sensitivity_rows(
         asset_type = group[0]["_asset_type"]
         venues = []
 
-        # Published eToro fee assumptions for a Spain-based account trading
-        # this universe: $1 per side for these US-listed individual shares,
-        # ETFs zero commission, and standard 1% crypto fee on each side.
-        # Club-tier crypto discounts and actual ticket details still require
-        # confirmation. Market spread remains separately unknown below.
-        if asset_type in {"STOCK", "ETF", "CRYPTO"}:
+        # eToro publishes $1 or $2 per side for stocks depending on country
+        # of residence and exchange; the exact account ticket is not assumed.
+        # Report both bounds for stocks. ETFs are commission-free and standard
+        # real-crypto fees are 1% per side, subject to Club-tier reductions.
+        if asset_type == "STOCK":
+            venues.extend([
+                ("ETORO_REAL", "published_fee_scenario"),
+                ("ETORO_REAL", "published_fee_scenario_upper_bound"),
+            ])
+        elif asset_type in {"ETF", "CRYPTO"}:
             venues.append(("ETORO_REAL", "published_fee_scenario"))
 
         if asset_type in {"STOCK", "ETF"}:
@@ -1254,8 +1295,9 @@ def _broker_cost_sensitivity_rows(
                 )
             else:
                 eligibility_note = (
-                    "REAL execution assumed; exact instrument ticket and Club "
-                    "tier still require confirmation"
+                    "REAL execution assumed; stock commission is shown at "
+                    "$1/$2 per side depending on residence/exchange; Club tier "
+                    "and exact ticket remain unconfirmed"
                 )
 
             for spread_bps in spread_bps_values:
@@ -1272,7 +1314,11 @@ def _broker_cost_sensitivity_rows(
                         turnover = trade["_turnover"]
                         if venue == "ETORO_REAL":
                             if asset_type == "STOCK":
-                                commission = 2.0
+                                commission = (
+                                    4.0
+                                    if fee_mode == "published_fee_scenario_upper_bound"
+                                    else 2.0
+                                )
                             elif asset_type == "ETF":
                                 commission = 0.0
                             else:

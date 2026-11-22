@@ -181,26 +181,51 @@ class TestCommonCalendarOutOfSampleSplit(unittest.TestCase):
         self.assertEqual(
             set(scenarios),
             {
-                "ETORO_REAL_STANDARD_CRYPTO_FEE",
+                "ETORO_REAL_STOCK_1USD_CRYPTO_1PCT",
+                "ETORO_REAL_STOCK_2USD_CRYPTO_1PCT",
                 "ETORO_STOCKS_BITVAVO_USDC_MAKER_XLM_EUR_MAKER",
+                "ETORO_STOCKS_BITVAVO_USDC_MAKER_XLM_EUR_MAKER_STOCK_2USD",
                 "ETORO_STOCKS_BITVAVO_USDC_TAKER_XLM_EUR_TAKER",
+                "ETORO_STOCKS_BITVAVO_USDC_TAKER_XLM_EUR_TAKER_STOCK_2USD",
             },
         )
+        low_stock, low_note = scenarios[
+            "ETORO_REAL_STOCK_1USD_CRYPTO_1PCT"
+        ]
+        high_stock, high_note = scenarios[
+            "ETORO_REAL_STOCK_2USD_CRYPTO_1PCT"
+        ]
         maker, maker_note = scenarios[
             "ETORO_STOCKS_BITVAVO_USDC_MAKER_XLM_EUR_MAKER"
+        ]
+        maker_high, maker_high_note = scenarios[
+            "ETORO_STOCKS_BITVAVO_USDC_MAKER_XLM_EUR_MAKER_STOCK_2USD"
         ]
         taker, taker_note = scenarios[
             "ETORO_STOCKS_BITVAVO_USDC_TAKER_XLM_EUR_TAKER"
         ]
+        taker_high, taker_high_note = scenarios[
+            "ETORO_STOCKS_BITVAVO_USDC_TAKER_XLM_EUR_TAKER_STOCK_2USD"
+        ]
+        self.assertEqual(low_stock["stock_fee_per_side_usd"], 1.0)
+        self.assertEqual(high_stock["stock_fee_per_side_usd"], 2.0)
+        self.assertIn("lower-fee", low_note)
+        self.assertIn("upper-fee", high_note)
+        self.assertEqual(maker_high["stock_fee_per_side_usd"], 2.0)
+        self.assertEqual(taker_high["stock_fee_per_side_usd"], 2.0)
 
         self.assertEqual(maker["crypto_rate_by_asset"]["BTC"], 0.0005)
+        self.assertEqual(maker_high["crypto_rate_by_asset"]["BTC"], 0.0005)
+        self.assertEqual(taker_high["crypto_rate_by_asset"]["BTC"], 0.0005)
         self.assertEqual(maker["crypto_rate_by_asset"]["ETH"], 0.0005)
         self.assertEqual(maker["crypto_rate_by_asset"]["SOL"], 0.0005)
         self.assertEqual(maker["crypto_rate_by_asset"]["XRP"], 0.0005)
         self.assertEqual(maker["crypto_rate_by_asset"]["XLM"], 0.0015)
         self.assertEqual(taker["crypto_rate_by_asset"]["XLM"], 0.0025)
-        self.assertIn("EUR/USDC conversion", maker_note)
-        self.assertIn("EUR/USDC conversion", taker_note)
+        self.assertIn("FX", maker_note)
+        self.assertIn("FX", maker_high_note)
+        self.assertIn("FX", taker_note)
+        self.assertIn("FX", taker_high_note)
 
     def test_broker_cost_sensitivity_models_published_fee_scenarios(self):
         assets = {
@@ -230,6 +255,7 @@ class TestCommonCalendarOutOfSampleSplit(unittest.TestCase):
         )
         lookup = {(row["asset"], row["venue"], row["fee_mode"]): row for row in rows}
         self.assertEqual(lookup[("AAPL", "ETORO_REAL", "published_fee_scenario")]["commission_scenario_usd"], 2.0)
+        self.assertEqual(lookup[("AAPL", "ETORO_REAL", "published_fee_scenario_upper_bound")]["commission_scenario_usd"], 4.0)
         self.assertEqual(lookup[("AAPL", "XTB_OMI", "zero_commission_conditional")]["commission_scenario_usd"], 0.0)
         self.assertEqual(lookup[("AAPL", "XTB_OMI", "zero_commission_conditional")]["broker_symbol"], "AAPL.US")
         self.assertEqual(lookup[("BTC", "BITVAVO_SPOT", "maker")]["broker_symbol"], "BTC/EUR")
