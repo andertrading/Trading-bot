@@ -42,7 +42,18 @@ class TestTelegramResearchReport(unittest.TestCase):
         """The older scan path must also avoid Telegram caption truncation."""
         self.candidate["generated_at"] = "2026-11-21T12:00:00+00:00"
         self.candidate["expires_at"] = "2026-11-21T12:30:00+00:00"
-        with patch.object(Bot, "TELEGRAM_ENABLED", True):
+        self.candidate.update({
+            "timeframe": "1d",
+            "validation_status": "APPROVED",
+            "tradable": True,
+            "validated": True,
+            "economic_eligibility": {"status": "ELIGIBLE", "blockers": []},
+        })
+        with (
+            patch.object(Bot, "TELEGRAM_ENABLED", True),
+            patch.object(Bot, "SIGNAL_ALERTS_ENABLED", True),
+            patch.object(Bot, "STRATEGY_VALIDATED", True),
+        ):
             result = Bot.send_telegram_notifications(self.scan)
 
         self.assertEqual(result, "sent:2")

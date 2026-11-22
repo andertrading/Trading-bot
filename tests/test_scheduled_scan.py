@@ -33,6 +33,19 @@ class MemoryStore:
         return 0
 
 
+def make_approved_daily_candidate(now):
+    candidate = make_candidate(now)
+    candidate.update({
+        "timeframe": "1d",
+        "direction": "LONG",
+        "validation_status": "APPROVED",
+        "tradable": True,
+        "validated": True,
+        "economic_eligibility": {"status": "ELIGIBLE", "blockers": []},
+    })
+    return candidate
+
+
 def make_candidate(now):
     return {
         "action": "BUY CANDIDATE",
@@ -388,7 +401,7 @@ class ScheduledScanTests(unittest.TestCase):
         self.assertFalse(result["alerts_enabled"])
         send_message.assert_not_called()
 
-    def test_alerts_send_only_when_strategy_and_telegram_are_enabled(self):
+    def test_blocked_candidate_never_sends_even_when_global_alert_switches_are_on(self):
         store = MemoryStore("url", "token")
         with patch.object(
             scheduled_scan, "UpstashSignalStateStore", return_value=store
@@ -401,11 +414,44 @@ class ScheduledScanTests(unittest.TestCase):
         ), patch.object(
             scheduled_scan.Bot, "TELEGRAM_ENABLED", True
         ), patch.object(
+            scheduled_scan.Bot, "send_telegram_message", return_value=True
+        ) as send_message:
+            result = scheduled_scan.run_scheduled_scan("15m")
+
+        self.assertTrue(result["alerts_enabled"])
+        self.assertEqual(result["alerts_sent"], 0)
+        self.assertFalse(next(iter(store.state["signals"].values()))["alert_sent"])
+        send_message.assert_not_called()
+
+    def test_only_approved_economically_eligible_daily_candidate_can_alert(self):
+        store = MemoryStore("url", "token")
+        admitted_scan = copy.deepcopy(self.scan)
+        admitted_scan["timeframes"] = ["1d"]
+        candidate = admitted_scan["results"][0]
+        candidate.update({
+            "timeframe": "1d",
+            "direction": "LONG",
+            "validation_status": "APPROVED",
+            "tradable": True,
+            "validated": True,
+            "economic_eligibility": {"status": "ELIGIBLE", "blockers": []},
+        })
+        with patch.object(
+            scheduled_scan, "UpstashSignalStateStore", return_value=store
+        ), patch.object(
+            scheduled_scan.Bot, "run_scan", return_value=admitted_scan
+        ), patch.object(
+            scheduled_scan, "SIGNAL_ALERTS_ENABLED", True
+        ), patch.object(
+            scheduled_scan, "STRATEGY_VALIDATED", True
+        ), patch.object(
+            scheduled_scan.Bot, "TELEGRAM_ENABLED", True
+        ), patch.object(
             scheduled_scan.Bot, "generate_candidate_chart", return_value=None
         ), patch.object(
             scheduled_scan.Bot, "send_telegram_message", return_value=True
         ) as send_message:
-            result = scheduled_scan.run_scheduled_scan("15m")
+            result = scheduled_scan.run_scheduled_scan("1d")
 
         self.assertTrue(result["alerts_enabled"])
         self.assertEqual(result["alerts_sent"], 1)
@@ -552,10 +598,12 @@ class ScheduledScanTests(unittest.TestCase):
     def test_chart_failure_falls_back_to_text_alert(
         self, build_messages, generate_chart, send_text
     ):
-        result = scheduled_scan._send_signal_report(
-            self.scan, self.scan["results"][0],
+        candidate = make_approved_daily_candidate(self.now)
+        with patch.object(scheduled_scan, "STRATEGY_VALIDATED", True):
+            result = scheduled_scan._send_signal_report(
+            self.scan, candidate,
             {"expires_at": "2026-11-21T12:30:00+00:00", "signal_id": "chart-fallback"},
-        )
+            )
         self.assertTrue(result)
         build_messages.assert_called_once()
         generate_chart.assert_called_once()
@@ -571,10 +619,12 @@ class ScheduledScanTests(unittest.TestCase):
     def test_photo_send_failure_falls_back_to_text(
         self, build_messages, generate_chart, send_photo, send_text
     ):
-        result = scheduled_scan._send_signal_report(
-            self.scan, self.scan["results"][0],
+        candidate = make_approved_daily_candidate(self.now)
+        with patch.object(scheduled_scan, "STRATEGY_VALIDATED", True):
+            result = scheduled_scan._send_signal_report(
+            self.scan, candidate,
             {"expires_at": "2026-11-21T12:30:00+00:00", "signal_id": "photo-fallback"},
-        )
+            )
         self.assertTrue(result)
         send_photo.assert_called_once()
         self.assertIn("Gráfico técnico", send_photo.call_args.args[1])
@@ -593,15 +643,17 @@ class ScheduledScanTests(unittest.TestCase):
         self, build_messages, generate_chart, send_photo, send_text
     ):
         """Ensure photo captions never replace or truncate the full text report."""
-        result = scheduled_scan._send_signal_report(
-            self.scan,
-            self.scan["results"][0],
-            {
-                "generated_at": "2026-11-21T12:00:00+00:00",
-                "expires_at": "2026-11-21T12:30:00+00:00",
-                "signal_id": "long-report",
-            },
-        )
+        candidate = make_approved_daily_candidate(self.now)
+        with patch.object(scheduled_scan, "STRATEGY_VALIDATED", True):
+            result = scheduled_scan._send_signal_report(
+                self.scan,
+                candidate,
+                {
+                    "generated_at": "2026-11-21T12:00:00+00:00",
+                    "expires_at": "2026-11-21T12:30:00+00:00",
+                    "signal_id": "long-report",
+                },
+            )
 
         self.assertTrue(result)
         send_text.assert_called_once_with("X" * 1800)

@@ -38,6 +38,7 @@ from config import (
     TELEGRAM_TOKEN,
     TELEGRAM_CHAT_ID,
     TIMEZONE,
+    SIGNAL_ALERTS_ENABLED,
     STRATEGY_VALIDATED,
 )
 
@@ -943,29 +944,56 @@ def build_telegram_messages(scan_result):
     return messages
 
 
+def is_operational_alert_candidate(candidate):
+    """Return True only for an individually admitted production candidate."""
+    if not isinstance(candidate, dict):
+        return False
+    economic = candidate.get("economic_eligibility")
+    return bool(
+        candidate.get("action") == "BUY CANDIDATE"
+        and candidate.get("timeframe") == "1d"
+        and candidate.get("direction", "LONG") == "LONG"
+        and candidate.get("validation_status") == "APPROVED"
+        and candidate.get("tradable") is True
+        and candidate.get("validated") is True
+        and isinstance(economic, dict)
+        and economic.get("status") == "ELIGIBLE"
+    )
+
+
 def send_telegram_notifications(scan_result):
     """
-    Envía el resumen y los informes completos de las candidatas.
-    Los gráficos son adjuntos opcionales con un pie breve.
+    Envía informes únicamente para candidatas aprobadas individualmente.
+    Las alertas globales y la validación de estrategia también son obligatorias.
     """
 
     if not TELEGRAM_ENABLED:
         return "disabled"
+    if not SIGNAL_ALERTS_ENABLED or not STRATEGY_VALIDATED:
+        return "held:global_validation_gate"
 
     try:
-        messages = build_telegram_messages(scan_result)
-
-        sent = 0
-        failed = 0
-
         candidates = [
             item
             for item in scan_result.get("results", [])
-            if (
-                item.get("action") == "BUY CANDIDATE"
-                and item.get("validation_status") in {"BLOCKED", "APPROVED"}
-            )
+            if is_operational_alert_candidate(item)
         ]
+        if not candidates:
+            logger.info("TELEGRAM NOTIFICATIONS HELD | no admitted daily candidates")
+            return "held:no_eligible_candidates"
+
+        report_scan = dict(scan_result)
+        report_scan.update({
+            "technical_candidates_found": len(candidates),
+            "candidates_blocked": 0,
+            "validated_candidates": len(candidates),
+            "no_trade_count": 0,
+            "results": candidates,
+        })
+        messages = build_telegram_messages(report_scan)
+
+        sent = 0
+        failed = 0
 
         # Primer mensaje: resumen general.
         if messages:
