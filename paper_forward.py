@@ -48,6 +48,7 @@ def new_paper_state(initial_capital_usd: float = DEFAULT_INITIAL_CAPITAL_USD) ->
         "equity_usd": capital,
         "peak_equity_usd": capital,
         "realized_gross_pnl_usd": 0.0,
+        "equity_history": [{"timestamp": None, "equity_usd": capital}],
         "open_risk_usd": 0.0,
         "trades": {},
         "processed_bars": {},
@@ -114,6 +115,10 @@ def _finish_trade(state: dict, trade: dict, exit_price: float,
     state["realized_gross_pnl_usd"] += pnl
     state["equity_usd"] += pnl
     state["peak_equity_usd"] = max(state["peak_equity_usd"], state["equity_usd"])
+    state.setdefault("equity_history", []).append({
+        "timestamp": exit_timestamp,
+        "equity_usd": state["equity_usd"],
+    })
 
 
 def process_signal_bar(
@@ -220,6 +225,14 @@ def process_signal_bar(
                 # A favorable gap is filled at the opening price.
                 exit_price = max(opening, target) if opening >= target else target
                 _finish_trade(state, trade, exit_price, timestamp.isoformat(), "TARGET")
+            else:
+                monitoring_expiry = signal.get("monitoring_expires_at")
+                if monitoring_expiry and timestamp >= _timestamp(
+                    monitoring_expiry, "signal.monitoring_expires_at"
+                ):
+                    _finish_trade(
+                        state, trade, close, timestamp.isoformat(), "TIME_EXIT"
+                    )
 
     state["processed_bars"][signal_id] = timestamp.isoformat()
     state["open_risk_usd"] = _open_risk(state)
@@ -234,6 +247,23 @@ def paper_summary(state: dict) -> dict:
     wins = [trade for trade in closed if float(trade["gross_pnl_usd"]) > 0]
     losses = [trade for trade in closed if float(trade["gross_pnl_usd"]) < 0]
     gross = float(state["realized_gross_pnl_usd"])
+    equity_points = [
+        float(point["equity_usd"])
+        for point in state.get("equity_history", [])
+        if isinstance(point, dict) and point.get("equity_usd") is not None
+    ]
+    running_peak = float(state["initial_capital_usd"])
+    max_drawdown_pct = 0.0
+    for equity_point in equity_points:
+        running_peak = max(running_peak, equity_point)
+        if running_peak > 0:
+            max_drawdown_pct = max(
+                max_drawdown_pct,
+                (running_peak - equity_point) / running_peak * 100.0,
+            )
+    closed_r = [float(trade["result_r"]) for trade in closed]
+    gross_wins = sum(float(t["gross_pnl_usd"]) for t in wins)
+    gross_losses = abs(sum(float(t["gross_pnl_usd"]) for t in losses))
     return {
         "mode": "PAPER_ONLY",
         "initial_capital_usd": state["initial_capital_usd"],
@@ -244,11 +274,9 @@ def paper_summary(state: dict) -> dict:
         "closed_trades": len(closed),
         "waiting_or_rejected": len(trades) - len(open_trades) - len(closed),
         "win_rate_pct_gross": len(wins) / len(closed) * 100.0 if closed else None,
-        "profit_factor_gross": (
-            sum(float(t["gross_pnl_usd"]) for t in wins)
-            / abs(sum(float(t["gross_pnl_usd"]) for t in losses))
-            if losses else (None if not wins else math.inf)
-        ),
+        "profit_factor_gross": gross_wins / gross_losses if gross_losses > 0 else None,
+        "expectancy_r_gross": sum(closed_r) / len(closed_r) if closed_r else None,
+        "max_drawdown_pct_gross": max_drawdown_pct,
         "open_risk_usd": _open_risk(state),
         "costs_included": False,
         "net_performance_validated": False,
