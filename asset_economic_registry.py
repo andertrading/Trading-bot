@@ -67,6 +67,18 @@ def validate_registry(registry: dict) -> None:
             raise ValueError(f"{symbol}: FX confirmation must be boolean")
 
 
+def valid_fee_side(side: dict) -> bool:
+    if not isinstance(side, dict):
+        return False
+    model, unit, value = side.get("model"), side.get("unit"), side.get("value")
+    if model not in {"FIXED", "PERCENT_NOTIONAL", "ZERO"}:
+        return False
+    if model == "ZERO":
+        return value == 0 and unit in {"USD", "PERCENT"}
+    expected_unit = "USD" if model == "FIXED" else "PERCENT"
+    return unit == expected_unit and _valid_number(value)
+
+
 def classify_registry_asset(symbol: str, registry: dict | None = None) -> dict:
     registry = registry if registry is not None else load_registry()
     validate_registry(registry)
@@ -82,19 +94,6 @@ def classify_registry_asset(symbol: str, registry: dict | None = None) -> dict:
         blockers.append("mvp_requires_REAL_execution")
 
     fees = item["fees"]
-    def valid_fee_side(side):
-        if not isinstance(side, dict):
-            return False
-        model = side.get("model")
-        unit = side.get("unit")
-        value = side.get("value")
-        if model not in {"FIXED", "PERCENT_NOTIONAL", "ZERO"}:
-            return False
-        if model == "ZERO":
-            return value == 0 and unit in {"USD", "PERCENT"}
-        expected_unit = "USD" if model == "FIXED" else "PERCENT"
-        return unit == expected_unit and _valid_number(value)
-
     if (
         not fees.get("confirmed") or not fees.get("source") or not fees.get("observed_at")
         or not valid_fee_side(fees.get("entry"))
