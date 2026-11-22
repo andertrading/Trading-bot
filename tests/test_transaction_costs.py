@@ -55,10 +55,10 @@ class TestEtoroTransactionCosts(unittest.TestCase):
         self.assertAlmostEqual(result["known_costs_total"], 1.43)
 
     def test_registry_costs_convert_percentage_fees_spread_and_fx_to_account_currency(self):
+        registry = self._complete_registry()
         configured = dict(costs.ASSETS["CSPX"])
         configured["currency"] = "EUR"
         with patch.dict(costs.ASSETS, {"CSPX": configured}):
-            registry = self._complete_registry()
             item = registry["assets"]["CSPX"]
             item["instrument"]["currency"] = "EUR"
             item["fx"].update({
