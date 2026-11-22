@@ -1449,6 +1449,12 @@ def _download_twelvedata(
         "adjust": "splits" if interval == "1d" else "none",
         "apikey": api_key,
     }
+    # Ask Twelve Data for the configured listing rather than relying on
+    # symbol-only resolution when the exchange/MIC are known.
+    if config.get("twelvedata_exchange"):
+        params["exchange"] = config["twelvedata_exchange"]
+    if config.get("twelvedata_mic_code"):
+        params["mic_code"] = config["twelvedata_mic_code"]
 
     if start_date is None and end_date is None:
         params["outputsize"] = 5000
