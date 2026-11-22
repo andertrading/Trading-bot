@@ -14,6 +14,7 @@ on:
       - research/daily-swing-pullback-20261122
       - research/daily-swing-ema-reclaim-20261122
       - research/daily-swing-donchian-breakout-20261122
+      - research/extended-daily-history-5y-20261122
 
 permissions:
   contents: read
@@ -30,8 +31,8 @@ jobs:
     env:
       BACKTEST_DATA_MODE: replay
       BACKTEST_SNAPSHOT_DIR: historicos_full_merged
-      BACKTEST_DAILY_LOOKBACK_DAYS: "730"
-      BACKTEST_EXTENDED_DAILY_HISTORY: "false"
+      BACKTEST_DAILY_LOOKBACK_DAYS: "1825"
+      BACKTEST_EXTENDED_DAILY_HISTORY: "true"
 
     steps:
       - name: Checkout research-only strategy harness
@@ -303,6 +304,94 @@ jobs:
           python -m unittest discover -s tests -p "test_strategy_research.py" -v
           python -m unittest discover -s tests -p "test_portfolio_backtest.py" -v
           python -m unittest discover -s tests -p "test_transaction_costs.py" -v
+
+      - name: Refresh all daily snapshots with five-year history
+        env:
+          BACKTEST_DATA_MODE: download
+          BACKTEST_SNAPSHOT_DIR: historicos_full_merged
+          BACKTEST_DAILY_LOOKBACK_DAYS: "1825"
+          BACKTEST_EXTENDED_DAILY_HISTORY: "true"
+          TWELVE_DATA_API_KEY: ${{ secrets.TWELVE_DATA_API_KEY }}
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          import pandas as pd
+          import backtest_v3 as bt
+
+          root = Path("historicos_full_merged")
+          manifest_path = root / "manifest.json"
+          existing = json.loads(manifest_path.read_text(encoding="utf-8"))
+          bt.SNAPSHOT_MANIFEST = [
+              item for item in existing
+              if str(item.get("timeframe", "")).lower() != "1d"
+          ]
+
+          assets = bt.get_assets()
+          if len(assets) != 12:
+              raise SystemExit(
+                  f"Expected 12 configured assets; received {len(assets)}"
+              )
+
+          minimum_start = (
+              pd.Timestamp.now(tz="UTC") - pd.Timedelta(days=1460)
+          )
+          results = []
+          failures = []
+
+          for asset, ticker in assets:
+              frame = bt.download_history(ticker, "1d", asset=asset)
+              if frame is None or frame.empty:
+                  failures.append({
+                      "asset": asset,
+                      "reason": bt.DOWNLOAD_ERRORS.get(
+                          (ticker, "1d"), "empty_daily_history"
+                      ),
+                  })
+                  continue
+
+              minimum_rows = 1400 if asset in bt.CRYPTO_ASSETS else 950
+              row = {
+                  "asset": asset,
+                  "ticker": ticker,
+                  "rows": len(frame),
+                  "first_timestamp_utc": frame.index[0].isoformat(),
+                  "last_timestamp_utc": frame.index[-1].isoformat(),
+                  "provider": frame.attrs.get("data_provider"),
+                  "minimum_rows": minimum_rows,
+                  "at_least_four_years": frame.index[0] <= minimum_start,
+              }
+              results.append(row)
+
+              if len(frame) < minimum_rows or not row["at_least_four_years"]:
+                  failures.append({
+                      "asset": asset,
+                      "reason": "daily_history_shorter_than_four_year_minimum",
+                      "rows": len(frame),
+                      "first_timestamp_utc": row["first_timestamp_utc"],
+                  })
+
+          bt._write_snapshot_manifest()
+          report = {
+              "status": "PASS" if len(results) == 12 and not failures else "FAIL",
+              "requested_lookback_days": 1825,
+              "minimum_history_days": 1460,
+              "expected_assets": 12,
+              "refreshed_assets": len(results),
+              "results": results,
+              "failures": failures,
+          }
+          Path("daily_history_extension.json").write_text(
+              json.dumps(report, ensure_ascii=False, indent=2),
+              encoding="utf-8",
+          )
+          print(json.dumps(report, ensure_ascii=False, indent=2))
+          if report["status"] != "PASS":
+              raise SystemExit(
+                  "Five-year daily history incomplete; do not run the research backtest."
+              )
+          PY
 
       - name: Audit internal candle gaps across every immutable snapshot
         run: |
