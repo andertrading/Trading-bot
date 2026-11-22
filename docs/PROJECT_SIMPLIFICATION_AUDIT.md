@@ -198,3 +198,10 @@ La página pública de Trading 212 muestra una fila histórica para los mismos i
 Referencias: https://www.trading212.com/trading-instruments/invest/CSPX.GB y https://www.trading212.com/es/trading-instruments/invest/CNDX.GB
 
 Las páginas identifican London Stock Exchange y los ISIN IE00B5BMR087 / IE00B53SZB19, pero la descripción de Trading 212 indica que sus valores OHLC son un índice de precio de compra diario. No se ha verificado que sea un feed de transacciones oficiales de bolsa ni se ha evaluado la metodología de construcción de máximos/mínimos. Por ello estos valores solo sirven como pista de que existe una referencia adicional; no se cargan al histórico, no rellenan huecos y no certifican Yahoo/EODHD/SIX.
+
+
+## Integración del registro económico con el auditor
+
+El registro individual es la fuente de verdad para los activos configurados. `asset_economic_eligibility.py` conserva su interfaz y el formato del informe existente, pero delega la clasificación normal de cada activo configurado en `asset_economic_registry.py`. Los argumentos explícitos de prueba mantienen una ruta aislada para no romper los tests unitarios.
+
+Los bloqueos del registro se traducen al vocabulario histórico del informe para preservar compatibilidad. La integración no conecta el registro con sizing, señales, alertas, paper ledger ni ejecución.
