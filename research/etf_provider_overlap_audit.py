@@ -366,15 +366,19 @@ def assess_alternate_repairs(primary, alternate):
         ):
             trusted.discard("Low")
         if (
-            values["Open"] is not None and values["High"] is not None
-            and values["Low"] is not None
-            and not values["Low"] <= values["Open"] <= values["High"]
+            values["Open"] is not None
+            and (
+                ("High" in trusted and values["Open"] > values["High"])
+                or ("Low" in trusted and values["Open"] < values["Low"])
+            )
         ):
             trusted.discard("Open")
         if (
-            values["Close"] is not None and values["High"] is not None
-            and values["Low"] is not None
-            and not values["Low"] <= values["Close"] <= values["High"]
+            values["Close"] is not None
+            and (
+                ("High" in trusted and values["Close"] > values["High"])
+                or ("Low" in trusted and values["Close"] < values["Low"])
+            )
         ):
             trusted.discard("Close")
         if not trusted:
@@ -394,12 +398,19 @@ def assess_alternate_repairs(primary, alternate):
             if column == "Close":
                 deviations.append(deviation)
             if deviation > 0.5:
-                issues.append({
+                issue = {
                     "date": str(day),
-                    "reason": "ohlc_field_deviation_over_0_5pct",
+                    "reason": (
+                        "close_deviation_over_0_5pct"
+                        if column == "Close"
+                        else "ohlc_field_deviation_over_0_5pct"
+                    ),
                     "field": column,
                     "deviation_pct": round(deviation, 6),
-                })
+                }
+                if column == "Close":
+                    issue["close_deviation_pct"] = round(deviation, 6)
+                issues.append(issue)
     if len(invalid) > maximum_repairs:
         issues.append({
             "date": None,
