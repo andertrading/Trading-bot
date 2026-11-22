@@ -137,11 +137,30 @@ def mtf_daily_trend_pullback(data, asset, timeframe, index=-1):
     return trend_pullback_reclaim(data, asset, timeframe, index)
 
 
+def mtf_daily_price_confirmed_pullback(data, asset, timeframe, index=-1):
+    """M15 pullback only when the last completed daily close is above EMA200."""
+    if timeframe != "15m":
+        return {"action": "NO TRADE"}
+    row = data.iloc[index]
+    if (
+        row.get("DAILY_TREND_UP") is not True
+        and row.get("DAILY_TREND_UP") != 1
+    ):
+        return {"action": "NO TRADE"}
+    if (
+        row.get("DAILY_PRICE_ABOVE_EMA200") is not True
+        and row.get("DAILY_PRICE_ABOVE_EMA200") != 1
+    ):
+        return {"action": "NO TRADE"}
+    return trend_pullback_reclaim(data, asset, timeframe, index)
+
+
 STRATEGIES = {
     "baseline": baseline,
     "trend_pullback_reclaim": trend_pullback_reclaim,
     "trend_continuation": trend_continuation,
     "mtf_daily_trend_pullback": mtf_daily_trend_pullback,
+    "mtf_daily_price_confirmed_pullback": mtf_daily_price_confirmed_pullback,
 }
 
 
@@ -667,6 +686,10 @@ def main():
                         daily_indicators["EMA50"]
                         > daily_indicators["EMA200"]
                     ).fillna(False).to_numpy(),
+                    "daily_price_above_ema200": (
+                        daily_indicators["Close"]
+                        > daily_indicators["EMA200"]
+                    ).fillna(False).to_numpy(),
                 }).sort_values("available_from")
                 daily_cache[asset] = available
 
@@ -688,6 +711,9 @@ def main():
         ).sort_values("row_number")
         data["DAILY_TREND_UP"] = (
             mapped["daily_trend_up"].fillna(False).to_numpy()
+        )
+        data["DAILY_PRICE_ABOVE_EMA200"] = (
+            mapped["daily_price_above_ema200"].fillna(False).to_numpy()
         )
         return data
 
