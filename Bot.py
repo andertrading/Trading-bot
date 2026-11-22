@@ -1474,11 +1474,14 @@ def run_scan(timeframes=None, include_paper_bars=False, paper_assets=None):
                 )
                 result["market_closed"] = True
             else:
-                result = analyze_asset(
-                    asset,
-                    timeframe,
-                    include_paper_bars=include_paper_bars,
-                )
+                if include_paper_bars:
+                    result = analyze_asset(
+                        asset,
+                        timeframe,
+                        include_paper_bars=True,
+                    )
+                else:
+                    result = analyze_asset(asset, timeframe)
                 if market_closed:
                     # A closed-market scan may replay the last completed bars
                     # for existing paper trades, but must not create a fresh
