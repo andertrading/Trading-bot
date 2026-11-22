@@ -1,10 +1,10 @@
 # ETF provider overlap findings — CSPX / CNDX
 
-**Latest five-year run:** GitHub Actions `44981233660`  
-**Artifact ID:** `14738021637` (`etf-provider-overlap-audit`)  
-**Audited code commit:** `d82f17513abf39d819aca1185027f5746cfa6ee5`  
+**Latest yfinance-path run:** GitHub Actions `44981488628`  
+**Artifact ID:** `14738042078` (`etf-provider-overlap-audit`)  
+**Audited code commit:** `34e796eb3bed8a7e3d717a0557b3cff400fe9c80`  
 **Window requested:** 2021-11-22 to 2026-11-21  
-**Yahoo LSE history returned:** 1,262 daily rows per ETF (five years)  
+**Yahoo chart history:** 1,262 rows per ETF; **yfinance history used by backtests:** CSPX 1,260 rows, CNDX 1,255 rows  
 **EODHD history returned:** CSPX 252 rows; CNDX 254 rows (approximately one year only)  
 **Actual EODHD overlap:** CSPX 251 sessions; CNDX 246 sessions (2025-11-24 to 2026-11-20)  
 **Scope:** public market OHLCV only. No eToro account, portfolio, positions, orders, or signals accessed.
@@ -19,12 +19,26 @@ The successful Actions status means the diagnostic completed and produced its ar
 
 | Asset | Yahoo LSE vs EODHD | Independent SIX cross-check | Decision |
 |---|---|---|---|
-| CSPX | Open and close practically identical (median absolute error below 0.000003%); high is materially inconsistent: median 0.091%, p95 6.002%, max 16.384%; 65 matched sessions have high error above 1%. Across the full five-year Yahoo response, 4 of 1,262 bars are structurally invalid (2024-05-02, 2025-10-24, 2026-03-02, 2026-03-06). | CSSPX.SW high/low values are generally much closer to EODHD than the Yahoo LSE high series; SIX is a cross-check, not an interchangeable primary feed. | **Yahoo LSE CSPX OHLC rejected for extended backtests pending repair.** |
-| CNDX | Open/close practically identical; high p95 error below 0.000004%, max 0.319%; low max error 0.342%. Across the full five-year Yahoo response, 16 of 1,262 bars are structurally invalid (including seven dates in 2022 and 2023, and nine dates in late 2025/2026). | CSNDX.SW has materially wider high/low differences, so it should not be used as a blind substitute for the LSE feed. | **Yahoo LSE CNDX is a candidate after explicit repair/rejection of the invalid 2026-03-02 bar and a wider-period audit. Not approved yet.** |
+| CSPX | Open and close practically identical (median absolute error below 0.000003%); high is materially inconsistent: median 0.091%, p95 6.002%, max 16.384%; 65 matched sessions have high error above 1%. On the exact yfinance backtest path, 2 of 1,260 CSPX bars are structurally invalid (2024-05-02 and 2026-03-02). The Yahoo chart endpoint shows two additional invalid rows that yfinance omits. | CSSPX.SW high/low values are generally much closer to EODHD than the Yahoo LSE high series; SIX is a cross-check, not an interchangeable primary feed. | **Yahoo LSE CSPX OHLC rejected for extended backtests pending repair.** |
+| CNDX | Open/close practically identical; high p95 error below 0.000004%, max 0.319%; low max error 0.342%. On the exact yfinance backtest path, 9 of 1,255 CNDX bars are structurally invalid (seven dates in 2022/2023 and 2026-03-02). The Yahoo chart endpoint reports additional invalid rows that yfinance omits. | CSNDX.SW has materially wider high/low differences, so it should not be used as a blind substitute for the LSE feed. | **Yahoo LSE CNDX is a candidate after explicit repair/rejection of the invalid 2026-03-02 bar and a wider-period audit. Not approved yet.** |
 
 ### Automated research-quality gate
 
-The audit now applies a conservative gate: zero structurally invalid Yahoo OHLC rows, p95 absolute OHLC discrepancy no greater than 0.5%, and maximum absolute OHLC discrepancy no greater than 1.0% versus EODHD. Both assets fail, so `provider_research_approved` is `false`. The full five-year Yahoo responses contain 4/1,262 structurally invalid CSPX rows and 16/1,262 CNDX rows. EODHD returned only about one year of history despite the five-year request, so price comparison against EODHD remains limited to the latest 251/246 overlapping sessions. The five-year Yahoo structural-integrity scan is broader, but it does not certify older bars against an independent price source. This distinguishes a completed diagnostic run from approval of the underlying data.
+The audit now applies a conservative gate: zero structurally invalid Yahoo OHLC rows, p95 absolute OHLC discrepancy no greater than 0.5%, and maximum absolute OHLC discrepancy no greater than 1.0% versus EODHD. Both assets fail, so `provider_research_approved` is `false`. The exact yfinance backtest histories contain 2/1,260 structurally invalid CSPX rows and 9/1,255 CNDX rows. All are eligible for SIX repair under the current safeguards. EODHD returned only about one year of history despite the five-year request, so price comparison against EODHD remains limited to the latest 251/246 overlapping sessions. The five-year Yahoo structural-integrity scan is broader, but it does not certify older bars against an independent price source. This distinguishes a completed diagnostic run from approval of the underlying data.
+
+### Exact yfinance path and repair feasibility
+
+The audit now downloads the same yfinance history path used by `data_engine.py` (`auto_adjust=False`, `actions=True`, `repair=False`) and normalizes the daily session date. Across all matched five-year rows, Yahoo chart OHLC and yfinance OHLC are identical; therefore, the CSPX high anomalies are present in the exact backtest data path, not just in a separate chart endpoint.
+
+The production SIX alternate source was also downloaded through yfinance:
+- CSPX SIX: 1,257 rows, zero structurally invalid bars.
+- CNDX SIX: 1,253 rows, zero structurally invalid bars.
+
+The audit mirrored the production repair safeguards (same-date alternate bar, coherent alternate OHLC, close deviation no greater than 0.5%, and repair count cap):
+- CSPX: both invalid yfinance bars are repairable; maximum close deviation 0.229308%; production cap 13.
+- CNDX: all nine invalid yfinance bars are repairable; maximum close deviation 0.174442%; production cap 13.
+
+This is strong evidence that the existing structural repair routine can repair the detected bad rows. The audit assesses eligibility against the real downloaded rows; the automated tests separately exercise the repair function and extended-download orchestration. It does **not** repair the CSPX high-series anomalies because those bars are structurally valid.
 
 ### Session coverage
 
@@ -34,7 +48,7 @@ The audit now applies a conservative gate: zero structurally invalid Yahoo OHLC 
 
 ### Structural defects
 
-Within the recent EODHD overlap, the Yahoo LSE 2026-03-02 bar is internally inconsistent for both instruments: its reported low is above the open. The five-year scan found additional structurally invalid Yahoo bars on the dates listed above. The current extended-backtest repair path detects structurally invalid OHLC bars and can patch them from the SIX listing only when the close deviation is at most 0.5%. On this sample, the SIX close deviations for that date are 0.229% (CSPX) and 0.155% (CNDX), so they fall within the configured limit; this still needs an end-to-end test through the actual yfinance download path. Crucially, the repair path does not detect a structurally valid yet economically implausible high. For CSPX, 65 Yahoo LSE highs exceed EODHD by more than 1%, while open and close match EODHD almost exactly.
+Within the recent EODHD overlap, the Yahoo LSE 2026-03-02 bar is internally inconsistent for both instruments: its reported low is above the open. The five-year scan found additional structurally invalid Yahoo bars on the dates listed above. The current extended-backtest repair path detects structurally invalid OHLC bars and can patch them from the SIX listing only when the close deviation is at most 0.5%. The five-year yfinance audit confirms all 2 CSPX and 9 CNDX invalid bars have same-date coherent SIX alternatives within that limit; maximum deviations are 0.229308% and 0.174442%, respectively. Crucially, the repair path does not detect a structurally valid yet economically implausible high. For CSPX, 65 Yahoo LSE highs exceed EODHD by more than 1%, while open and close match EODHD almost exactly.
 
 ## Impact on the current code path
 
@@ -42,14 +56,13 @@ Within the recent EODHD overlap, the Yahoo LSE 2026-03-02 bar is internally inco
 - Extended daily backtests use Yahoo LSE to obtain a longer history.
 - Therefore, historical strategy evaluation can see different high/low values from the live daily feed. This can alter ATR, stop placement, target levels, and trade outcomes even when open/close match.
 - Existing Yahoo alternate-SIX repair is only invoked for structurally invalid bars. It should be able to repair the 2026-03-02 rows under the configured close-deviation threshold, but that must be verified end-to-end. It will not catch the CSPX high-series anomalies that remain structurally valid.
-- This diagnostic obtains Yahoo data from the Yahoo chart endpoint, while the extended-backtest helper uses yfinance. Both are Yahoo-sourced, but the exact rows and repair behavior must be checked through the production helper before certifying the full pipeline.
+- The diagnostic now checks both Yahoo's chart endpoint and the exact yfinance helper used by extended backtests. Their OHLC values match exactly on the five-year overlapping rows. The repair feasibility calculation mirrors the production constraints; a live, unmocked full-history run through the production helper remains a separate final verification.
 
 ## Required next steps
 
 1. Add provider-quality checks that test OHLC coherence **and** cross-provider range anomalies on the overlapping window.
 2. Reject the CSPX Yahoo LSE extended history for any research that depends on High/Low until the source or repair method is validated.
-3. Audit the exact yfinance history path used by production against the Yahoo chart endpoint; the current diagnostic uses the chart endpoint, while the backtest helper uses yfinance.
-4. Verify end-to-end that 2026-03-02 bad bars are repaired from SIX (or fail closed) through the actual yfinance path, and check all other structural-defect dates from the five-year scan.
+3. Run the real extended-history helper with network calls enabled in a controlled research job and verify that all detected invalid bars are actually replaced and the final normalized frame passes integrity checks.
 5. Obtain an independent five-year OHLC source before certifying older Yahoo history; EODHD returned only one year in this run.
 6. For CNDX, validate the longer history and confirm every bad bar is repaired or causes a fail-closed stop.
 7. Keep EODHD as the current live daily source; do not switch production routing based on this diagnostic.
