@@ -116,6 +116,10 @@ class TestPortfolioBacktest(unittest.TestCase):
         self.assertAlmostEqual(result["trades"][0]["allocated_risk_usd"], 5.0)
         self.assertAlmostEqual(result["trades"][0]["realized_pnl_usd"], 10.0)
         self.assertAlmostEqual(result["summary"]["ending_equity_usd"], 1010.0)
+        self.assertAlmostEqual(result["summary"]["gross_pnl_usd"], 10.0)
+        self.assertIsNone(result["summary"]["net_pnl_usd"])
+        self.assertFalse(result["summary"]["net_performance_validated"])
+        self.assertEqual(result["summary"]["return_basis"], "gross_before_costs")
         self.assertFalse(result["summary"]["costs_included"])
 
     def test_simultaneous_exits_are_aggregated_for_drawdown(self):
@@ -218,6 +222,14 @@ class TestPortfolioBacktest(unittest.TestCase):
             later_rejection[0]["reason"],
             "limite_de_riesgo_o_capital_disponible",
         )
+
+    def test_empty_portfolio_does_not_claim_net_performance(self):
+        result = simulate_portfolio([], capital_usd=1000.0)
+        summary = result["summary"]
+        self.assertEqual(summary["gross_pnl_usd"], 0.0)
+        self.assertIsNone(summary["net_pnl_usd"])
+        self.assertIsNone(summary["net_return_pct"])
+        self.assertFalse(summary["net_performance_validated"])
 
     def test_invalid_capital_fails_closed(self):
         with self.assertRaises(ValueError):
