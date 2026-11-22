@@ -40,6 +40,14 @@ The audit mirrored the production repair safeguards (same-date alternate bar, co
 
 This is strong evidence that the existing structural repair routine can repair the detected bad rows. The audit assesses eligibility against the real downloaded rows; the automated tests separately exercise the repair function and extended-download orchestration. It does **not** repair the CSPX high-series anomalies because those bars are structurally valid.
 
+### Five-year comparison between the two Yahoo listings
+
+The same-share-class LSE and SIX yfinance histories overlap for 1,236 CSPX sessions and 1,233 CNDX sessions:
+- **CSPX:** LSE/SIX High absolute error has p95 8.519% and max 21.207%; 388 sessions differ by more than 1%. Open and Close p95 errors are only 0.119% and 0.143%. This reinforces that the CSPX LSE High series is anomalous, but does not by itself prove which listing is correct for the older four years.
+- **CNDX:** LSE/SIX High p95 error is 0.968% (max 6.355%) and Low p95 error is 0.746% (max 7.639%). These listings are not interchangeable as a blanket replacement.
+
+On the recent EODHD overlap, the SIX yfinance CSPX High is much closer to EODHD (p95 0.150%, max 0.354%) than the LSE yfinance High (p95 6.002%, max 16.384%). For CNDX the reverse is true: LSE is closer to EODHD (High max 0.318%, Low max 0.341%) while SIX differs by as much as 2.406% on High and 2.306% on Low. Therefore, the current evidence supports investigating SIX as a CSPX historical source, but it does not justify globally replacing LSE with SIX or using SIX for CNDX.
+
 ### Session coverage
 
 - CSPX: 251 matched sessions; no EODHD-only sessions; 5 Yahoo-only sessions.
