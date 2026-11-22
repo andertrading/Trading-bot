@@ -235,7 +235,8 @@ def main():
     session = requests.Session()
     session.headers.update({"User-Agent": "TradingBot3.0-ProviderOverlapAudit/1.0"})
     end = date.today() - timedelta(days=1)
-    start = end - timedelta(days=370)
+    # Extend provider certification to the same ~5-year window used by daily backtests.
+    start = end - timedelta(days=1825)
     results, errors = [], []
     print("AUDITORÍA OHLCV YAHOO vs EODHD | CSPX/CNDX | SOLO LECTURA")
     print(f"Ventana solicitada: {start} -> {end}")
