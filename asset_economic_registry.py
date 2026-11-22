@@ -84,6 +84,8 @@ def validate_registry(registry: dict) -> None:
             raise ValueError(f"{symbol}: FX confirmation must be boolean")
         if not isinstance(item["fx"].get("required"), bool):
             raise ValueError(f"{symbol}: FX requirement must be boolean")
+        if item["fx"].get("conversion_fee_unit") != "PERCENT":
+            raise ValueError(f"{symbol}: FX conversion fee must use percentage points")
         fx_required_by_currency = (
             str(instrument.get("currency") or "").upper()
             != str(ACCOUNT_CURRENCY).upper()
