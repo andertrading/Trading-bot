@@ -133,7 +133,7 @@ def _parse_yahoo_payload(payload):
         try:
             event_day = datetime.fromtimestamp(
                 int(event["date"]), timezone.utc
-            ).astimezone(NEW_YORK).date().isoformat()
+            ).date().isoformat()
             numerator = float(event["numerator"])
             denominator = float(event["denominator"])
             split_events.append({
@@ -166,6 +166,11 @@ def _max_ohlc_deviation_pct(twelvedata_bars, yahoo_bars):
             deviation = abs(observed - reference) / abs(reference) * 100.0
             maximum = max(maximum, deviation)
             comparisons += 1
+    if maximum > MAX_OHLC_DEVIATION_PCT:
+        raise ValueError(
+            f"OHLC cross-source deviation {maximum:.4f}% exceeds "
+            f"{MAX_OHLC_DEVIATION_PCT:.2f}%"
+        )
     return maximum, common, comparisons
 
 

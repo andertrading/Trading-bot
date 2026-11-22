@@ -81,6 +81,7 @@ class TestTwelveDataSplitAdjustmentAudit(unittest.TestCase):
         bars, events = _parse_yahoo_payload(payload)
         self.assertEqual(len(bars), 1)
         self.assertEqual(events[0]["ratio"], 3.0)
+        self.assertEqual(events[0]["date"], "2022-08-25")
 
     def test_validates_expected_split_date_and_ratio(self):
         events = [{"date": "2022-08-25", "ratio": 3.0}]
