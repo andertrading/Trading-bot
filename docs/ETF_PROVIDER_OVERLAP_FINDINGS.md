@@ -1,8 +1,8 @@
 # ETF provider overlap findings — CSPX / CNDX
 
-**Latest yfinance-path run:** GitHub Actions `44981488628`  
-**Artifact ID:** `14738042078` (`etf-provider-overlap-audit`)  
-**Audited code commit:** `34e796eb3bed8a7e3d717a0557b3cff400fe9c80`  
+**Latest diagnostic run:** GitHub Actions `44982274254`  
+**Artifact ID:** `14738326287` (`etf-provider-overlap-audit`)  
+**Audited code commit:** `0e6e92375c24f5322a40bb62b9c4a0e555d49268`  
 **Window requested:** 2021-11-22 to 2026-11-21  
 **Yahoo chart history:** 1,262 rows per ETF; **yfinance history used by backtests:** CSPX 1,260 rows, CNDX 1,255 rows  
 **EODHD history returned:** CSPX 252 rows; CNDX 254 rows (approximately one year only)  
