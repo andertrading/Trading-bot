@@ -77,6 +77,39 @@ class MarketEvidenceTests(unittest.TestCase):
         self.assertEqual(client.cost_payloads[0]["settlementType"], "real")
         self.assertEqual(client.cost_payloads[0]["leverage"], 1)
 
+    def test_closed_market_quote_skips_stale_hypothetical_cost_request(self):
+        class ClosedMarketClient(FakeMarketEvidenceClient):
+            def get_realtime_quotes(self, ids, now, asset_calendars=None):
+                self.quote_requests += 1
+                iid = ids[0]
+                return {iid: EtoroQuote(
+                    iid, Decimal("99"), Decimal("101"), now - timedelta(hours=48),
+                    "last_session",
+                )}
+
+        client = ClosedMarketClient()
+        report = collect_market_evidence(
+            client,
+            symbols={"AAPL": {"market_calendar": "XNYS", "type": "STOCK"}},
+            now_utc=datetime(2026, 11, 22, 12, 0, tzinfo=timezone.utc),
+        )
+
+        asset = report["assets"]["AAPL"]
+        self.assertEqual(asset["quote"]["quote_type"], "last_session")
+        self.assertEqual(
+            asset["quote"]["spread_evidence_scope"],
+            "LAST_COMPLETED_SESSION_ONLY",
+        )
+        self.assertEqual(
+            asset["hypothetical_open_cost"]["status"],
+            "SKIPPED_MARKET_CLOSED",
+        )
+        self.assertEqual(client.cost_payloads, [])
+        self.assertEqual(report["summary"]["assets_with_last_session_quotes"], 1)
+        self.assertEqual(report["summary"]["assets_with_market_closed_cost_skips"], 1)
+        self.assertEqual(report["summary"]["assets_with_validated_open_costs"], 0)
+        self.assertEqual(report["summary"]["status"], "PARTIAL")
+
     def test_configured_etoro_symbol_is_used_for_exact_instrument_resolution(self):
         class ExactEtoroSymbolClient(FakeMarketEvidenceClient):
             def __init__(self):
