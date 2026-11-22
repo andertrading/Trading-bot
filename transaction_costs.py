@@ -376,6 +376,10 @@ def estimate_verified_registry_trade_costs(
     entry_notional = entry * quantity
     exit_notional = exit_price * quantity
     total_turnover = entry_notional + exit_notional
+    fx = item["fx"]
+    quote_to_account_rate = (
+        float(fx["quote_to_account_rate"]) if fx.get("required") else 1.0
+    )
 
     def side_cost(side, notional):
         model = side["model"]
@@ -385,7 +389,7 @@ def estimate_verified_registry_trade_costs(
         if model == "FIXED":
             return value
         if model == "PERCENT_NOTIONAL":
-            return notional * value / 100.0
+            return notional * value / 100.0 * quote_to_account_rate
         raise ValueError("unsupported verified fee model")
 
     result["entry_commission_cost"] = side_cost(entry_fee, entry_notional)
@@ -395,14 +399,15 @@ def estimate_verified_registry_trade_costs(
     )
 
     spread_bps = float(item["spread"]["bid_ask_bps"])
-    result["market_spread_cost"] = total_turnover * spread_bps / 20000.0
+    result["market_spread_cost"] = (
+        total_turnover * spread_bps / 20000.0 * quote_to_account_rate
+    )
 
-    fx = item["fx"]
     if fx.get("required"):
         result["fx_conversion_cost"] = (
             total_turnover
             * float(fx["conversion_fee_pct"]) / 100.0
-            * float(fx["quote_to_account_rate"])
+            * quote_to_account_rate
         )
     else:
         result["fx_conversion_cost"] = 0.0
