@@ -788,6 +788,10 @@ class TestTwelveDataDailyRequestSuppression(unittest.TestCase):
         self.assertEqual(status["open_positions"], [])
         self.assertAlmostEqual(status["capital_usd"], 1000.0)
         self.assertAlmostEqual(status["available_capital_usd"], 1000.0)
+        self.assertIn(
+            "La cartera virtual prospectiva aún solo contiene resultados brutos; costes netos no confirmados",
+            Bot.get_validation_blockers(status, asset="AAPL"),
+        )
 
     def test_scan_portfolio_status_reserves_open_paper_position_cash_and_risk(self):
         paper_state = new_paper_state()
