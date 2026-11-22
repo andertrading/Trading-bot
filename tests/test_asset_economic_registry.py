@@ -28,6 +28,7 @@ class AssetEconomicRegistryTests(unittest.TestCase):
     def test_missing_evidence_fails_closed(self):
         result = classify_registry_asset("CSPX", self.registry)
         self.assertEqual(result["status"], "COSTS_UNVERIFIED")
+        self.assertIn("instrument_identity_evidence_missing", result["blockers"])
         self.assertIn("execution_type_evidence_missing", result["blockers"])
         self.assertIn("round_trip_fee_evidence_missing", result["blockers"])
         self.assertIn("observed_bid_ask_spread_evidence_missing", result["blockers"])
@@ -57,6 +58,18 @@ class AssetEconomicRegistryTests(unittest.TestCase):
         self.assertTrue(valid_fee_side({"model":"PERCENT_NOTIONAL","value":0.01,"unit":"PERCENT"}))
         self.assertFalse(valid_fee_side({"model":"FIXED","value":-1,"unit":"USD"}))
         self.assertFalse(valid_fee_side({"model":"ZERO","value":False,"unit":"USD"}))
+
+    def test_instrument_identity_requires_timestamped_evidence(self):
+        item = self.registry["assets"]["CSPX"]
+        item["instrument"].update({
+            "confirmed": True, "source": "instrument ticket",
+            "observed_at": "2026-11-22T00:00:00"
+        })
+        result = classify_registry_asset("CSPX", self.registry)
+        self.assertIn("instrument_identity_evidence_missing", result["blockers"])
+        item["instrument"]["observed_at"] = "2026-11-22T00:00:00Z"
+        result = classify_registry_asset("CSPX", self.registry)
+        self.assertNotIn("instrument_identity_evidence_missing", result["blockers"])
 
     def test_registry_rejects_missing_or_extra_assets(self):
         altered = copy.deepcopy(self.registry)
