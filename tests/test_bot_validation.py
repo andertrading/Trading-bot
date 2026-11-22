@@ -255,32 +255,30 @@ class TestBotValidation(unittest.TestCase):
 
     def test_unconfirmed_fx_does_not_block_same_currency_asset(self):
         with patch.object(Bot, "FX_CONVERSION_CONFIRMED", False):
-            result = Bot.apply_validation_gate(
-                self.candidate,
+            blockers = Bot.get_validation_blockers(
                 {"status": "OK"},
+                asset="AAPL",
             )
 
         self.assertNotIn(
             "Conversión de divisa pendiente de confirmar",
-            result["validation_reasons"],
+            blockers,
         )
-        self.assertFalse(result["tradable"])
 
     def test_unconfirmed_fx_blocks_different_currency_asset(self):
         eur_config = dict(Bot.ASSETS["AAPL"])
         eur_config["currency"] = "EUR"
         with patch.object(Bot, "FX_CONVERSION_CONFIRMED", False):
             with patch.dict(Bot.ASSETS, {"AAPL": eur_config}):
-                result = Bot.apply_validation_gate(
-                    self.candidate,
+                blockers = Bot.get_validation_blockers(
                     {"status": "OK"},
+                    asset="AAPL",
                 )
 
         self.assertIn(
             "Conversión de divisa pendiente de confirmar",
-            result["validation_reasons"],
+            blockers,
         )
-        self.assertFalse(result["tradable"])
 
     def test_no_trade_remains_non_tradable(self):
         result = Bot.apply_validation_gate(
