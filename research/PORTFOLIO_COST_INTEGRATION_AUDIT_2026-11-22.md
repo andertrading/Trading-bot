@@ -28,7 +28,25 @@ Use `estimate_verified_registry_trade_costs()` for admission-grade calculations 
 
 The verified estimator must be called using the **actual portfolio quantity** and the relevant prices. The precomputed hypothetical cost columns remain diagnostics only.
 
-### 2. Cost-aware risk sizing
+### 2. Spread treatment: prevent double counting
+
+A second integration hazard exists in the current verified estimator: it always adds a separate half-spread on entry and half-spread on exit. The registry's `price_basis` currently stores free-text descriptions, but does not expose a machine-readable flag stating whether the supplied entry/exit prices already include bid/ask spread.
+
+This matters because:
+
+- If historical OHLC prices are trade/last or mid-like reference prices, the modeled half-spread on each side may be needed to approximate executable prices.
+- If the backtest already uses executable ask for entry and bid for exit, the spread is embedded in those prices. Subtracting a separate spread charge again double-counts it.
+- A non-empty `execution_basis` or `mapping_rule` string does not prove which of these treatments is in force. The current synthetic test fixture describes broker bid/ask execution while the estimator also adds a spread cost; it verifies arithmetic, not the economic non-duplication of spread.
+
+Before net integration, add an explicit validated registry field such as `spread_treatment` with closed values:
+
+- `SEPARATE_FROM_PRICES`: prices exclude the market spread; deduct measured half-spread on entry and exit.
+- `EMBEDDED_IN_EXECUTION_PRICES`: prices already represent the relevant executable bid/ask; do not deduct a second spread charge.
+- Missing/unknown: costs remain incomplete and net validation is blocked.
+
+The choice must be supported by instrument-specific evidence and tests. Do not infer it from vendor names or from free-text descriptions.
+
+### 3. Cost-aware risk sizing
 
 Sizing must reserve the full modeled loss if the stop is reached, including round-trip costs. For a long position, define:
 
@@ -43,7 +61,7 @@ Because fixed per-side commissions are not proportional to quantity, do not appr
 
 Cash reservation must also include entry-side transaction costs, not only entry notional. Do not reserve the full round-trip fee as cash if the exit-side fee is only payable later; account for the timing explicitly.
 
-### 3. Realized net P&L exactly once
+### 4. Realized net P&L exactly once
 
 At exit, calculate verified round-trip costs once using the allocated quantity and actual simulated exit price:
 
@@ -55,7 +73,7 @@ Then use net P&L for equity, subsequent risk budgets, return, win rate, profit f
 
 Never subtract `result_R_after_known_fees` or any hypothetical-size cost field from portfolio P&L. That would mix position sizes and can double-count costs.
 
-### 4. Fail-closed net reporting
+### 5. Fail-closed net reporting
 
 A portfolio net metric is valid only when every accepted and closed trade has complete verified costs and verified execution-price basis. If one trade is incomplete:
 
@@ -66,7 +84,7 @@ A portfolio net metric is valid only when every accepted and closed trade has co
 
 The current registry state (0/12 eligible) means this gate must remain closed.
 
-### 5. Risk-limit semantics
+### 6. Risk-limit semantics
 
 The hard 1% per-trade and 3% aggregate limits must apply to modeled all-in stop loss, not only price movement to the stop. Add tests for simultaneous entries, fixed commissions, variable spread/FX costs, and costs that make a candidate infeasible under the risk budget.
 
@@ -77,6 +95,8 @@ The simulator remains a bar-based approximation: spread measurement and historic
 - Actual portfolio quantity, not hypothetical capital sizing, drives cost calculations.
 - Fixed fees are charged once per side and do not scale with quantity.
 - Percentage fees, spread, and FX scale with the correct entry/exit notionals.
+- Spread is deducted exactly once: separately for reference prices, or embedded in executable bid/ask prices, never both.
+- Missing/unknown spread treatment blocks net reporting.
 - Entry-side cash reservation and all-in stop-risk reservation are both respected.
 - A verified cost record is applied exactly once to realized P&L.
 - An incomplete registry record produces no net P&L, net R, or net portfolio return.
