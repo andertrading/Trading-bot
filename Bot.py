@@ -1224,6 +1224,13 @@ def get_validation_blockers(portfolio_status, asset=None):
         blockers.append(
             "Cartera no confirmada o riesgo de cartera bloqueado"
         )
+    elif (
+        portfolio_status.get("positions_confirmed") is not True
+        or not isinstance(portfolio_status.get("open_positions"), (list, tuple))
+    ):
+        blockers.append(
+            "Las posiciones abiertas de la cartera virtual no están confirmadas"
+        )
 
     if (
         isinstance(portfolio_status, dict)
@@ -1358,8 +1365,12 @@ def apply_validation_gate(result, portfolio_status):
             "Nivel de riesgo provisional no válido"
         )
 
-    sizing_result = result.get("sizing_result")
-    if sizing_result is None and not blockers:
+    # Never trust a caller-supplied size. Always derive it again from
+    # the current registry evidence and the confirmed virtual portfolio.
+    result.pop("sizing_result", None)
+    result.pop("sizing_cost_evidence", None)
+    sizing_result = None
+    if not blockers:
         # The sizing path is reachable only after every global, instrument,
         # market-data, strategy and paper-portfolio gate has passed.
         try:
