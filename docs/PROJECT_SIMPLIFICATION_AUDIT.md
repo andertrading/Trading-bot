@@ -272,3 +272,32 @@ En el run #619 de GitHub Actions, la suite de raíz pasó 16/16 y la suite `test
 ### Validación de datos antes de aprobar una candidata
 
 El gate de `Bot.py` exige que la candidata lleve `data_valid=True`, un timestamp ISO-8601 con zona horaria no futura y una antigüedad numérica no negativa. La rutina `analyze_asset` ya comprueba frescura y ausencia de datos futuros; el gate vuelve a exigir la evidencia para impedir que una candidata construida por otra ruta o una prueba manual omita la validación de mercado.
+
+
+## Resultado de investigación de estrategias y costes (artefacto run #110)
+
+Se recuperó el artefacto ya existente del run de investigación 44977107159; no se volvieron a descargar históricos para este análisis. El artefacto confirma 10/10 series diarias de acciones/cripto con aproximadamente cinco años de datos y 24/24 series auditadas sin huecos. Esta evidencia procede de una rama de investigación separada y no equivale a aprobación de datos/costes para producción.
+
+En la muestra completa de investigación diaria:
+- Baseline: 224 operaciones, +27.25 R brutos.
+- Donchian breakout: 138 operaciones, +23.49 R brutos.
+- EMA reclaim: 89 operaciones, +9.73 R brutos.
+- Trend pullback: 24 operaciones, -0.32 R brutos.
+
+Estos resultados son exploratorios, no una validación de rentabilidad. En el portfolio OOS de los 10 activos core, el escenario de eToro de $1 por lado en acciones y 1% por lado en cripto, incluso con spread añadido igual a cero, dio resultados netos negativos:
+- Baseline: +8.10% bruto frente a -14.97% neto (127 operaciones).
+- Donchian: +1.89% bruto frente a -13.39% neto (79 operaciones).
+- EMA reclaim: +2.44% bruto frente a -8.68% neto (58 operaciones).
+- Trend pullback: +1.29% bruto frente a -2.07% neto (17 operaciones).
+
+La muestra por activo y fold no alcanza el umbral interno de 100 operaciones; ninguna estrategia diaria queda estadísticamente aprobada. Los escenarios son estimaciones públicas, no costes verificados del ticket. Además, el modelo de costes verificado del registro sigue incompleto para los 12 activos. Conclusión operativa: no activar ninguna estrategia; el cuello de botella no es solo el capital, sino la combinación de edge bruto débil, comisión fija por operación y coste porcentual de cripto.
+
+### Referencia pública de tarifas eToro para España (no sustituye el ticket)
+
+La tabla oficial de costes de eToro, actualización enero de 2026, incluye España en la lista de países seleccionados. Para acciones individuales distintas de AUD/HKD/AED, el ejemplo publicado aplica $1 al abrir y $1 al cerrar; para ETFs la comisión es cero. La página oficial de tarifas confirma que el importe de acciones depende de residencia y bolsa, no se aplica a ETFs ni a CFDs, y que el spread de mercado sigue existiendo.
+
+En cripto, la página oficial publica un 1% por posición para los niveles Bronze/Silver/Gold, con descuentos para niveles superiores; el coste se aplica en compra y venta. El nivel real del cliente y el coste que muestra el ticket deben confirmarse antes de rellenar el registro económico. No se cambia ningún campo de coste verificado ni se marca ningún activo como elegible con esta evidencia pública.
+
+Fuentes oficiales:
+- eToro Fees: https://www.etoro.com/trading/fees/
+- eToro Cost & Charges examples (January 2026 update): https://www.etoro.com/wp-content/uploads/2025/07/Cost-and-Charges-examples-table-Crypto-Fees-in-May-2025.pdf
