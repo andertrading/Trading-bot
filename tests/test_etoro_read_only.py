@@ -72,6 +72,8 @@ class EtoroReadOnlyClientTests(unittest.TestCase):
         )
         result = self.client.get_rates([1, 2])
         self.assertEqual(result.status_code, 206)
+        args, _ = self.session.request.call_args
+        self.assertTrue(args[1].endswith("/api/v1/market-data/instruments/rates"))
 
     def test_partial_account_snapshot_fails_closed(self):
         self.session.request.return_value = FakeResponse(
@@ -483,6 +485,17 @@ class RealtimeQuoteValidationTests(unittest.TestCase):
         self.assertEqual(quotes[101].bid, Decimal("99.9"))
         self.assertEqual(quotes[101].ask, Decimal("100.1"))
         self.assertEqual(quotes[101].quote_type, "realtime")
+
+    def test_v1_rates_schema_is_normalized_with_explicit_utc_timestamp(self):
+        response = EtoroResponse({
+            "rates": [
+                {"instrumentID": 101, "bid": "99.9", "ask": "100.1", "date": "2026-11-21T11:59:45Z"},
+                {"instrumentID": 202, "bid": "49.9", "ask": "50.1", "date": "2026-11-21T11:59:50Z"},
+            ]
+        }, 200, {})
+        quotes = normalize_realtime_quotes(response, [101, 202], self.now)
+        self.assertEqual(set(quotes), {101, 202})
+        self.assertEqual(quotes[101].timestamp, datetime(2026, 11, 21, 11, 59, 45, tzinfo=timezone.utc))
 
     def test_partial_http_206_is_rejected_even_if_some_quotes_exist(self):
         partial = EtoroResponse(self.response.data, 206, {})
