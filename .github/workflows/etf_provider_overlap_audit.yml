@@ -1,0 +1,41 @@
+name: Trading Bot 3.0 - ETF Provider Overlap Audit
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "research/etf_provider_overlap_audit.py"
+      - ".github/workflows/etf_provider_overlap_audit.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  etf-provider-overlap:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pandas numpy requests
+      - name: Compare Yahoo and EODHD daily ETF data
+        env:
+          EODHD_API_KEY: ${{ secrets.EODHD_API_KEY }}
+        run: python research/etf_provider_overlap_audit.py
+      - name: Upload overlap report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: etf-provider-overlap-audit
+          path: etf_provider_overlap/
+          if-no-files-found: warn
+          retention-days: 14
