@@ -82,10 +82,23 @@ def classify_registry_asset(symbol: str, registry: dict | None = None) -> dict:
         blockers.append("mvp_requires_REAL_execution")
 
     fees = item["fees"]
+    def valid_fee_side(side):
+        if not isinstance(side, dict):
+            return False
+        model = side.get("model")
+        unit = side.get("unit")
+        value = side.get("value")
+        if model not in {"FIXED", "PERCENT_NOTIONAL", "ZERO"}:
+            return False
+        if model == "ZERO":
+            return value == 0 and unit in {"USD", "PERCENT"}
+        expected_unit = "USD" if model == "FIXED" else "PERCENT"
+        return unit == expected_unit and _valid_number(value)
+
     if (
         not fees.get("confirmed") or not fees.get("source") or not fees.get("observed_at")
-        or not _valid_number(fees.get("entry_usd"))
-        or not _valid_number(fees.get("exit_usd"))
+        or not valid_fee_side(fees.get("entry"))
+        or not valid_fee_side(fees.get("exit"))
     ):
         blockers.append("round_trip_fee_evidence_missing")
 
