@@ -643,14 +643,16 @@ class ScheduledScanTests(unittest.TestCase):
         self, build_messages, generate_chart, send_photo, send_text
     ):
         """Ensure photo captions never replace or truncate the full text report."""
-        result = scheduled_scan._send_signal_report(
-            self.scan,
-            self.scan["results"][0],
-            {
-                "generated_at": "2026-11-21T12:00:00+00:00",
-                "expires_at": "2026-11-21T12:30:00+00:00",
-                "signal_id": "long-report",
-            },
+        candidate = make_approved_daily_candidate(self.now)
+        with patch.object(scheduled_scan, "STRATEGY_VALIDATED", True):
+            result = scheduled_scan._send_signal_report(
+                self.scan,
+                candidate,
+                {
+                    "generated_at": "2026-11-21T12:00:00+00:00",
+                    "expires_at": "2026-11-21T12:30:00+00:00",
+                    "signal_id": "long-report",
+                },
             )
 
         self.assertTrue(result)
