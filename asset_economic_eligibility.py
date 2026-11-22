@@ -10,6 +10,7 @@ import json
 import math
 from typing import Any
 
+from asset_economic_registry import classify_registry_asset as classify_registry_asset_from_registry
 from config import (
     ACCOUNT_CURRENCY,
     ASSETS,
@@ -50,7 +51,7 @@ def classify_asset(
     account_currency_confirmed: bool | None = None,
     fx_conversion_fee_pct: float | None = None,
     quote_to_account_rate: float | None = None,
-    minimum_order_constraints_confirmed: bool = False,
+    minimum_order_constraints_confirmed: bool | None = None,
 ) -> dict:
     """Classify one asset for the daily long-only, unleveraged REAL MVP.
 
@@ -75,6 +76,64 @@ def classify_asset(
         result["status"] = "INELIGIBLE"
         result["blockers"] = ["asset_not_configured"]
         return result
+
+
+    registry_mode = (
+        asset_config is None
+        and execution_type is None
+        and execution_type_confirmed is None
+        and fee_schedule_confirmed is None
+        and close_fees_confirmed is None
+        and execution_price_basis_confirmed is None
+        and market_spread_bps is None
+        and spreads_confirmed is None
+        and account_currency is None
+        and account_currency_confirmed is None
+        and fx_conversion_fee_pct is None
+        and quote_to_account_rate is None
+        and minimum_order_constraints_confirmed is None
+        and asset in ASSETS
+    )
+    if registry_mode:
+        registry_result = classify_registry_asset_from_registry(asset)
+        registry_blockers = {
+            "instrument_identity_evidence_missing": ["instrument_identity_not_confirmed_in_instrument_ticket"],
+            "execution_type_evidence_missing": ["execution_type_not_confirmed_in_instrument_ticket"],
+            "round_trip_fee_evidence_missing": [
+                "account_specific_fee_schedule_not_confirmed",
+                "round_trip_close_fee_not_confirmed",
+            ],
+            "observed_bid_ask_spread_evidence_missing": [
+                "bid_ask_spread_measurement_not_confirmed",
+                "observed_bid_ask_spread_missing_or_invalid",
+            ],
+            "execution_price_basis_evidence_missing": [
+                "historical_price_to_execution_price_basis_not_confirmed",
+            ],
+            "minimum_order_rules_evidence_missing": [
+                "minimum_order_and_fractional_quantity_rules_not_confirmed",
+            ],
+            "fx_conversion_evidence_missing": [
+                "trade_FX_conversion_fee_or_rate_not_verified",
+            ],
+            "mvp_requires_REAL_execution": ["mvp_requires_confirmed_REAL_execution"],
+        }
+        mapped_blockers = []
+        for blocker in registry_result["blockers"]:
+            mapped_blockers.extend(registry_blockers.get(blocker, [blocker]))
+        return {
+            "asset": asset,
+            "name": config.get("name", asset),
+            "asset_type": config.get("type"),
+            "configured_execution_type": registry_result.get("execution_type"),
+            "execution_type_confirmed": (
+                "execution_type_evidence_missing" not in registry_result["blockers"]
+            ),
+            "status": registry_result["status"],
+            "blockers": mapped_blockers,
+            "policy": "DAILY_LONG_ONLY_UNLEVERAGED_REAL",
+            "registry_source_of_truth": True,
+        }
 
     if not config.get("enabled", True):
         result["status"] = "INELIGIBLE"
