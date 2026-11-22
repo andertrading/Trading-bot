@@ -95,6 +95,10 @@ def collect_market_evidence(client: Any, *, symbols: Mapping[str, Mapping[str, A
         record = report["assets"][asset]
         iid = instrument["instrumentId"]
         eligibility = eligibility_by_id.get(iid)
+        if eligibility is None:
+            record["errors"].append(
+                "eligibility: no validated eligibility record returned for resolved instrument"
+            )
         real_cfg = _real_unleveraged_long_config(eligibility) if eligibility else None
         minimums = [sample_amount_usd]
         if eligibility and eligibility.min_position_exposure is not None:
