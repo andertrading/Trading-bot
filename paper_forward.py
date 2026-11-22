@@ -279,15 +279,19 @@ def process_signal_bar(
                         if max_portfolio_risk > MAX_PORTFOLIO_RISK:
                             raise ValueError("portfolio risk policy exceeds the hard 3% cap")
                         equity = float(state["equity_usd"])
-                        risk_budget = equity * risk_fraction
+                        capital_base = min(
+                            equity,
+                            float(state["initial_capital_usd"]),
+                        )
+                        risk_budget = capital_base * risk_fraction
                         reserved = _open_risk(state)
-                        if reserved + risk_budget > equity * max_portfolio_risk + 1e-9:
+                        if reserved + risk_budget > capital_base * max_portfolio_risk + 1e-9:
                             trade.update({"status": "REJECTED_PORTFOLIO_RISK",
                                           "completed_at": timestamp.isoformat()})
                         else:
                             quantity = risk_budget / (fill - stop)
                             notional = quantity * fill
-                            if _open_notional(state) + notional > equity + 1e-9:
+                            if _open_notional(state) + notional > capital_base + 1e-9:
                                 trade.update({"status": "REJECTED_NO_LEVERAGE_CASH",
                                               "completed_at": timestamp.isoformat()})
                             else:
@@ -299,6 +303,7 @@ def process_signal_bar(
                                     "risk_budget_usd": risk_budget,
                                     "risk_reserved_usd": risk_budget,
                                     "risk_fraction": risk_fraction,
+                                    "risk_capital_base_usd": capital_base,
                                     "costs_usd": None, "net_pnl_usd": None,
                                 })
                                 # If target is touched after entry and stop is not,
