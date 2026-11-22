@@ -79,7 +79,7 @@ Within the recent EODHD overlap, the Yahoo LSE 2026-03-02 bar is internally inco
 
 ## Limitations
 
-- This is a five-year Yahoo structural scan but only a one-year EODHD price overlap, not a five-year cross-provider certification. EODHD returned no older rows in this run; the reason (plan entitlement, endpoint behavior, or symbol history availability) has not yet been established.
+- This is a five-year Yahoo structural scan but only a one-year EODHD price overlap, not a five-year cross-provider certification. The one-year EODHD response is consistent with EODHD's Free plan, whose official documentation states one year of EOD history; paid EOD Historical All-World lists 30+ years. EODHD also cautions that actual history varies by ticker and exchange, so the plan limit alone does not guarantee full CSPX/CNDX coverage. No paid upgrade is assumed or recommended at this stage. References: https://eodhd.com/help/plans and https://eodhd.com/pricing/.
 - Yahoo SIX is a different exchange listing of the same USD share class. It is useful as an independent anomaly check, but differences in liquidity, trading hours, and volume mean it is not automatically a drop-in replacement for LSE.
 - This diagnostic compares split-adjusted OHLC without dividend adjustment. It does not validate eToro executable prices, spreads, slippage, or fees.
 - A provider's successful HTTP response or a green workflow is not evidence of accurate prices.
