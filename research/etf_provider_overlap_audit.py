@@ -111,6 +111,49 @@ def load_yahoo(session, asset, spec, start, end, symbol_key="yahoo", expected_ma
     return frame, exchange
 
 
+def ohlc_integrity(frame):
+    """Count structurally invalid OHLC rows without silently dropping them."""
+    required = ["Open", "High", "Low", "Close"]
+    if frame is None or frame.empty or any(col not in frame.columns for col in required):
+        return {"rows": 0 if frame is None else int(len(frame)), "invalid_rows": None, "invalid_dates": []}
+    values = frame[required].apply(pd.to_numeric, errors="coerce")
+    finite = np.isfinite(values.to_numpy(dtype=float)).all(axis=1)
+    positive = (values > 0).all(axis=1)
+    coherent = (
+        (values["High"] >= values["Low"])
+        & (values["High"] >= values["Open"])
+        & (values["High"] >= values["Close"])
+        & (values["Low"] <= values["Open"])
+        & (values["Low"] <= values["Close"])
+    )
+    invalid = ~(finite & positive & coherent)
+    return {
+        "rows": int(len(frame)),
+        "invalid_rows": int(invalid.sum()),
+        "invalid_dates": [str(day) for day in frame.index[invalid]],
+    }
+
+
+def _price_error_metrics(left, right, suffix_left, suffix_right):
+    joined = (
+        left.add_suffix(suffix_left)
+        .join(right.add_suffix(suffix_right), how="inner")
+    )
+    output = {}
+    for col in ("Open", "High", "Low", "Close"):
+        a = pd.to_numeric(joined[f"{col}{suffix_left}"], errors="coerce")
+        b = pd.to_numeric(joined[f"{col}{suffix_right}"], errors="coerce")
+        valid = a.notna() & b.notna() & (a > 0) & (b > 0)
+        pct = ((a[valid] / b[valid]) - 1.0).abs() * 100
+        output[col] = {
+            "observations": int(len(pct)),
+            "median_abs_pct": float(pct.median()) if not pct.empty else None,
+            "p95_abs_pct": float(pct.quantile(0.95)) if not pct.empty else None,
+            "max_abs_pct": float(pct.max()) if not pct.empty else None,
+        }
+    return output
+
+
 def compare(asset, eod, yahoo, exchange, alternate):
     joined = (
         eod.add_suffix("_eodhd")
@@ -124,14 +167,32 @@ def compare(asset, eod, yahoo, exchange, alternate):
     if len(joined) < 200:
         raise RuntimeError(f"{asset}: solapamiento insuficiente ({len(joined)} sesiones)")
     metrics = {"asset": asset, "yahoo_exchange": exchange, "overlap_sessions": len(joined)}
-    price_errors = {}
-    for col in ("Open", "High", "Low", "Close"):
-        pct = (joined[f"{col}_yahoo"] / joined[f"{col}_eodhd"] - 1.0).abs() * 100
-        price_errors[col] = {
-            "median_abs_pct": float(pct.median()),
-            "p95_abs_pct": float(pct.quantile(0.95)),
-            "max_abs_pct": float(pct.max()),
-        }
+    price_errors = _price_error_metrics(eod, yahoo, "_eodhd", "_yahoo")
+    six_errors = _price_error_metrics(eod, alternate, "_eodhd", "_six")
+    yahoo_integrity = ohlc_integrity(yahoo)
+    eodhd_integrity = ohlc_integrity(eod)
+    six_integrity = ohlc_integrity(alternate)
+    # Conservative research gate: no structurally invalid bars, p95 <= 0.5%,
+    # and max absolute OHLC discrepancy <= 1.0% versus the live EODHD source.
+    blockers = []
+    if yahoo_integrity["invalid_rows"] != 0:
+        blockers.append("yahoo_has_structurally_invalid_ohlc_rows")
+    for col, stats in price_errors.items():
+        if stats["p95_abs_pct"] is None or stats["p95_abs_pct"] > 0.5:
+            blockers.append(f"yahoo_{col.lower()}_p95_error_over_0_5pct")
+        if stats["max_abs_pct"] is None or stats["max_abs_pct"] > 1.0:
+            blockers.append(f"yahoo_{col.lower()}_max_error_over_1pct")
+    metrics.update({
+        "provider_integrity": {
+            "eodhd": eodhd_integrity,
+            "yahoo_lse": yahoo_integrity,
+            "yahoo_six": six_integrity,
+        },
+        "price_abs_pct_error": price_errors,
+        "six_vs_eodhd_price_abs_pct_error": six_errors,
+        "yahoo_research_quality_gate": "PASS" if not blockers else "FAIL",
+        "yahoo_research_quality_blockers": blockers,
+    })
     volume = joined[["Volume_eodhd", "Volume_yahoo"]].dropna()
     positive = volume[(volume > 0).all(axis=1)]
     volume_ratio = (
@@ -143,7 +204,6 @@ def compare(asset, eod, yahoo, exchange, alternate):
         "last_date": str(joined.index.max()),
         "eodhd_only_sessions": int(len(eod.index.difference(yahoo.index))),
         "yahoo_only_sessions": int(len(yahoo.index.difference(eod.index))),
-        "price_abs_pct_error": price_errors,
         "volume_positive_overlap_sessions": int(len(positive)),
         "volume_ratio_yahoo_to_eodhd_median": (
             float(volume_ratio.median()) if not volume_ratio.empty else None
@@ -207,7 +267,10 @@ def main():
         "requested_end": str(end),
         "results": results,
         "errors": errors,
-        "interpretation": "Diagnostic only; does not authorize provider replacement.",
+        "provider_research_approved": bool(results) and all(
+            item.get("yahoo_research_quality_gate") == "PASS" for item in results
+        ),
+        "interpretation": "Diagnostic only; a completed workflow is not a data-quality pass and does not authorize provider replacement.",
     }
     (OUT / "summary.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
     if errors or len(results) != 2:
