@@ -1112,18 +1112,32 @@ def _has_daily_gaps(df, asset):
         )
         return True
 
-    # El motor utiliza como máximo dos años para los indicadores
-    # operativos. Comprobar huecos solo dentro de esa ventana evita
-    # rechazar históricos por discontinuidades anteriores al periodo
-    # que realmente puede utilizar el sistema.
+    # Live mantiene la ventana operativa de dos años. En investigación
+    # extendida, validar exactamente la ventana solicitada evita rechazar
+    # un histórico de cinco años por discontinuidades anteriores a ella.
     extended_daily_backtest = os.getenv(
         "BACKTEST_EXTENDED_DAILY_HISTORY", "false"
     ).strip().lower() in {"1", "true", "yes", "on"}
-    recent_cutoff = (
-        session_dates[0]
-        if extended_daily_backtest
-        else session_dates[-1] - timedelta(days=730)
-    )
+    lookback_days = 730
+    if extended_daily_backtest:
+        try:
+            lookback_days = int(
+                os.getenv("BACKTEST_DAILY_LOOKBACK_DAYS", "730")
+            )
+        except (TypeError, ValueError):
+            logger.error(
+                "BACKTEST_DAILY_LOOKBACK_DAYS inválido | %s",
+                asset,
+            )
+            return True
+        if not 730 <= lookback_days <= 3650:
+            logger.error(
+                "BACKTEST_DAILY_LOOKBACK_DAYS fuera de rango | %s | días=%s",
+                asset,
+                lookback_days,
+            )
+            return True
+    recent_cutoff = session_dates[-1] - timedelta(days=lookback_days)
 
     if asset in CRYPTO_ASSETS:
         recent_timestamps = timestamps[
