@@ -267,3 +267,8 @@ Resultado: `provider_repair_approved=false`. Se descartan CSP1.L/CNX1.L como sus
 ### Estado de validación del código integrado
 
 En el run #614 de GitHub Actions, la suite de raíz pasó 16/16 y la suite `tests/` pasó 659/659; el arranque de `Bot.py` y las rutas `/` y `/health` también pasaron. El workflow de auditoría GBX queda manual para evitar consultas externas en cada actualización de la PR.
+
+
+### Validación de datos antes de aprobar una candidata
+
+El gate de `Bot.py` exige que la candidata lleve `data_valid=True`, un timestamp ISO-8601 con zona horaria no futura y una antigüedad numérica no negativa. La rutina `analyze_asset` ya comprueba frescura y ausencia de datos futuros; el gate vuelve a exigir la evidencia para impedir que una candidata construida por otra ruta o una prueba manual omita la validación de mercado.
