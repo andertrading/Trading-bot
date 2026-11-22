@@ -419,3 +419,6 @@ Ahora:
 Consecuencia para la investigación anterior: el run #110 sigue aportando evidencia de cobertura y ausencia de huecos en las series, pero su campo heredado `price_adjustment_verified=True` era un falso positivo del wrapper y no demuestra que los factores históricos estén bien aplicados. Sus resultados de estrategia se mantienen como exploratorios, no como validación de datos para producción. No se descargaron datos nuevos ni se consumieron créditos para esta corrección.
 
 CI #646 pasó en el head `62d098ac40f0607c1379038dc36b7c92c2ba1189`.
+
+
+La regresión también está cubierta: un test construye un snapshot legado con `price_adjustment_verified=True` pero sin estado de verificación independiente y confirma que el loader lo rechaza. CI #648 pasó con esta prueba incluida.
