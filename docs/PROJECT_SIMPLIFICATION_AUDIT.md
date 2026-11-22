@@ -205,3 +205,8 @@ Las páginas identifican London Stock Exchange y los ISIN IE00B5BMR087 / IE00B53
 El registro individual es la fuente de verdad para los activos configurados. `asset_economic_eligibility.py` conserva su interfaz y el formato del informe existente, pero delega la clasificación normal de cada activo configurado en `asset_economic_registry.py`. Los argumentos explícitos de prueba mantienen una ruta aislada para no romper los tests unitarios.
 
 Los bloqueos del registro se traducen al vocabulario histórico del informe para preservar compatibilidad. La integración no conecta el registro con sizing, señales, alertas, paper ledger ni ejecución.
+
+
+### Precio histórico frente a precio ejecutable
+
+La ficha ahora exige tres elementos explícitos antes de confirmar la base de precios: tratamiento del histórico (ajustes por splits/dividendos), base del precio ejecutable del broker (bid/ask o precio aplicable) y regla que conecta la señal histórica con la entrada realista. No basta con adjuntar una fuente o marcar una casilla de confirmación. Los 12 activos quedan sin esos campos hasta disponer de evidencia específica.
