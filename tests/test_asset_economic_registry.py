@@ -71,6 +71,24 @@ class AssetEconomicRegistryTests(unittest.TestCase):
         result = classify_registry_asset("CSPX", self.registry)
         self.assertNotIn("instrument_identity_evidence_missing", result["blockers"])
 
+    def test_price_basis_requires_historical_execution_and_mapping_definitions(self):
+        item = self.registry["assets"]["CSPX"]
+        item["price_basis"].update({
+            "confirmed": True,
+            "source": "broker instrument ticket and historical feed spec",
+            "observed_at": "2026-11-22T00:00:00Z",
+        })
+        result = classify_registry_asset("CSPX", self.registry)
+        self.assertIn("execution_price_basis_evidence_missing", result["blockers"])
+
+        item["price_basis"].update({
+            "historical_basis": "split-adjusted, not dividend-adjusted",
+            "execution_basis": "broker executable bid/ask quote",
+            "mapping_rule": "signal at completed close; entry on next available ask",
+        })
+        result = classify_registry_asset("CSPX", self.registry)
+        self.assertNotIn("execution_price_basis_evidence_missing", result["blockers"])
+
     def test_registry_rejects_missing_or_extra_assets(self):
         altered = copy.deepcopy(self.registry)
         altered["assets"].pop("CSPX")
