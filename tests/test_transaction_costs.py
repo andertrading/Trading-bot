@@ -13,6 +13,67 @@ class TestEtoroTransactionCosts(unittest.TestCase):
             patch.object(costs, "ETORO_EXECUTION_PRICE_BASIS_CONFIRMED", True),
         )
 
+    def _complete_registry(self):
+        registry = costs.load_registry()
+        item = registry["assets"]["CSPX"]
+        evidence = {
+            "confirmed": True,
+            "source": "verified instrument ticket",
+            "observed_at": "2026-11-22T00:00:00Z",
+        }
+        item["instrument"].update(evidence)
+        item["execution"].update({"type": "REAL", **evidence})
+        item["fees"] = {
+            "entry": {"model": "FIXED", "value": 1.0, "unit": "USD"},
+            "exit": {"model": "PERCENT_NOTIONAL", "value": 0.1, "unit": "PERCENT"},
+            **evidence,
+        }
+        item["spread"].update({"bid_ask_bps": 10.0, **evidence})
+        item["price_basis"].update({
+            "historical_basis": "split-adjusted, not dividend-adjusted",
+            "execution_basis": "broker executable bid/ask quote",
+            "mapping_rule": "signal at completed close; entry on next available ask",
+            **evidence,
+        })
+        item["minimum_order"].update({
+            "minimum_notional": 1.0,
+            "fractional_allowed": True,
+            **evidence,
+        })
+        return registry
+
+    def test_verified_registry_costs_calculate_entry_exit_fees_and_spread(self):
+        result = costs.estimate_verified_registry_trade_costs(
+            "CSPX", 100.0, 110.0, 2.0, registry=self._complete_registry()
+        )
+        self.assertTrue(result["valid"])
+        self.assertTrue(result["complete"])
+        self.assertEqual(result["registry_status"], "ELIGIBLE")
+        self.assertAlmostEqual(result["entry_commission_cost"], 1.0)
+        self.assertAlmostEqual(result["exit_commission_cost"], 0.22)
+        self.assertAlmostEqual(result["market_spread_cost"], 0.21)
+        self.assertAlmostEqual(result["known_costs_total"], 1.43)
+
+    def test_registry_costs_fail_closed_for_unverified_asset(self):
+        result = costs.estimate_verified_registry_trade_costs(
+            "CSPX", 100.0, 110.0, 1.0
+        )
+        self.assertTrue(result["valid"])
+        self.assertFalse(result["complete"])
+        self.assertEqual(result["registry_status"], "COSTS_UNVERIFIED")
+        self.assertIn("round_trip_fee_evidence_missing", result["unpriced_costs"])
+
+    def test_registry_costs_reject_confirmed_cfd_for_real_only_mvp(self):
+        registry = self._complete_registry()
+        item = registry["assets"]["CSPX"]
+        item["execution"]["type"] = "CFD"
+        result = costs.estimate_verified_registry_trade_costs(
+            "CSPX", 100.0, 110.0, 1.0, registry=registry
+        )
+        self.assertFalse(result["complete"])
+        self.assertEqual(result["registry_status"], "INELIGIBLE")
+        self.assertIn("mvp_requires_REAL_execution", result["unpriced_costs"])
+
     def test_real_stock_uses_conservative_two_dollar_fee_each_side(self):
         result = costs.estimate_etoro_trade_costs(
             "AAPL", 100.0, 110.0, 1.0
