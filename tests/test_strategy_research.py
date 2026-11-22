@@ -13,6 +13,7 @@ from strategy_research import (
     _net_portfolio_cost_scenarios,
     mtf_daily_price_confirmed_pullback,
     daily_swing_trend_pullback,
+    daily_swing_ema_reclaim,
     _asset_class_universes,
 )
 
@@ -99,6 +100,49 @@ class TestDailySwingTrendPullback(unittest.TestCase):
         )
         self.assertEqual(
             daily_swing_trend_pullback(data, "AAPL", "1d", index=1)["action"],
+            "NO TRADE",
+        )
+
+
+class TestDailySwingEmaReclaim(unittest.TestCase):
+
+    def test_daily_price_reclaim_does_not_require_rsi_or_macd(self):
+        data = pd.DataFrame([
+            {
+                "Close": 99.0, "Low": 98.5, "EMA20": 100.0,
+                "EMA50": 95.0, "EMA200": 90.0,
+                "ATR": 2.0, "ATR_PERCENT": 2.0,
+            },
+            {
+                "Close": 102.0, "Low": 100.0, "EMA20": 101.0,
+                "EMA50": 96.0, "EMA200": 90.5,
+                "ATR": 2.0, "ATR_PERCENT": 2.0,
+            },
+        ])
+        result = daily_swing_ema_reclaim(data, "AAPL", "1d", index=1)
+        self.assertEqual(result["action"], "BUY CANDIDATE")
+        self.assertFalse(result["tradable"])
+        self.assertFalse(result["validated"])
+
+    def test_daily_price_reclaim_rejects_wrong_timeframe_or_trend(self):
+        data = pd.DataFrame([
+            {
+                "Close": 99.0, "Low": 98.5, "EMA20": 100.0,
+                "EMA50": 95.0, "EMA200": 90.0,
+                "ATR": 2.0, "ATR_PERCENT": 2.0,
+            },
+            {
+                "Close": 102.0, "Low": 100.0, "EMA20": 101.0,
+                "EMA50": 89.0, "EMA200": 90.5,
+                "ATR": 2.0, "ATR_PERCENT": 2.0,
+            },
+        ])
+        self.assertEqual(
+            daily_swing_ema_reclaim(data, "AAPL", "15m", index=1)["action"],
+            "NO TRADE",
+        )
+        self.assertEqual(
+            daily_swing_ema_reclaim(data, "AAPL", "1d", index=1)["action"],
             "NO TRADE",
         )
 
