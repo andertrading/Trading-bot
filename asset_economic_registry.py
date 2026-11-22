@@ -82,6 +82,14 @@ def validate_registry(registry: dict) -> None:
             raise ValueError(f"{symbol}: minimum-order confirmation must be boolean")
         if not isinstance(item["fx"].get("confirmed"), bool):
             raise ValueError(f"{symbol}: FX confirmation must be boolean")
+        if not isinstance(item["fx"].get("required"), bool):
+            raise ValueError(f"{symbol}: FX requirement must be boolean")
+        fx_required_by_currency = (
+            str(instrument.get("currency") or "").upper()
+            != str(ACCOUNT_CURRENCY).upper()
+        )
+        if item["fx"]["required"] != fx_required_by_currency:
+            raise ValueError(f"{symbol}: FX requirement conflicts with quote/account currency")
 
 
 def valid_fee_side(side: dict) -> bool:
