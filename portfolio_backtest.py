@@ -65,6 +65,9 @@ def _empty_result(capital):
             "peak_open_risk_usd": 0.0,
             "peak_open_risk_pct_of_equity": 0.0,
             "risk_limit_breach_events": 0,
+            "trades_exceeding_planned_gross_stop_risk": 0,
+            "total_loss_beyond_planned_gross_stop_risk_usd": 0.0,
+            "max_loss_beyond_planned_gross_stop_risk_usd": 0.0,
             "peak_open_notional_usd": 0.0,
             "portfolio_risk_limit_pct": 0.0,
             "costs_included": False,
@@ -284,6 +287,12 @@ def simulate_portfolio(
                 continue
             pnl = position["allocated_risk_usd"] * position["result_R"]
             position["realized_pnl_usd"] = pnl
+            loss_beyond_stop = max(
+                0.0,
+                -pnl - position["allocated_risk_usd"],
+            )
+            position["loss_beyond_planned_gross_stop_risk_usd"] = loss_beyond_stop
+            position["exceeded_planned_gross_stop_risk"] = loss_beyond_stop > 1e-10
             position["status"] = "CLOSED"
             closed_at_timestamp.append(position)
             timestamp_pnl += pnl
@@ -335,6 +344,13 @@ def simulate_portfolio(
             "result_R": position["result_R"],
             "requested_risk_pct": position["requested_risk_pct"],
             "allocated_risk_usd": round(position["allocated_risk_usd"], 8),
+            "planned_gross_stop_risk_usd": round(position["allocated_risk_usd"], 8),
+            "loss_beyond_planned_gross_stop_risk_usd": round(
+                position.get("loss_beyond_planned_gross_stop_risk_usd", 0.0), 8
+            ),
+            "exceeded_planned_gross_stop_risk": bool(
+                position.get("exceeded_planned_gross_stop_risk", False)
+            ),
             "quantity": round(position["quantity"], 10),
             "notional_usd": round(position["notional_usd"], 8),
             "allocation_factor": round(position["allocation_factor"], 8),
@@ -371,6 +387,16 @@ def simulate_portfolio(
         "peak_open_risk_usd": round(peak_open_risk, 8),
         "peak_open_risk_pct_of_equity": round(peak_open_risk_pct, 6),
         "risk_limit_breach_events": risk_limit_breach_events,
+        "trades_exceeding_planned_gross_stop_risk": sum(
+            row["exceeded_planned_gross_stop_risk"] for row in accepted_rows
+        ),
+        "total_loss_beyond_planned_gross_stop_risk_usd": round(sum(
+            row["loss_beyond_planned_gross_stop_risk_usd"] for row in accepted_rows
+        ), 8),
+        "max_loss_beyond_planned_gross_stop_risk_usd": round(max(
+            (row["loss_beyond_planned_gross_stop_risk_usd"] for row in accepted_rows),
+            default=0.0,
+        ), 8),
         "peak_open_notional_usd": round(peak_open_notional, 8),
         "costs_included": False,
     })
