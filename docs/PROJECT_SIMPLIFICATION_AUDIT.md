@@ -149,3 +149,31 @@ El archivo `research/etf_provider_overlap_audit.py` compara las cotizaciones dia
 El workflow `.github/workflows/etf_provider_overlap_audit.yml` ejecuta la auditoría al cambiar estos archivos en una PR y también permite ejecución manual. Requiere el secreto existente `EODHD_API_KEY`; nunca imprime ni guarda la clave.
 
 **Estado:** herramienta añadida; comparación real pendiente de ejecución y revisión del artefacto. Hasta entonces, Yahoo y EODHD no se consideran equivalentes y no se cambia el enrutamiento de datos.
+
+### Resultados del solapamiento diario (ejecución 22-11-2026)
+
+La auditoría descargó datos reales de EODHD, Yahoo LSE y, como contraste independiente, Yahoo SIX para las mismas clases de participación USD. Ventana común: 2025-11-24 a 2026-11-20.
+
+**CSPX**
+- 251 sesiones solapadas EODHD/Yahoo LSE.
+- Apertura y cierre Yahoo LSE frente a EODHD: error mediano y p95 prácticamente cero.
+- Máximos Yahoo LSE: 65/251 sesiones con desviación absoluta superior al 1%; p95 6,385%; máximo 19,594%.
+- Mínimos: 1/251 sesiones por encima del 1%.
+- Contraste SIX (CSSPX.SW): máximo p95 0,150%, máximo absoluto 0,353%; apertura/cierre también muy próximos a EODHD.
+- Los máximos anómalos de Yahoo LSE no aparecen en el contraste SIX. Ejemplos extremos: 2026-01-06 (Yahoo LSE 888,76; EODHD 743,15; SIX 742,60), 2026-02-23 (886,57; 741,90; 740,70) y 2025-11-26 (863,38; 730,59; 730,60). Esto apunta a velas High defectuosas en Yahoo LSE, no a movimientos reales del ETF.
+
+**CNDX**
+- 246 sesiones EODHD/Yahoo LSE; Yahoo LSE y EODHD coinciden prácticamente en apertura/cierre y presentan desviaciones máximas inferiores al 0,35% en High/Low.
+- El contraste SIX (CSNDX.SW) tiene diferencias mayores en High/Low (p95 1,661% y 1,243%, respectivamente); por tanto, SIX no debe utilizarse como sustituto general de CNDX LSE.
+
+**Volumen**
+- Yahoo LSE/EODHD: ratio mediano 1,071 para CSPX y 1,000 para CNDX. Los volúmenes no son intercambiables sin normalización/estudio adicional.
+
+**Decisión técnica**
+- No sustituir el proveedor general de CSPX/CNDX todavía.
+- Bloquear el uso sin revisión del histórico ampliado Yahoo LSE de CSPX: la validación OHLC actual solo descarta velas incoherentes, por lo que máximos exagerados pero formalmente coherentes pueden pasar inadvertidos.
+- Mantener Yahoo LSE para CNDX provisionalmente sujeto a la validación de calidad ya existente.
+- Investigar una reparación selectiva de máximos CSPX con contraste SIX/EODHD, con umbral predefinido, trazabilidad por vela y pruebas unitarias; no modificar datos históricos silenciosamente.
+- No cambiar producción ni aceptar estrategia alguna a partir de esta auditoría.
+
+Artefacto reproducible: ejecución [44980363657](https://github.com/andertrading/Trading-bot/actions/runs/44980363657), artefacto etf-provider-overlap-audit. CI de tests del mismo commit: [44980363667](https://github.com/andertrading/Trading-bot/actions/runs/44980363667), correcto.
