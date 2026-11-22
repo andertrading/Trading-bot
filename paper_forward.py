@@ -176,6 +176,11 @@ def process_signal_bar(
                 if entry_touched and stop_touched:
                     trade.update({"status": "NO_FILL_AMBIGUOUS_ENTRY_STOP",
                                   "completed_at": timestamp.isoformat()})
+                elif stop_touched:
+                    # A stop touch before entry invalidates the setup; never
+                    # allow a later candle to fill the stale entry.
+                    trade.update({"status": "NO_FILL_STOP_TOUCHED",
+                                  "completed_at": timestamp.isoformat()})
                 elif opening >= target:
                     trade.update({"status": "NO_FILL_GAP_PAST_TARGET",
                                   "completed_at": timestamp.isoformat()})
