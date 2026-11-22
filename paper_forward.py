@@ -152,7 +152,9 @@ def paper_portfolio_snapshot(
         "current_portfolio_risk_usd": open_risk_usd,
         "invested_notional_usd": invested_notional_usd,
         "available_capital_usd": available_capital_usd,
-        "costs_status": state.get("costs_status", "NOT_INCLUDED_UNVERIFIED"),
+        # The forward engine does not yet debit verified net costs.
+        # Never allow a persisted flag to claim otherwise.
+        "costs_status": "NOT_INCLUDED_UNVERIFIED",
     }
 
 
