@@ -74,6 +74,7 @@ class TestRiskManager(unittest.TestCase):
             entry=100,
             stop=95,
             score=85,
+                available_capital_usd=1000,
             quote_to_usd=1,
             portfolio_risk_usd=0,
             costs_per_unit_quote=0,
@@ -89,6 +90,7 @@ class TestRiskManager(unittest.TestCase):
                 entry=100,
                 stop=95,
                 score=85,
+                available_capital_usd=1000,
                 quote_to_usd=1,
                 costs_per_unit_quote=0,
                 fixed_costs_quote=0,
@@ -103,6 +105,7 @@ class TestRiskManager(unittest.TestCase):
                 entry=100,
                 stop=95,
                 score=85,
+                available_capital_usd=1000,
                 quote_to_usd=None,
                 portfolio_risk_usd=0,
                 costs_per_unit_quote=0,
@@ -117,6 +120,7 @@ class TestRiskManager(unittest.TestCase):
                 entry=100,
                 stop=95,
                 score=85,
+                available_capital_usd=1000,
                 quote_to_usd=1,
                 portfolio_risk_usd=0,
             )
@@ -129,6 +133,7 @@ class TestRiskManager(unittest.TestCase):
                 entry=100,
                 stop=95,
                 score=85,
+                available_capital_usd=1000,
                 quote_to_usd=1,
                 portfolio_risk_usd=0,
                 costs_per_unit_quote=0,
@@ -146,6 +151,7 @@ class TestRiskManager(unittest.TestCase):
                         entry=100,
                         stop=95,
                         score=85,
+                available_capital_usd=1000,
                         quote_to_usd=1,
                         portfolio_risk_usd=0,
                         costs_per_unit_quote=0,
@@ -159,6 +165,7 @@ class TestRiskManager(unittest.TestCase):
                 entry=100,
                 stop=95,
                 score=85,
+                available_capital_usd=1000,
                 capital_usd=1000,
                 quote_to_usd=1,
                 portfolio_risk_usd=0,
@@ -181,6 +188,7 @@ class TestRiskManager(unittest.TestCase):
                 entry=100,
                 stop=95,
                 score=85,
+                available_capital_usd=1000,
                 capital_usd=1000,
                 quote_to_usd=1,
                 portfolio_risk_usd=0,
@@ -206,6 +214,7 @@ class TestRiskManager(unittest.TestCase):
                         entry=value,
                         stop=95,
                         score=85,
+                available_capital_usd=1000,
                         quote_to_usd=1,
                         portfolio_risk_usd=0,
                         costs_per_unit_quote=0,
@@ -232,6 +241,7 @@ class TestRiskManager(unittest.TestCase):
                         entry=100,
                         stop=95,
                         score=85,
+                available_capital_usd=1000,
                         quote_to_usd=1,
                         portfolio_risk_usd=0,
                         costs_per_unit_quote=value,
@@ -249,6 +259,7 @@ class TestRiskManager(unittest.TestCase):
                 entry=100,
                 stop=95,
                 score=85,
+                available_capital_usd=1000,
                 capital_usd=1000,
                 quote_to_usd=1,
                 portfolio_risk_usd=0,
@@ -266,12 +277,69 @@ class TestRiskManager(unittest.TestCase):
         self.assertAlmostEqual(result["risk_amount_usd"], 5)
         self.assertAlmostEqual(result["position_size"], 1)
 
+    def test_missing_available_cash_blocks_position_size(self):
+        with patch("risk_manager.ALLOW_POSITION_SIZING", True):
+            result = calculate_position_size(
+                entry=100,
+                stop=95,
+                score=85,
+                quote_to_usd=1,
+                portfolio_risk_usd=0,
+                costs_per_unit_quote=0,
+                fixed_costs_quote=0,
+            )
+
+        self.assertEqual(result["status"], "BLOCKED")
+        self.assertIn("efectivo disponible", result["reason"])
+
+    def test_position_size_is_capped_by_available_cash_without_leverage(self):
+        with patch("risk_manager.ALLOW_POSITION_SIZING", True):
+            result = calculate_position_size(
+                entry=100,
+                stop=99.99,
+                score=85,
+                capital_usd=1000,
+                available_capital_usd=250,
+                quote_to_usd=1,
+                portfolio_risk_usd=0,
+                costs_per_unit_quote=0,
+                fixed_costs_quote=0,
+            )
+
+        self.assertEqual(result["status"], "SIMULACION_NO_VALIDADA")
+        self.assertAlmostEqual(result["position_size"], 2.5)
+        self.assertAlmostEqual(result["position_notional_usd"], 250)
+        self.assertAlmostEqual(result["available_capital_usd"], 250)
+        self.assertTrue(result["cash_limited"])
+        self.assertLessEqual(
+            result["position_notional_usd"],
+            result["available_capital_usd"],
+        )
+        self.assertLess(result["total_reserved_risk_usd"], result["risk_amount_usd"])
+
+    def test_available_cash_cannot_exceed_virtual_capital(self):
+        with patch("risk_manager.ALLOW_POSITION_SIZING", True):
+            result = calculate_position_size(
+                entry=100,
+                stop=95,
+                score=85,
+                capital_usd=1000,
+                available_capital_usd=1001,
+                quote_to_usd=1,
+                portfolio_risk_usd=0,
+                costs_per_unit_quote=0,
+                fixed_costs_quote=0,
+            )
+
+        self.assertEqual(result["status"], "BLOCKED")
+
     def test_position_size_includes_costs(self):
         with patch("risk_manager.ALLOW_POSITION_SIZING", True):
             result = calculate_position_size(
                 entry=100,
                 stop=95,
                 score=85,
+                available_capital_usd=1000,
                 capital_usd=1000,
                 quote_to_usd=1,
                 portfolio_risk_usd=0,
@@ -294,6 +362,7 @@ class TestRiskManager(unittest.TestCase):
                 entry=100,
                 stop=95,
                 score=85,
+                available_capital_usd=1000,
                 capital_usd=1000,
                 quote_to_usd=1,
                 portfolio_risk_usd=28,
@@ -325,6 +394,7 @@ class TestRiskManager(unittest.TestCase):
                     entry=100,
                     stop=95,
                     score=85,
+                available_capital_usd=1000,
                     capital_usd=1000,
                     quote_to_usd=1,
                     portfolio_risk_usd=0,
