@@ -266,9 +266,9 @@ def _snapshot_metadata(
         "timeframe": interval,
         "provider": data.attrs.get("provider", provider),
         "period_requested": (
-            _daily_period_label()
-            if interval == "1d"
-            else "provider_maximum_available"
+            "provider_maximum_available"
+            if interval != "1d"
+            else None
         ),
         "interval_requested": interval,
         "auto_adjust": None,
@@ -463,6 +463,21 @@ def _load_snapshot(asset, ticker, interval):
                 f"{key} esperado={value}, "
                 f"recibido={metadata.get(key)}"
             )
+
+    if interval == "1d":
+        allowed_daily_periods = {"2y", "1825d"}
+        actual_daily_period = metadata.get("period_requested")
+        if actual_daily_period not in allowed_daily_periods:
+            raise ValueError(
+                f"Periodo diario incompatible en {metadata_path}: "
+                f"esperado uno de {sorted(allowed_daily_periods)}, "
+                f"recibido={actual_daily_period}"
+            )
+    elif metadata.get("period_requested") != "provider_maximum_available":
+        raise ValueError(
+            f"Periodo intradía incompatible en {metadata_path}: "
+            f"recibido={metadata.get('period_requested')}"
+        )
 
     expected_provider = _provider_for_asset(asset, interval)
     actual_provider = metadata.get("provider")
