@@ -838,12 +838,8 @@ class InstrumentEligibilityTests(unittest.TestCase):
     def test_zero_stop_take_profit_bounds_allowed_when_feature_disabled(self):
         config = dict(self.item["leverageConfigs"][0])
         config["allowStopLossTakeProfit"] = False
-        for field in (
-            "minStopLossPercentage", "maxStopLossPercentage",
-            "defaultStopLossPercentage", "minTakeProfitPercentage",
-            "maxTakeProfitPercentage", "defaultTakeProfitPercentage",
-        ):
-            config[field] = 0
+        config["minStopLossPercentage"] = 0
+        config["minTakeProfitPercentage"] = 0
         item = dict(self.item, leverageConfigs=[config])
         response = EtoroResponse(
             dict(self.response.data, eligibilities=[item]), 200, {}
@@ -878,14 +874,20 @@ class InstrumentEligibilityTests(unittest.TestCase):
                 with self.assertRaisesRegex(EtoroAPIError, "no negativo"):
                     normalize_instrument_eligibility(response, [101])
 
-    def test_zero_percentage_rejected_when_stop_take_profit_is_enabled(self):
-        config = dict(self.item["leverageConfigs"][0], minStopLossPercentage=0)
-        item = dict(self.item, leverageConfigs=[config])
-        response = EtoroResponse(
-            dict(self.response.data, eligibilities=[item]), 200, {}
-        )
-        with self.assertRaisesRegex(EtoroAPIError, "allowStopLossTakeProfit"):
-            normalize_instrument_eligibility(response, [101])
+    def test_zero_maximum_or_default_percentage_is_rejected(self):
+        for field in (
+            "maxStopLossPercentage", "defaultStopLossPercentage",
+            "maxTakeProfitPercentage", "defaultTakeProfitPercentage",
+        ):
+            with self.subTest(field=field):
+                config = dict(self.item["leverageConfigs"][0])
+                config[field] = 0
+                item = dict(self.item, leverageConfigs=[config])
+                response = EtoroResponse(
+                    dict(self.response.data, eligibilities=[item]), 200, {}
+                )
+                with self.assertRaisesRegex(EtoroAPIError, "debe ser positivo"):
+                    normalize_instrument_eligibility(response, [101])
 
     def test_complete_eligibility_is_normalized_without_inventing_permissions(self):
         result = normalize_instrument_eligibility(self.response, [101])
