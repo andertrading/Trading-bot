@@ -20,6 +20,23 @@ Consequences:
 - Per-trade `verified_net_pnl_usd` and `verified_result_R` do not use the portfolio's allocated quantity. They must not be summed to create portfolio net results.
 - Portfolio risk limits currently constrain gross stop-loss exposure. Once costs are included, commissions/spread/FX can make the all-in loss at a stop exceed the nominal 1% per-trade or 3% aggregate limits.
 
+## Public eToro fee schedule spot-check — 2026-11-22
+
+The current Spanish public fee page was checked against the scenario assumptions in `transaction_costs.py`:
+
+- REAL stocks: eToro currently describes a $1 or $2 opening/closing commission depending on residence and exchange. The code's $2 per side is the conservative upper end, not a confirmed fee for every configured stock.
+- REAL ETFs: eToro states no platform transaction commission. Market spread still exists.
+- REAL crypto: the public schedule is tiered by Club level and monthly volume; Bronze/Silver/Gold show 1%, with reduced rates for higher tiers. The code's 1% per side is a conservative base-tier assumption, not an account-specific quote.
+- CFDs: the public page lists 0.15% for stocks/ETFs and 1% for crypto; the current scenario model matches these percentage assumptions. The page also states that new Spanish users have been unable to trade CFDs since 2 August 2024, so CFD paths remain outside this REAL-only production candidate.
+- Market spread is the natural bid/ask difference, not an additional eToro spread commission. It varies with market conditions. Currency-conversion fees vary by location, payment method and Club level.
+
+Sources checked:
+- https://www.etoro.com/es/trading/fees/
+- https://www.etoro.com/es/trading/fees/cfd-spreads/
+- https://www.etoro.com/es/trading/fees/cfd-overnight-fees/
+
+This spot-check supports retaining the published-fee values as **scenario assumptions only**. It does not confirm the user's applicable stock fee, Club tier, actual instrument execution type, market spread, or historical OHLC-to-executable-price mapping. The order ticket's estimated-cost display remains the instrument-level evidence source.
+
 ## Required integration design
 
 ### 1. One source of truth
