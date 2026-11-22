@@ -396,6 +396,20 @@ class TestBacktestV3(unittest.TestCase):
         )
         self.assertEqual(daily_metadata["period_requested"], "2y")
 
+        with patch.object(backtest_v3, "BACKTEST_DAILY_LOOKBACK_DAYS", 1825):
+            extended_daily_metadata = backtest_v3._snapshot_metadata(
+                "AAPL",
+                "AAPL",
+                "1d",
+                daily_data,
+                backtest_v3.Path("extended_daily_snapshot.csv"),
+                "sha256",
+                "twelvedata",
+            )
+        self.assertEqual(
+            extended_daily_metadata["period_requested"], "1825d"
+        )
+
         daily_data.attrs.update({
             "price_source_detail": "LSE primary; SIX alternate OHLC repair",
             "ohlc_repair_count": 9,
