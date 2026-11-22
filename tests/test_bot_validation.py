@@ -703,5 +703,46 @@ class TestTwelveDataDailyRequestSuppression(unittest.TestCase):
 
 
 
+    def test_legacy_telegram_path_never_sends_blocked_candidates(self):
+        scan = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "analyses_completed": 1,
+            "technical_candidates_found": 1,
+            "candidates_blocked": 1,
+            "validated_candidates": 0,
+            "no_trade_count": 0,
+            "results": [{
+                "action": "BUY CANDIDATE",
+                "asset": "AAPL",
+                "timeframe": "1d",
+                "validation_status": "BLOCKED",
+                "tradable": False,
+                "validated": False,
+                "economic_eligibility": {
+                    "status": "COSTS_UNVERIFIED",
+                    "blockers": ["round_trip_fee_evidence_missing"],
+                },
+            }],
+        }
+        with patch.object(Bot, "TELEGRAM_ENABLED", True), \\
+             patch.object(Bot, "SIGNAL_ALERTS_ENABLED", True), \\
+             patch.object(Bot, "STRATEGY_VALIDATED", True), \\
+             patch.object(Bot, "send_telegram_message") as send:
+            result = Bot.send_telegram_notifications(scan)
+
+        self.assertEqual(result, "held:no_eligible_candidates")
+        send.assert_not_called()
+
+    def test_legacy_telegram_path_requires_global_alert_and_strategy_gates(self):
+        with patch.object(Bot, "TELEGRAM_ENABLED", True), \\
+             patch.object(Bot, "SIGNAL_ALERTS_ENABLED", False), \\
+             patch.object(Bot, "STRATEGY_VALIDATED", True), \\
+             patch.object(Bot, "send_telegram_message") as send:
+            result = Bot.send_telegram_notifications({"results": []})
+
+        self.assertEqual(result, "held:global_validation_gate")
+        send.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()
