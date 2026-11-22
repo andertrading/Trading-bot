@@ -41,7 +41,7 @@ class TestEtfProviderOverlapQuality(unittest.TestCase):
         )
         result = _price_error_metrics(left, right, "_left", "_right")
         self.assertEqual(result["High"]["observations"], 2)
-        self.assertAlmostEqual(result["High"]["max_abs_pct"], 100.0 * (110.0 / 101.0 - 1.0))
+        self.assertAlmostEqual(result["High"]["max_abs_pct"], 100.0 * abs(101.0 / 110.0 - 1.0))
         self.assertEqual(result["Open"]["max_abs_pct"], 0.0)
 
 
