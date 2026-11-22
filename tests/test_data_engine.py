@@ -2566,7 +2566,7 @@ class TestYahooAlternateDailyOhlcRepair(unittest.TestCase):
 
     def test_repairs_structurally_invalid_lse_bar_from_same_date_six_bar(self):
         self.assertTrue(self.assert_date_present)
-        self.primary.loc[self.bad_date, "Low"] = 100.5
+        self.primary.loc[self.bad_date, "Low"] = 101.5
 
         repaired, metadata = engine._patch_incoherent_daily_ohlc_from_alternate(
             self.primary, self.alternate, "CSPX", "CSSPX.SW"
@@ -2579,7 +2579,7 @@ class TestYahooAlternateDailyOhlcRepair(unittest.TestCase):
         self.assertFalse(engine._invalid_ohlc_mask(repaired).any())
 
     def test_rejects_repair_when_same_date_close_deviation_exceeds_limit(self):
-        self.primary.loc[self.bad_date, "Low"] = 100.5
+        self.primary.loc[self.bad_date, "Low"] = 101.5
         self.alternate.loc[self.bad_date, "Close"] = 102.0
 
         repaired, metadata = engine._patch_incoherent_daily_ohlc_from_alternate(
@@ -2590,8 +2590,8 @@ class TestYahooAlternateDailyOhlcRepair(unittest.TestCase):
         self.assertIsNone(metadata)
 
     def test_rejects_repair_when_alternate_bar_is_structurally_invalid(self):
-        self.primary.loc[self.bad_date, "Low"] = 100.5
-        self.alternate.loc[self.bad_date, "Low"] = 100.5
+        self.primary.loc[self.bad_date, "Low"] = 101.5
+        self.alternate.loc[self.bad_date, "Low"] = 101.5
 
         repaired, metadata = engine._patch_incoherent_daily_ohlc_from_alternate(
             self.primary, self.alternate, "CSPX", "CSSPX.SW"
@@ -2615,7 +2615,7 @@ class TestYahooAlternateDailyOhlcRepair(unittest.TestCase):
         remove_incomplete, has_gaps
     ):
         primary = make_ohlcv(self.index)
-        primary.loc[self.bad_date, "Low"] = 100.5
+        primary.loc[self.bad_date, "Low"] = 101.5
         alternate = make_ohlcv(self.index)
         download_history.side_effect = [primary, alternate]
         download_alternate.return_value = (alternate, "CSSPX.SW")
