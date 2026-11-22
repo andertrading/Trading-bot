@@ -29,7 +29,7 @@ jobs:
     # Scheduled runs require repository opt-in. A deliberate manual
     # dispatch is also allowed for paper-only validation without enabling
     # recurring automation; alert and strategy gates remain independent.
-    if: ${{ vars.SIGNAL_AUTOMATION_ENABLED == 'true' || github.event_name == 'workflow_dispatch' }}
+    if: ${{ github.event_name == 'workflow_dispatch' || (vars.SIGNAL_AUTOMATION_ENABLED == 'true' && vars.MARKET_DATA_CREDITS_AUTHORIZED == 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
