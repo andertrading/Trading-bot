@@ -86,6 +86,28 @@ class TestAssetEconomicEligibility(unittest.TestCase):
         self.assertEqual(result["status"], "COSTS_UNVERIFIED")
         self.assertIn("trade_FX_conversion_fee_or_rate_not_verified", result["blockers"])
 
+    def test_non_usd_quote_requires_both_fx_fee_and_conversion_rate(self):
+        values = self.complete_inputs()
+        values["fx_conversion_fee_pct"] = 0.001
+        values["quote_to_account_rate"] = None
+        result = eligibility.classify_asset(
+            "TEST",
+            asset_config={"name": "Test", "type": "STOCK", "currency": "EUR", "enabled": True},
+            **values,
+        )
+        self.assertEqual(result["status"], "COSTS_UNVERIFIED")
+        self.assertIn("trade_FX_conversion_fee_or_rate_not_verified", result["blockers"])
+
+    def test_confirmed_but_missing_execution_type_fails_closed(self):
+        result = eligibility.classify_asset(
+            "TEST",
+            asset_config={"name": "Test", "type": "STOCK", "currency": "USD", "enabled": True},
+            execution_type=None,
+            execution_type_confirmed=True,
+        )
+        self.assertEqual(result["status"], "INELIGIBLE")
+        self.assertIn("mvp_requires_confirmed_REAL_execution", result["blockers"])
+
     def test_current_config_fails_closed_for_all_12_assets(self):
         report = eligibility.build_eligibility_report()
         self.assertEqual(len(report["assets"]), 12)
