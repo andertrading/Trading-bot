@@ -19,6 +19,12 @@ from signal_lifecycle import (
     advance_signal,
     build_signal_record,
 )
+from paper_forward import (
+    DEFAULT_RISK_PER_TRADE,
+    new_paper_state,
+    paper_summary,
+    process_signal_bar,
+)
 
 
 logger = logging.getLogger("scheduled_scan")
@@ -247,6 +253,51 @@ def run_scheduled_scan(timeframe: str) -> dict:
     }
 
     state = store.load()
+    paper_state = state.get("paper_forward")
+    if not isinstance(paper_state, dict) or paper_state.get("execution_mode") != "PAPER_ONLY":
+        paper_state = new_paper_state()
+    paper_bars_processed = 0
+
+    # Process the latest completed OHLC bar for each existing signal before
+    # lifecycle monitoring can invalidate it. The signal's own creation candle
+    # is ignored by the paper engine; only later bars can produce a fill.
+    for stored_signal in list(state["signals"].values()):
+        if stored_signal.get("timeframe") != timeframe:
+            continue
+        current = by_asset.get(stored_signal.get("asset"))
+        if not current or current.get("data_valid") is not True:
+            continue
+        required_bar_fields = (
+            "data_timestamp", "last_open", "last_high", "last_low", "last_price"
+        )
+        if not all(current.get(field) is not None for field in required_bar_fields):
+            continue
+        previous_bar = paper_state.get("processed_bars", {}).get(
+            stored_signal.get("signal_id")
+        )
+        paper_risk = stored_signal.get("provisional_risk_pct")
+        try:
+            paper_risk = float(paper_risk) if paper_risk is not None else DEFAULT_RISK_PER_TRADE
+        except (TypeError, ValueError, OverflowError):
+            paper_risk = DEFAULT_RISK_PER_TRADE
+        process_signal_bar(
+            paper_state,
+            stored_signal,
+            {
+                "timestamp": current["data_timestamp"],
+                "open": current["last_open"],
+                "high": current["last_high"],
+                "low": current["last_low"],
+                "close": current["last_price"],
+            },
+            risk_fraction=paper_risk,
+        )
+        if paper_state.get("processed_bars", {}).get(
+            stored_signal.get("signal_id")
+        ) != previous_bar:
+            paper_bars_processed += 1
+
+    store.update_paper_state(paper_state)
     transitions = 0
     retried_alerts = 0
 
@@ -388,6 +439,8 @@ def run_scheduled_scan(timeframe: str) -> dict:
         "alerts_retried": retried_alerts,
         "lifecycle_notifications_retried": lifecycle_notifications_retried,
         "stale_candidates_skipped": stale_candidates_skipped,
+        "paper_bars_processed": paper_bars_processed,
+        "paper_forward": paper_summary(paper_state),
         "alerts_enabled": alerts_enabled,
         "automatic_execution": False,
         "real_trading_authorized": False,
