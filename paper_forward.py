@@ -172,40 +172,52 @@ def process_signal_bar(
                                   "completed_at": timestamp.isoformat()})
                 elif entry_touched:
                     fill = max(entry, opening)
-                    risk_fraction = _number(risk_fraction, "risk_fraction")
-                    max_risk_per_trade = _number(max_risk_per_trade, "max_risk_per_trade")
-                    max_portfolio_risk = _number(max_portfolio_risk, "max_portfolio_risk")
-                    if risk_fraction > max_risk_per_trade or max_risk_per_trade > MAX_RISK_PER_TRADE:
-                        raise ValueError("per-trade risk policy exceeds the hard 1% cap")
-                    if max_portfolio_risk > MAX_PORTFOLIO_RISK:
-                        raise ValueError("portfolio risk policy exceeds the hard 3% cap")
-                    equity = float(state["equity_usd"])
-                    risk_budget = equity * risk_fraction
-                    reserved = _open_risk(state)
-                    if reserved + risk_budget > equity * max_portfolio_risk + 1e-9:
-                        trade.update({"status": "REJECTED_PORTFOLIO_RISK",
-                                      "completed_at": timestamp.isoformat()})
+                    if (
+                        isinstance(risk_fraction, bool)
+                        or not math.isfinite(float(risk_fraction))
+                        or float(risk_fraction) <= 0
+                    ):
+                        # Low-quality candidates can exist for diagnostics,
+                        # but a zero provisional risk must never become a fill.
+                        trade.update({
+                            "status": "REJECTED_INVALID_RISK_POLICY",
+                            "completed_at": timestamp.isoformat(),
+                        })
                     else:
-                        quantity = risk_budget / (fill - stop)
-                        notional = quantity * fill
-                        if notional > equity + 1e-9:
-                            trade.update({"status": "REJECTED_NO_LEVERAGE_CASH",
+                        risk_fraction = _number(risk_fraction, "risk_fraction")
+                        max_risk_per_trade = _number(max_risk_per_trade, "max_risk_per_trade")
+                        max_portfolio_risk = _number(max_portfolio_risk, "max_portfolio_risk")
+                        if risk_fraction > max_risk_per_trade or max_risk_per_trade > MAX_RISK_PER_TRADE:
+                            raise ValueError("per-trade risk policy exceeds the hard 1% cap")
+                        if max_portfolio_risk > MAX_PORTFOLIO_RISK:
+                            raise ValueError("portfolio risk policy exceeds the hard 3% cap")
+                        equity = float(state["equity_usd"])
+                        risk_budget = equity * risk_fraction
+                        reserved = _open_risk(state)
+                        if reserved + risk_budget > equity * max_portfolio_risk + 1e-9:
+                            trade.update({"status": "REJECTED_PORTFOLIO_RISK",
                                           "completed_at": timestamp.isoformat()})
                         else:
-                            trade.update({
-                                "status": "OPEN", "entry_fill_price": fill,
-                                "entry_timestamp": timestamp.isoformat(),
-                                "stop": stop, "target": target,
-                                "quantity": quantity, "notional_usd": notional,
-                                "risk_budget_usd": risk_budget,
-                                "risk_reserved_usd": risk_budget,
-                                "risk_fraction": risk_fraction,
-                                "costs_usd": None, "net_pnl_usd": None,
-                            })
-                            # If target is touched after entry and stop is not,
-                            # the same candle can close at the target.
-                            if target_touched:
-                                _finish_trade(state, trade, target, timestamp.isoformat(), "TARGET")
+                            quantity = risk_budget / (fill - stop)
+                            notional = quantity * fill
+                            if notional > equity + 1e-9:
+                                trade.update({"status": "REJECTED_NO_LEVERAGE_CASH",
+                                              "completed_at": timestamp.isoformat()})
+                            else:
+                                trade.update({
+                                    "status": "OPEN", "entry_fill_price": fill,
+                                    "entry_timestamp": timestamp.isoformat(),
+                                    "stop": stop, "target": target,
+                                    "quantity": quantity, "notional_usd": notional,
+                                    "risk_budget_usd": risk_budget,
+                                    "risk_reserved_usd": risk_budget,
+                                    "risk_fraction": risk_fraction,
+                                    "costs_usd": None, "net_pnl_usd": None,
+                                })
+                                # If target is touched after entry and stop is not,
+                                # the same candle can close at the target.
+                                if target_touched:
+                                    _finish_trade(state, trade, target, timestamp.isoformat(), "TARGET")
             elif timestamp > expiry or signal.get("status") != "PENDING":
                 trade.update({"status": "NOT_FILLED_EXPIRED_OR_INVALID",
                               "completed_at": timestamp.isoformat()})
