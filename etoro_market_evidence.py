@@ -102,7 +102,10 @@ def collect_market_evidence(client: Any, *, symbols: Mapping[str, Mapping[str, A
                   "quote": None, "hypothetical_open_cost": None, "errors": []}
         report["assets"][asset] = record
         try:
-            instrument = _resolve_instrument(client, asset)
+            etoro_symbol = symbols[asset].get("etoro_symbol", asset)
+            if not isinstance(etoro_symbol, str) or not etoro_symbol.strip():
+                raise EtoroAPIError("etoro_symbol debe ser un símbolo no vacío")
+            instrument = _resolve_instrument(client, etoro_symbol.strip())
             expected_type = symbols[asset].get("type")
             if not _instrument_type_matches(
                 expected_type, instrument.get("instrumentType")
