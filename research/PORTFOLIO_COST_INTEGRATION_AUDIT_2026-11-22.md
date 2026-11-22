@@ -51,6 +51,22 @@ The $2 and $4 scenarios correspond to the public $1-per-side and $2-per-side sto
 
 Implications: with the conservative $2-per-side assumption, a C-tier stock trade cannot fit inside its $2.50 all-in stop-risk budget even before variable costs. A B-tier trade has only $1 left for price risk and all other costs. This is a meaningful small-capital friction for fixed-fee stocks; it is not evidence that the strategy is profitable or unprofitable, and it is not a reason to increase risk or change brokers without validated evidence. ETF and crypto cost structures differ and must be evaluated separately.
 
+### Crypto fee sensitivity at different stop distances
+
+For a long crypto position with a 1% fee on entry and 1% on exit, assuming the exit occurs exactly at the stop and ignoring market spread/slippage, the round-trip fee alone is approximately:
+
+`fee_R = 0.01 * (2 - stop_distance_pct) / stop_distance_pct`
+
+| Stop distance from entry | Approx. round-trip fee |
+|---|---:|
+| 2% | 0.99R |
+| 3% | 0.66R |
+| 5% | 0.39R |
+| 8% | 0.24R |
+| 10% | 0.19R |
+
+This is a sensitivity calculation, not a measured strategy result. It demonstrates why the crypto fee model can consume a large share of the stop-risk budget when stops are tight. Actual spreads, slippage, execution type, and the trade's realized exit price can make the final result different.
+
 ## Required integration design
 
 ### 1. One source of truth
