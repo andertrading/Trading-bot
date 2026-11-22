@@ -321,3 +321,12 @@ Se hizo una sensibilidad aislada sobre los costes por operación del artefacto: 
 - Baseline diario: neto estimado -59.84 R con 1.000 USD y sigue en -7.40 R con 20.000 USD.
 
 La sensibilidad no incluye spread, no simula el efecto de la trayectoria de equity sobre el tamaño de las posiciones y no constituye una validación de rentabilidad. Solo demuestra que aumentar capital reduce el peso de la comisión fija de acciones, pero no arregla por sí solo una estrategia con ventaja bruta insuficiente; no se recomienda aumentar el capital de referencia ni el riesgo para compensarlo.
+
+
+### Identidad de instrumentos Twelve Data
+
+El gate de metadata exige símbolo y moneda compatibles, tipo de activo correcto, bolsa y tipo presentes, y zona horaria coherente con el calendario configurado para acciones/ETF. El MIC es obligatorio para acciones y ETF, pero no para cripto: Twelve Data documenta MIC para valores negociables y no lo presenta como identificador aplicable a monedas digitales. La validación de tipo usa `Common Stock`, `ETF` y `Digital Currency`.
+
+La bolsa y el MIC recibidos se registran en logs, pero aún no se comparan con un valor esperado independiente por símbolo. No se han inventado códigos ni se ha marcado la identidad exacta del listado como verificada. La identidad completa sigue pendiente hasta disponer de metadatos por instrumento contrastados.
+
+Fuente de esquema de metadata Twelve Data: https://twelvedata.com/docs/ai/ai-data-assistant
