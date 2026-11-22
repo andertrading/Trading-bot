@@ -217,3 +217,6 @@ La ficha ahora exige tres elementos explícitos antes de confirmar la base de pr
 Se añade `estimate_verified_registry_trade_costs` como ruta de cálculo para el MVP REAL. Solo calcula y declara completo el coste cuando la clasificación del registro es `ELIGIBLE`; utiliza comisión de entrada y salida por separado (fija, porcentual en puntos porcentuales o cero confirmado), spread bid-ask y FX cuando corresponda. Una ficha incompleta devuelve sus bloqueos y no transforma valores desconocidos en cero.
 
 El cálculo anterior `estimate_etoro_trade_costs` se conserva como escenario de tarifas públicas estimadas y no puede certificar la elegibilidad del instrumento. Ambos resultados quedan separados para evitar confundir una simulación conservadora con costes confirmados del ticket.
+
+
+La ruta verificada expresa todos los componentes en moneda de cuenta: las comisiones porcentuales y el spread se convierten desde la moneda de cotización mediante el tipo FX registrado; las comisiones fijas en USD ya están en moneda de cuenta. La comisión de conversión se calcula por separado sobre el nominal de entrada y salida. Si falta cualquiera de esos datos, no devuelve un total numérico.
