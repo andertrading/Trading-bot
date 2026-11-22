@@ -172,7 +172,7 @@ def assess_target_dates(usd_frame, gbp_usd_frame, target_dates):
             item["status"] = "NO_GBX_CANDIDATE"
         elif day not in usd.index:
             item["status"] = "CANDIDATE_ONLY_NO_PRIMARY_CROSSCHECK"
-            item["gbx_candidate_ohlc_usd": = {
+            item["gbx_candidate_ohlc_usd"] = {
                 column: round(float(alternate.at[day, column]), 6)
                 for column in OHLC
             }
