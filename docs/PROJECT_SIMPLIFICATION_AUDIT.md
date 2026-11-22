@@ -400,3 +400,6 @@ Fuentes públicas Bitvavo:
 The production validation gate requires a complete `sizing_result` and independently confirmed portfolio risk before a candidate can become an approved manual signal. `ALLOW_POSITION_SIZING` remains disabled, and `Bot.run_scan()` does not invent a size when the registry is incomplete or portfolio exposure is unknown. This is intentional: the current registry has no economically eligible assets, and the bot must not infer the user's real open positions.
 
 The next sizing implementation must be a clearly labelled virtual/paper calculation using the 1,000 USD reference capital and fully evidenced round-trip costs. It must remain separate from the user's real account and must not mark a candidate as tradable until the account-specific execution and portfolio-risk requirements are satisfied.
+
+
+Nota de interpretación del modelo de costes: `ETORO_STOCK_REAL_COMMISSION_USD_PER_SIDE=2.0` sigue siendo el escenario superior conservador usado por el estimador genérico. La sensibilidad específica de España usa 1 USD por lado según la tabla pública. Ninguno de los dos valores sustituye la confirmación de residencia contractual y ticket; el registro económico continúa fail-closed.
