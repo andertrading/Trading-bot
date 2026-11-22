@@ -274,6 +274,7 @@ def run_audit(
     eligibility_status = "NOT_IN_SCOPE"
 
     quotes_valid = False
+    realtime_quotes_valid = False
     quotes_status = "NOT_CHECKED"
     quote_diagnostics: list[dict[str, Any]] = []
     if resolved and len(resolved) == len(enabled_assets):
@@ -291,9 +292,12 @@ def run_audit(
                 max_closed_age_seconds=604800,
             )
             quotes_valid = True
+            realtime_quotes_valid = all(
+                quote.quote_type == "realtime" for quote in quotes.values()
+            )
             quotes_status = (
                 "VALIDATED_WITH_CLOSED_MARKETS"
-                if any(quote.quote_type == "last_session" for quote in quotes.values())
+                if not realtime_quotes_valid
                 else "VALIDATED"
             )
             quote_diagnostics = [
@@ -344,7 +348,8 @@ def run_audit(
         "instrument_resolution": instrument_report,
         "instrument_eligibility_validated": eligibility_valid,
         "instrument_eligibility_status": eligibility_status,
-        "complete_realtime_quotes_validated": quotes_valid,
+        "market_quotes_validated": quotes_valid,
+        "complete_realtime_quotes_validated": realtime_quotes_valid,
         "realtime_quotes_status": quotes_status,
         "quote_diagnostics": quote_diagnostics,
         "portfolio_risk_admission_ready": False,
