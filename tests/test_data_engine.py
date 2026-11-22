@@ -2589,6 +2589,17 @@ class TestYahooAlternateDailyOhlcRepair(unittest.TestCase):
         self.assertIsNone(repaired)
         self.assertIsNone(metadata)
 
+    def test_rejects_repair_when_trusted_high_deviates_even_if_close_matches(self):
+        self.primary.loc[self.bad_date, "Low"] = 101.5
+        self.alternate.loc[self.bad_date, "High"] = 104.0
+
+        repaired, metadata = engine._patch_incoherent_daily_ohlc_from_alternate(
+            self.primary, self.alternate, "CSPX", "CSSPX.SW"
+        )
+
+        self.assertIsNone(repaired)
+        self.assertIsNone(metadata)
+
     def test_rejects_repair_when_alternate_bar_is_structurally_invalid(self):
         self.primary.loc[self.bad_date, "Low"] = 101.5
         self.alternate.loc[self.bad_date, "Low"] = 101.5
