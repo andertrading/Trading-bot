@@ -1478,7 +1478,7 @@ def run_scan(timeframes=None, include_paper_bars=False, paper_assets=None):
                     result = analyze_asset(
                         asset,
                         timeframe,
-                        include_paper_bars=True,
+                        include_paper_bars=asset in paper_assets,
                     )
                 else:
                     result = analyze_asset(asset, timeframe)
