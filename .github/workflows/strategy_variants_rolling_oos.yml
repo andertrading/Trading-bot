@@ -31,8 +31,8 @@ jobs:
     env:
       BACKTEST_DATA_MODE: replay
       BACKTEST_SNAPSHOT_DIR: historicos_full_merged
-      BACKTEST_DAILY_LOOKBACK_DAYS: "1825"
-      BACKTEST_EXTENDED_DAILY_HISTORY: "true"
+      BACKTEST_DAILY_LOOKBACK_DAYS: "730"
+      BACKTEST_EXTENDED_DAILY_HISTORY: "false"
 
     steps:
       - name: Checkout research-only strategy harness
@@ -394,6 +394,9 @@ jobs:
           PY
 
       - name: Audit internal candle gaps across every immutable snapshot
+        env:
+          BACKTEST_DAILY_LOOKBACK_DAYS: "1825"
+          BACKTEST_EXTENDED_DAILY_HISTORY: "true"
         run: |
           python - <<'PY'
           import json
@@ -467,6 +470,11 @@ jobs:
           PY
 
       - name: Run fixed strategy hypotheses with chronological walk-forward split
+        env:
+          BACKTEST_DATA_MODE: replay
+          BACKTEST_SNAPSHOT_DIR: historicos_full_merged
+          BACKTEST_DAILY_LOOKBACK_DAYS: "1825"
+          BACKTEST_EXTENDED_DAILY_HISTORY: "true"
         run: python strategy_research.py
 
       - name: Upload research metrics and trade logs
@@ -497,3 +505,4 @@ jobs:
             strategy_research_mtf_asset_class_net_portfolio.csv
             provider_freshness.json
             snapshot_quality.json
+            daily_history_extension.json
