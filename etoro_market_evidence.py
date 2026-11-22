@@ -75,8 +75,8 @@ def collect_market_evidence(client: Any, *, symbols: Mapping[str, Mapping[str, A
             record["instrument"] = {
                 "instrument_id": instrument["instrumentId"],
                 "symbol": instrument["internalSymbolFull"],
-                "display_name": instrument["displayName"],
-                "instrument_type": instrument["type"],
+                "display_name": instrument["displayname"],
+                "instrument_type": instrument["instrumentType"],
             }
         except Exception as exc:
             record["errors"].append(f"instrument_resolution: {type(exc).__name__}: {exc}")
