@@ -293,7 +293,11 @@ def can_add_sized_trade(
         "fractional_allowed": sizing_result.get("fractional_allowed"),
         "available_capital_usd": sizing_result.get("available_capital_usd"),
     }
-    if any(not _is_finite_number(value) for value in cash_fields.values()):
+    if any(
+        not _is_finite_number(value)
+        for key, value in cash_fields.items()
+        if key != "fractional_allowed"
+    ):
         return {
             "allowed": False,
             "reason": "Faltan datos verificables para comprobar el nominal frente al efectivo disponible.",
