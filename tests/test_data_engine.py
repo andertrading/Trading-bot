@@ -2552,3 +2552,112 @@ class TestTwelveDataDateRangeFormatting(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestYahooAlternateDailyOhlcRepair(unittest.TestCase):
+    def setUp(self):
+        self.index = pd.bdate_range(
+            "2025-01-01", "2026-11-18", tz="UTC"
+        )
+        self.primary = make_ohlcv(self.index)
+        self.alternate = make_ohlcv(self.index)
+        self.bad_date = pd.Timestamp("2026-03-02", tz="UTC")
+        self.assert_date_present = self.bad_date in self.index
+
+    def test_repairs_structurally_invalid_lse_bar_from_same_date_six_bar(self):
+        self.assertTrue(self.assert_date_present)
+        self.primary.loc[self.bad_date, "Low"] = 100.5
+
+        repaired, metadata = engine._patch_incoherent_daily_ohlc_from_alternate(
+            self.primary, self.alternate, "CSPX", "CSSPX.SW"
+        )
+
+        self.assertIsNotNone(repaired)
+        self.assertEqual(repaired.loc[self.bad_date, "Low"], 99.0)
+        self.assertEqual(metadata["ohlc_repair_count"], 1)
+        self.assertEqual(metadata["ohlc_repair_source_ticker"], "CSSPX.SW")
+        self.assertFalse(engine._invalid_ohlc_mask(repaired).any())
+
+    def test_rejects_repair_when_same_date_close_deviation_exceeds_limit(self):
+        self.primary.loc[self.bad_date, "Low"] = 100.5
+        self.alternate.loc[self.bad_date, "Close"] = 102.0
+
+        repaired, metadata = engine._patch_incoherent_daily_ohlc_from_alternate(
+            self.primary, self.alternate, "CSPX", "CSSPX.SW"
+        )
+
+        self.assertIsNone(repaired)
+        self.assertIsNone(metadata)
+
+    def test_rejects_repair_when_alternate_bar_is_structurally_invalid(self):
+        self.primary.loc[self.bad_date, "Low"] = 100.5
+        self.alternate.loc[self.bad_date, "Low"] = 100.5
+
+        repaired, metadata = engine._patch_incoherent_daily_ohlc_from_alternate(
+            self.primary, self.alternate, "CSPX", "CSSPX.SW"
+        )
+
+        self.assertIsNone(repaired)
+        self.assertIsNone(metadata)
+
+    @patch.dict(os.environ, {
+        "BACKTEST_EXTENDED_DAILY_HISTORY": "true",
+        "BACKTEST_DAILY_LOOKBACK_DAYS": "1825",
+    })
+    @patch.object(engine, "_has_daily_gaps", return_value=False)
+    @patch.object(engine, "_remove_incomplete_candle", side_effect=lambda frame, interval, asset: frame)
+    @patch.object(engine, "_download_yahoo_alternate_daily")
+    @patch.object(engine, "_download_yahoo_daily_history")
+    @patch.object(engine.requests, "get")
+    @patch.object(engine, "datetime", FrozenDateTime)
+    def test_extended_yahoo_download_returns_repaired_history(
+        self, request_get, download_history, download_alternate,
+        remove_incomplete, has_gaps
+    ):
+        primary = make_ohlcv(self.index)
+        primary.loc[self.bad_date, "Low"] = 100.5
+        alternate = make_ohlcv(self.index)
+        download_history.side_effect = [primary, alternate]
+        download_alternate.return_value = (alternate, "CSSPX.SW")
+
+        timestamps = [int(value.timestamp()) for value in self.index]
+        payload = {
+            "chart": {
+                "error": None,
+                "result": [{
+                    "meta": {
+                        "currency": "USD",
+                        "fullExchangeName": "London Stock Exchange",
+                        "exchangeTimezoneName": "Europe/London",
+                    },
+                    "timestamp": timestamps,
+                    "indicators": {
+                        "quote": [{
+                            "open": [100.0] * len(timestamps),
+                            "high": [102.0] * len(timestamps),
+                            "low": [99.0] * len(timestamps),
+                            "close": [101.0] * len(timestamps),
+                            "volume": [1000] * len(timestamps),
+                        }],
+                    },
+                }],
+            },
+        }
+        response = type("Response", (), {
+            "status_code": 200,
+            "raise_for_status": lambda self: None,
+            "json": lambda self: payload,
+        })()
+        request_get.return_value = response
+
+        result = engine._download_yahoo(
+            "CSPX", {"yahoo": "CSPX.L", "currency": "USD"}, "1d"
+        )
+
+        self.assertIsNotNone(result)
+        self.assertFalse(engine._invalid_ohlc_mask(result).any())
+        self.assertEqual(result.loc[self.bad_date, "Low"], 99.0)
+        self.assertEqual(result.attrs["ohlc_repair_count"], 1)
+        self.assertEqual(result.attrs["ohlc_repair_source_ticker"], "CSSPX.SW")
+        self.assertEqual(download_history.call_count, 1)
+        download_alternate.assert_called_once()
