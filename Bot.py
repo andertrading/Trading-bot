@@ -1096,11 +1096,17 @@ def build_scan_portfolio_status(paper_portfolio_state=None):
     """
     if paper_portfolio_state is None:
         try:
-            return get_portfolio_status(
+            status = get_portfolio_status(
                 open_positions=None,
                 positions_confirmed=False,
                 capital_usd=INITIAL_CAPITAL_USD,
             )
+            if not isinstance(status, dict):
+                raise ValueError("El gestor de cartera devolvió un resultado no válido")
+            status.setdefault("open_positions", None)
+            status.setdefault("positions_confirmed", False)
+            status.setdefault("capital_usd", INITIAL_CAPITAL_USD)
+            return status
         except Exception:
             logger.exception("PORTFOLIO STATUS ERROR")
             return {
