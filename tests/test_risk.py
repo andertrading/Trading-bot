@@ -28,6 +28,16 @@ class TestRiskManager(unittest.TestCase):
             0.0,
         )
 
+    def test_higher_quality_signals_receive_more_risk(self):
+        self.assertGreater(
+            risk_pct_for_score(95),
+            risk_pct_for_score(85),
+        )
+        self.assertGreater(
+            risk_pct_for_score(85),
+            risk_pct_for_score(75),
+        )
+
     def test_invalid_scores_have_no_risk(self):
         for score in (
             float("nan"),
