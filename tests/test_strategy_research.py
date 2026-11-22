@@ -11,7 +11,27 @@ from strategy_research import (
     _synchronized_oos_trades,
     _portfolio_allocated_cost_trades,
     _net_portfolio_cost_scenarios,
+    mtf_daily_price_confirmed_pullback,
 )
+
+
+class TestDailyPriceConfirmedMtfStrategy(unittest.TestCase):
+
+    def test_daily_price_filter_blocks_when_completed_daily_close_is_below_ema200(self):
+        data = pd.DataFrame([{
+            "DAILY_TREND_UP": True,
+            "DAILY_PRICE_ABOVE_EMA200": False,
+        }])
+        result = mtf_daily_price_confirmed_pullback(data, "AAPL", "15m")
+        self.assertEqual(result["action"], "NO TRADE")
+
+    def test_daily_price_filter_blocks_non_intraday_timeframe(self):
+        data = pd.DataFrame([{
+            "DAILY_TREND_UP": True,
+            "DAILY_PRICE_ABOVE_EMA200": True,
+        }])
+        result = mtf_daily_price_confirmed_pullback(data, "AAPL", "1d")
+        self.assertEqual(result["action"], "NO TRADE")
 
 
 class TestCommonCalendarOutOfSampleSplit(unittest.TestCase):
