@@ -30,7 +30,10 @@ from indicators import add_indicators
 from strategies import evaluate_signal_at
 from risk_manager import risk_pct_for_score
 from portfolio_backtest import simulate_portfolio
-from transaction_costs import estimate_etoro_trade_costs
+from transaction_costs import (
+    estimate_etoro_trade_costs,
+    estimate_verified_registry_trade_costs,
+)
 
 
 VERSION = "3.19"
@@ -250,6 +253,18 @@ def _daily_period_label():
     )
 
 
+def _valid_independent_adjustment_evidence(source, verified_at):
+    if not isinstance(source, str) or not source.strip().startswith("https://"):
+        return False
+    try:
+        timestamp = pd.Timestamp(verified_at)
+    except (TypeError, ValueError):
+        return False
+    if pd.isna(timestamp) or timestamp.tzinfo is None:
+        return False
+    return timestamp <= pd.Timestamp.now(tz="UTC")
+
+
 def _snapshot_metadata(
     asset,
     ticker,
@@ -278,6 +293,16 @@ def _snapshot_metadata(
         ),
         "price_adjustment_verified": bool(
             data.attrs.get("price_adjustment_verified", False)
+        ),
+        "price_adjustment_verification_status": data.attrs.get(
+            "price_adjustment_verification_status",
+            "NOT_RECORDED",
+        ),
+        "price_adjustment_verification_source": data.attrs.get(
+            "price_adjustment_verification_source"
+        ),
+        "price_adjustment_verified_at": data.attrs.get(
+            "price_adjustment_verified_at"
         ),
         "price_source_detail": data.attrs.get("price_source_detail"),
         "ohlc_repair_count": int(data.attrs.get("ohlc_repair_count", 0) or 0),
@@ -463,6 +488,19 @@ def _load_snapshot(asset, ticker, interval):
                 f"Metadatos incompatibles en {metadata_path}: "
                 f"{key} esperado={value}, "
                 f"recibido={metadata.get(key)}"
+            )
+
+    if interval == "1d" and metadata.get("provider") == "twelvedata":
+        if (
+            metadata.get("price_adjustment_verification_status")
+            != "INDEPENDENTLY_VERIFIED"
+            or not _valid_independent_adjustment_evidence(
+                metadata.get("price_adjustment_verification_source"),
+                metadata.get("price_adjustment_verified_at"),
+            )
+        ):
+            raise ValueError(
+                "El ajuste diario por splits de Twelve Data no tiene evidencia independiente válida"
             )
 
     actual_hash = _sha256_file(csv_path)
@@ -797,7 +835,9 @@ def get_timeframes():
         if item.strip()
     ]
     if not requested:
-        return tuple(PERIODS)
+        # El backtest principal valida únicamente el MVP swing diario.
+        # M15 se ejecuta de forma explícita como laboratorio independiente.
+        return ("1d",)
 
     unknown = set(requested).difference(PERIODS)
     if unknown:
@@ -1106,6 +1146,21 @@ def download_history(ticker, interval, asset=None):
             raise ValueError("La política de ajuste de precios no coincide")
         if data.attrs.get("price_adjustment_verified") is not True:
             raise ValueError("El ajuste de precios no está verificado")
+        if (
+            interval == "1d"
+            and expected_provider == "twelvedata"
+            and (
+                data.attrs.get("price_adjustment_verification_status")
+                != "INDEPENDENTLY_VERIFIED"
+                or not _valid_independent_adjustment_evidence(
+                    data.attrs.get("price_adjustment_verification_source"),
+                    data.attrs.get("price_adjustment_verified_at"),
+                )
+            )
+        ):
+            raise ValueError(
+                "El ajuste diario por splits de Twelve Data no tiene evidencia independiente válida"
+            )
         data = _normalize_columns(data.copy())
         required = ["Open", "High", "Low", "Close"]
         missing = [column for column in required if column not in data.columns]
@@ -1541,6 +1596,30 @@ def _estimate_backtest_cost_fields(asset, trade):
         known_costs = float(costs.get("known_costs_total", 0.0))
         known_fee_adjusted_pnl = gross_pnl - known_costs
 
+        verified_costs = estimate_verified_registry_trade_costs(
+            asset, entry, exit_price, quantity
+        )
+        verified_complete = bool(verified_costs.get("complete", False))
+        verified_total = (
+            float(verified_costs["known_costs_total"])
+            if verified_complete and _is_finite_metric(
+                verified_costs.get("known_costs_total")
+            )
+            else None
+        )
+        verified_net_pnl = (
+            gross_pnl - verified_total if verified_total is not None else None
+        )
+        verified_result_r = (
+            verified_net_pnl / actual_risk_budget
+            if verified_net_pnl is not None and actual_risk_budget > 0
+            else None
+        )
+        combined_unpriced = list(dict.fromkeys(
+            list(costs.get("unpriced_costs", []))
+            + list(verified_costs.get("unpriced_costs", []))
+        ))
+
         return {
             "hypothetical_quantity": round(quantity, 10),
             "hypothetical_risk_budget_usd": round(actual_risk_budget, 6),
@@ -1560,8 +1639,23 @@ def _estimate_backtest_cost_fields(asset, trade):
             "result_R_after_known_fees": round(
                 known_fee_adjusted_pnl / actual_risk_budget, 4
             ),
-            "costs_complete": bool(costs.get("complete", False)),
-            "unpriced_costs": ";".join(costs.get("unpriced_costs", [])),
+            "costs_complete": verified_complete,
+            "registry_costs_status": verified_costs.get("registry_status"),
+            "verified_costs_total_usd": (
+                round(verified_total, 6) if verified_total is not None else None
+            ),
+            "verified_net_pnl_usd": (
+                round(verified_net_pnl, 6) if verified_net_pnl is not None else None
+            ),
+            "verified_result_R": (
+                round(verified_result_r, 4) if verified_result_r is not None else None
+            ),
+            "registry_unpriced_costs": ";".join(
+                verified_costs.get("unpriced_costs", [])
+            ),
+            "scenario_costs_complete": bool(costs.get("complete", False)),
+            "scenario_unpriced_costs": ";".join(costs.get("unpriced_costs", [])),
+            "unpriced_costs": ";".join(verified_costs.get("unpriced_costs", [])),
             "cost_model_execution_type": execution_type,
             "cost_model_assumptions": "; ".join(costs.get("assumptions", [])),
         }
@@ -1578,6 +1672,13 @@ def _estimate_backtest_cost_fields(asset, trade):
             "known_fee_adjusted_pnl_usd": None,
             "result_R_after_known_fees": None,
             "costs_complete": False,
+            "registry_costs_status": "COSTS_UNVERIFIED",
+            "verified_costs_total_usd": None,
+            "verified_net_pnl_usd": None,
+            "verified_result_R": None,
+            "registry_unpriced_costs": "cost_model_calculation_failed",
+            "scenario_costs_complete": False,
+            "scenario_unpriced_costs": "cost_model_calculation_failed",
             "unpriced_costs": "cost_model_calculation_failed",
             "cost_model_execution_type": ETORO_EXECUTION_TYPES.get(asset, "UNKNOWN"),
             "cost_model_assumptions": "",
@@ -2054,6 +2155,9 @@ def _empty_metrics():
         "average_duration_bars": 0,
         "known_fee_adjusted_total_R": 0,
         "known_fee_adjusted_average_R": 0,
+        "verified_cost_adjusted_total_R": None,
+        "verified_cost_adjusted_average_R": None,
+        "trades_with_verified_costs": 0,
         "trades_with_complete_costs": 0,
         "trades_with_unpriced_costs": 0,
     }
@@ -2146,6 +2250,16 @@ def calculate_metrics(trades):
         else None
     )
 
+    verified_results = [
+        float(trade["verified_result_R"])
+        for trade in records
+        if (
+            isinstance(trade, dict)
+            and trade.get("costs_complete") is True
+            and _is_finite_metric(trade.get("verified_result_R"))
+        )
+    ]
+
     return {
         "trades": len(results),
         "wins": len(wins),
@@ -2178,6 +2292,15 @@ def calculate_metrics(trades):
             ),
             4,
         ),
+        "verified_cost_adjusted_total_R": (
+            round(float(np.sum(verified_results)), 4)
+            if verified_results else None
+        ),
+        "verified_cost_adjusted_average_R": (
+            round(float(np.mean(verified_results)), 4)
+            if verified_results else None
+        ),
+        "trades_with_verified_costs": len(verified_results),
         "known_fee_adjusted_average_R": (
             round(
                 np.mean([
@@ -2552,7 +2675,7 @@ def main():
         f"{portfolio_metrics['trades_accepted']} aceptadas / "
         f"{portfolio_metrics['trades_rejected']} rechazadas | "
         f"PnL bruto: {portfolio_metrics['net_pnl_usd']:.2f} USD | "
-        f"DD máximo: {portfolio_metrics['max_drawdown_usd']:.2f} USD"
+        f"DD realizado máximo: {portfolio_metrics['max_drawdown_usd']:.2f} USD"
     )
     print(
         "Límite de riesgo conjunto: "
@@ -2564,7 +2687,8 @@ def main():
     )
     print(
         "Cartera: long-only, capital compartido, entradas simultáneas "
-        "prorrateadas; PnL bruto sin costes ni spreads."
+        "prorrateadas; PnL bruto sin costes ni spreads. DD basado en cierres "
+        "realizados; no incluye pérdidas flotantes intratrade."
     )
 
     # -----------------------------------------------------
@@ -2617,6 +2741,13 @@ def main():
         "overnight_cost_usd",
         "known_costs_total_usd",
         "known_fee_adjusted_pnl_usd",
+        "registry_costs_status",
+        "verified_costs_total_usd",
+        "verified_net_pnl_usd",
+        "verified_result_R",
+        "registry_unpriced_costs",
+        "scenario_costs_complete",
+        "scenario_unpriced_costs",
         "result_R",
         "result_R_after_known_fees",
         "costs_complete",

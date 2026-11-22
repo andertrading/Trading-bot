@@ -1053,7 +1053,324 @@ class TestIntradayGaps(unittest.TestCase):
         )
 
 
+class TestPriceAdjustmentMetadata(unittest.TestCase):
+
+    def test_twelvedata_daily_split_adjustment_is_not_marked_verified(self):
+        frame = make_ohlcv(
+            pd.date_range("2026-01-01T00:00:00Z", periods=5, freq="D")
+        )
+        result = engine._attach_market_data_metadata(frame, "TSLA", "1d")
+        self.assertEqual(result.attrs["data_provider"], "twelvedata")
+        self.assertFalse(result.attrs["price_adjustment_verified"])
+        self.assertEqual(
+            result.attrs["price_adjustment_verification_status"],
+            "REQUESTED_NOT_INDEPENDENTLY_VERIFIED",
+        )
+
+    def test_twelvedata_daily_can_be_marked_verified_only_by_explicit_asset_evidence(self):
+        frame = make_ohlcv(
+            pd.date_range("2026-01-01T00:00:00Z", periods=5, freq="D")
+        )
+        config = {
+            **engine.ASSETS["TSLA"],
+            "twelvedata_daily_adjustment_verification": {
+                "status": "INDEPENDENTLY_VERIFIED",
+                "source": "https://example.org/split-adjustment-audit.json",
+                "verified_at": "2026-11-22T00:00:00Z",
+            },
+        }
+        with patch.dict(engine.ASSETS, {"TSLA": config}):
+            result = engine._attach_market_data_metadata(frame, "TSLA", "1d")
+        self.assertTrue(result.attrs["price_adjustment_verified"])
+        self.assertEqual(
+            result.attrs["price_adjustment_verification_status"],
+            "INDEPENDENTLY_VERIFIED",
+        )
+        self.assertEqual(
+            result.attrs["price_adjustment_verification_source"],
+            "https://example.org/split-adjustment-audit.json",
+        )
+        self.assertEqual(
+            result.attrs["price_adjustment_verified_at"],
+            "2026-11-22T00:00:00Z",
+        )
+
+    def test_boolean_without_sourced_evidence_does_not_unlock_daily_data(self):
+        frame = make_ohlcv(
+            pd.date_range("2026-01-01T00:00:00Z", periods=5, freq="D")
+        )
+        config = {
+            **engine.ASSETS["TSLA"],
+            "twelvedata_daily_adjustment_independently_verified": True,
+        }
+        with patch.dict(engine.ASSETS, {"TSLA": config}):
+            result = engine._attach_market_data_metadata(frame, "TSLA", "1d")
+        self.assertFalse(result.attrs["price_adjustment_verified"])
+        self.assertEqual(
+            result.attrs["price_adjustment_verification_status"],
+            "REQUESTED_NOT_INDEPENDENTLY_VERIFIED",
+        )
+
+    def test_twelvedata_intraday_raw_mode_remains_documented(self):
+        frame = make_ohlcv(
+            pd.date_range("2026-11-18T14:30:00Z", periods=5, freq="15min")
+        )
+        result = engine._attach_market_data_metadata(frame, "TSLA", "15m")
+        self.assertTrue(result.attrs["price_adjustment_verified"])
+        self.assertEqual(
+            result.attrs["price_adjustment_verification_status"],
+            "DOCUMENTED_RAW_MODE",
+        )
+
+
+class TestTwelveDataInstrumentMetadata(unittest.TestCase):
+
+    def test_accepts_crypto_identity_without_mic_code(self):
+        meta = {
+            "exchange": "Test Crypto Exchange",
+            "type": "Digital Currency",
+        }
+        self.assertTrue(
+            engine._validate_twelvedata_instrument_metadata(
+                "BTC", engine.ASSETS["BTC"], meta
+            )
+        )
+
+    def test_accepts_equity_identity_with_expected_timezone_and_mic(self):
+        meta = {
+            "exchange": "NASDAQ",
+            "mic_code": "XNAS",
+            "type": "Common Stock",
+            "exchange_timezone": "America/New_York",
+        }
+        self.assertTrue(
+            engine._validate_twelvedata_instrument_metadata(
+                "TSLA", engine.ASSETS["TSLA"], meta
+            )
+        )
+
+    def test_rejects_missing_security_mic_code(self):
+        meta = {
+            "exchange": "NASDAQ",
+            "type": "Common Stock",
+            "exchange_timezone": "America/New_York",
+        }
+        self.assertFalse(
+            engine._validate_twelvedata_instrument_metadata(
+                "TSLA", engine.ASSETS["TSLA"], meta
+            )
+        )
+
+    def test_rejects_wrong_asset_type(self):
+        meta = {
+            "exchange": "Test Crypto Exchange",
+            "type": "Common Stock",
+        }
+        self.assertFalse(
+            engine._validate_twelvedata_instrument_metadata(
+                "BTC", engine.ASSETS["BTC"], meta
+            )
+        )
+
+    def test_enforces_configured_exact_exchange_and_mic(self):
+        config = dict(engine.ASSETS["TSLA"])
+        config["twelvedata_exchange"] = "NASDAQ"
+        config["twelvedata_mic_code"] = "XNAS"
+        meta = {
+            "exchange": "NASDAQ",
+            "mic_code": "XNAS",
+            "type": "Common Stock",
+            "exchange_timezone": "America/New_York",
+        }
+        self.assertTrue(
+            engine._validate_twelvedata_instrument_metadata(
+                "TSLA", config, meta
+            )
+        )
+
+    def test_rejects_exchange_or_mic_mismatch_when_expected(self):
+        config = dict(engine.ASSETS["TSLA"])
+        config["twelvedata_exchange"] = "NASDAQ"
+        config["twelvedata_mic_code"] = "XNAS"
+        for field, wrong in (("exchange", "NYSE"), ("mic_code", "XNYS")):
+            with self.subTest(field=field):
+                meta = {
+                    "exchange": "NASDAQ",
+                    "mic_code": "XNAS",
+                    "type": "Common Stock",
+                    "exchange_timezone": "America/New_York",
+                }
+                meta[field] = wrong
+                self.assertFalse(
+                    engine._validate_twelvedata_instrument_metadata(
+                        "TSLA", config, meta
+                    )
+                )
+
+    def test_rejects_wrong_equity_timezone(self):
+        meta = {
+            "exchange": "NASDAQ",
+            "mic_code": "XNAS",
+            "type": "Common Stock",
+            "exchange_timezone": "Europe/London",
+        }
+        self.assertFalse(
+            engine._validate_twelvedata_instrument_metadata(
+                "TSLA", engine.ASSETS["TSLA"], meta
+            )
+        )
+
+
 class TestTwelveDataAdjustmentMode(unittest.TestCase):
+
+    def test_accepts_and_pins_london_etf_listing_identity(self):
+        class Response:
+            def __init__(self, payload):
+                self.payload = payload
+
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return self.payload
+
+        meta = {
+            "exchange": "London Stock Exchange",
+            "mic_code": "XLON",
+            "type": "ETF",
+            "exchange_timezone": "Europe/London",
+        }
+        self.assertTrue(
+            engine._validate_twelvedata_instrument_metadata(
+                "CSPX", engine.ASSETS["CSPX"], meta
+            )
+        )
+
+        index = pd.date_range(
+            "2026-01-01T00:00:00Z",
+            periods=220,
+            freq="D",
+        )
+        values = [
+            {
+                "datetime": timestamp.strftime("%Y-%m-%d %H:%M:%S"),
+                "open": "100",
+                "high": "102",
+                "low": "99",
+                "close": "101",
+                "volume": "1000",
+            }
+            for timestamp in index
+        ]
+        payload = {
+            "meta": {
+                "symbol": "CSPX",
+                "currency": "USD",
+                **meta,
+            },
+            "values": values,
+        }
+        with (
+            patch.dict("os.environ", {"TWELVE_DATA_API_KEY": "test"}),
+            patch.object(
+                engine,
+                "_twelvedata_request",
+                return_value=Response(payload),
+            ) as request,
+            patch.object(
+                engine,
+                "_remove_incomplete_candle",
+                side_effect=lambda frame, timeframe, asset: frame,
+            ),
+            patch.object(engine, "_has_daily_gaps", return_value=False),
+        ):
+            result = engine._download_twelvedata(
+                "CSPX",
+                engine.ASSETS["CSPX"],
+                "1d",
+            )
+        self.assertIsNotNone(result)
+        self.assertEqual(
+            request.call_args.args[0]["exchange"],
+            "London Stock Exchange",
+        )
+        self.assertEqual(request.call_args.args[0]["mic_code"], "XLON")
+
+    def test_rejects_wrong_london_etf_mic(self):
+        meta = {
+            "exchange": "London Stock Exchange",
+            "mic_code": "XSWX",
+            "type": "ETF",
+            "exchange_timezone": "Europe/London",
+        }
+        self.assertFalse(
+            engine._validate_twelvedata_instrument_metadata(
+                "CSPX", engine.ASSETS["CSPX"], meta
+            )
+        )
+
+    def test_stock_request_pins_verified_exchange_and_mic(self):
+        class Response:
+            def __init__(self, payload):
+                self.payload = payload
+
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return self.payload
+
+        index = pd.date_range(
+            "2026-01-01T00:00:00Z",
+            periods=220,
+            freq="D",
+        )
+        values = [
+            {
+                "datetime": timestamp.strftime("%Y-%m-%d %H:%M:%S"),
+                "open": "100",
+                "high": "102",
+                "low": "99",
+                "close": "101",
+                "volume": "1000",
+            }
+            for timestamp in index
+        ]
+        payload = {
+            "meta": {
+                "symbol": "TSLA",
+                "currency": "USD",
+                "exchange": "NASDAQ",
+                "mic_code": "XNAS",
+                "type": "Common Stock",
+                "exchange_timezone": "America/New_York",
+            },
+            "values": values,
+        }
+
+        with (
+            patch.dict("os.environ", {"TWELVE_DATA_API_KEY": "test"}),
+            patch.object(
+                engine,
+                "_twelvedata_request",
+                return_value=Response(payload),
+            ) as request,
+            patch.object(
+                engine,
+                "_remove_incomplete_candle",
+                side_effect=lambda frame, timeframe, asset: frame,
+            ),
+            patch.object(engine, "_has_daily_gaps", return_value=False),
+        ):
+            result = engine._download_twelvedata(
+                "TSLA",
+                engine.ASSETS["TSLA"],
+                "1d",
+            )
+
+        self.assertIsNotNone(result)
+        self.assertEqual(request.call_args.args[0]["exchange"], "NASDAQ")
+        self.assertEqual(request.call_args.args[0]["mic_code"], "XNAS")
 
     def test_daily_requests_explicit_split_adjustment_and_intraday_raw(self):
         class Response:
@@ -1096,6 +1413,8 @@ class TestTwelveDataAdjustmentMode(unittest.TestCase):
                     "meta": {
                         "symbol": "BTC/USD",
                         "currency_quote": "USD",
+                        "exchange": "Test Crypto Exchange",
+                        "type": "Digital Currency",
                     },
                     "values": values,
                 }
@@ -2552,3 +2871,167 @@ class TestTwelveDataDateRangeFormatting(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestYahooAlternateDailyOhlcRepair(unittest.TestCase):
+    def setUp(self):
+        self.index = pd.bdate_range(
+            "2025-01-01", "2026-11-18", tz="UTC"
+        )
+        self.primary = make_ohlcv(self.index)
+        self.alternate = make_ohlcv(self.index)
+        self.bad_date = pd.Timestamp("2026-03-02", tz="UTC")
+        self.assert_date_present = self.bad_date in self.index
+
+    def test_only_structurally_invalid_primary_field_is_excluded_from_comparison(self):
+        row = self.primary.loc[self.bad_date].copy()
+        row["Low"] = 101.5
+        trusted = engine._trusted_primary_ohlc_columns(row)
+        self.assertNotIn("Low", trusted)
+        self.assertTrue({"Open", "High", "Close"}.issubset(trusted))
+
+    def test_repairs_structurally_invalid_lse_bar_from_same_date_six_bar(self):
+        self.assertTrue(self.assert_date_present)
+        self.primary.loc[self.bad_date, "Low"] = 101.5
+
+        repaired, metadata = engine._patch_incoherent_daily_ohlc_from_alternate(
+            self.primary, self.alternate, "CSPX", "CSSPX.SW"
+        )
+
+        self.assertIsNotNone(repaired)
+        self.assertEqual(repaired.loc[self.bad_date, "Low"], 99.0)
+        self.assertEqual(metadata["ohlc_repair_count"], 1)
+        self.assertEqual(metadata["ohlc_repair_source_ticker"], "CSSPX.SW")
+        self.assertFalse(engine._invalid_ohlc_mask(repaired).any())
+
+    def test_rejects_repair_when_same_date_close_deviation_exceeds_limit(self):
+        self.primary.loc[self.bad_date, "Low"] = 101.5
+        self.alternate.loc[self.bad_date, "Close"] = 102.0
+
+        repaired, metadata = engine._patch_incoherent_daily_ohlc_from_alternate(
+            self.primary, self.alternate, "CSPX", "CSSPX.SW"
+        )
+
+        self.assertIsNone(repaired)
+        self.assertIsNone(metadata)
+
+    def test_rejects_repair_when_trusted_high_deviates_even_if_close_matches(self):
+        self.primary.loc[self.bad_date, "Low"] = 101.5
+        self.alternate.loc[self.bad_date, "High"] = 104.0
+
+        repaired, metadata = engine._patch_incoherent_daily_ohlc_from_alternate(
+            self.primary, self.alternate, "CSPX", "CSSPX.SW"
+        )
+
+        self.assertIsNone(repaired)
+        self.assertIsNone(metadata)
+
+    def test_rejects_repair_when_alternate_bar_is_structurally_invalid(self):
+        self.primary.loc[self.bad_date, "Low"] = 101.5
+        self.alternate.loc[self.bad_date, "Low"] = 101.5
+
+        repaired, metadata = engine._patch_incoherent_daily_ohlc_from_alternate(
+            self.primary, self.alternate, "CSPX", "CSSPX.SW"
+        )
+
+        self.assertIsNone(repaired)
+        self.assertIsNone(metadata)
+
+    @patch.object(engine, "_download_yahoo_daily_history")
+    @patch.object(engine.requests, "get")
+    def test_alternate_download_validates_six_metadata_then_uses_daily_history(
+        self, request_get, download_history
+    ):
+        alternate = make_ohlcv(self.index)
+        download_history.return_value = alternate
+        payload = {
+            "chart": {
+                "error": None,
+                "result": [{
+                    "meta": {
+                        "currency": "USD",
+                        "fullExchangeName": "Swiss Exchange",
+                        "exchangeTimezoneName": "Europe/Zurich",
+                    },
+                }],
+            },
+        }
+        response = type("Response", (), {
+            "status_code": 200,
+            "raise_for_status": lambda self: None,
+            "json": lambda self: payload,
+        })()
+        request_get.return_value = response
+
+        start = datetime(2025, 1, 1, tzinfo=timezone.utc)
+        end = datetime(2026, 11, 19, tzinfo=timezone.utc)
+        result = engine._download_yahoo_alternate_daily(
+            "CSPX", start, end, "USD"
+        )
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result[1], "CSSPX.SW")
+        self.assertEqual(len(result[0]), len(self.index))
+        download_history.assert_called_once_with("CSSPX.SW", start, end)
+
+    @patch.dict(os.environ, {
+        "BACKTEST_EXTENDED_DAILY_HISTORY": "true",
+        "BACKTEST_DAILY_LOOKBACK_DAYS": "1825",
+    })
+    @patch.object(engine, "_has_daily_gaps", return_value=False)
+    @patch.object(engine, "_remove_incomplete_candle", side_effect=lambda frame, interval, asset: frame)
+    @patch.object(engine, "_download_yahoo_alternate_daily")
+    @patch.object(engine, "_download_yahoo_daily_history")
+    @patch.object(engine.requests, "get")
+    @patch.object(engine, "datetime", FrozenDateTime)
+    def test_extended_yahoo_download_returns_repaired_history(
+        self, request_get, download_history, download_alternate,
+        remove_incomplete, has_gaps
+    ):
+        primary = make_ohlcv(self.index)
+        primary.loc[self.bad_date, "Low"] = 101.5
+        alternate = make_ohlcv(self.index)
+        download_history.side_effect = [primary, alternate]
+        download_alternate.return_value = (alternate, "CSSPX.SW")
+
+        timestamps = [int(value.timestamp()) for value in self.index]
+        payload = {
+            "chart": {
+                "error": None,
+                "result": [{
+                    "meta": {
+                        "currency": "USD",
+                        "fullExchangeName": "London Stock Exchange",
+                        "exchangeTimezoneName": "Europe/London",
+                    },
+                    "timestamp": timestamps,
+                    "indicators": {
+                        "quote": [{
+                            "open": [100.0] * len(timestamps),
+                            "high": [102.0] * len(timestamps),
+                            "low": [99.0] * len(timestamps),
+                            "close": [101.0] * len(timestamps),
+                            "volume": [1000] * len(timestamps),
+                        }],
+                    },
+                }],
+            },
+        }
+        response = type("Response", (), {
+            "status_code": 200,
+            "raise_for_status": lambda self: None,
+            "json": lambda self: payload,
+        })()
+        request_get.return_value = response
+
+        result = engine._download_yahoo(
+            "CSPX", {"yahoo": "CSPX.L", "currency": "USD"}, "1d"
+        )
+
+        self.assertIsNotNone(result)
+        self.assertFalse(engine._invalid_ohlc_mask(result).any())
+        self.assertEqual(result.loc[self.bad_date, "Low"], 99.0)
+        self.assertEqual(result.attrs["ohlc_repair_count"], 1)
+        self.assertEqual(result.attrs["ohlc_repair_source_ticker"], "CSSPX.SW")
+        self.assertEqual(download_history.call_count, 1)
+        download_alternate.assert_called_once()

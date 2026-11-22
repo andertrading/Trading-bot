@@ -4,7 +4,13 @@ Published platform fees are estimates until checked in the user's execution tick
 Market spread, account-specific conversion and CFD financing are never guessed.
 """
 import math
+from functools import lru_cache
 
+from asset_economic_registry import (
+    classify_registry_asset,
+    load_registry,
+    valid_fee_side,
+)
 from config import (
     ACCOUNT_CURRENCY,
     ASSETS,
@@ -296,6 +302,131 @@ def estimate_etoro_trade_costs(
     )
     result["valid"] = True
     result["complete"] = not result["unpriced_costs"]
+    return result
+
+
+@lru_cache(maxsize=1)
+def _load_default_economic_registry():
+    """Load the immutable default registry once per process/backtest."""
+    return load_registry()
+
+
+def estimate_verified_registry_trade_costs(
+    asset,
+    entry,
+    exit_price,
+    quantity,
+    *,
+    registry=None,
+):
+    """Calculate REAL round-trip costs only from fully verified registry evidence.
+
+    This is the admission-grade cost path for the REAL-only MVP. The legacy
+    estimate_etoro_trade_costs() remains a published-fee scenario calculator;
+    it must not be used to certify an instrument or override registry blockers.
+    """
+    result = {
+        "valid": False,
+        "complete": False,
+        "source": "asset_economic_registry",
+        "registry_status": None,
+        "execution_type": None,
+        "currency": ACCOUNT_CURRENCY,
+        "entry_commission_cost": None,
+        "exit_commission_cost": None,
+        "commission_cost": None,
+        "market_spread_cost": None,
+        "fx_conversion_cost": None,
+        "overnight_cost": None,
+        "known_costs_total": None,
+        "unpriced_costs": [],
+    }
+
+    if asset not in ASSETS:
+        result["unpriced_costs"].append("asset_not_configured")
+        return result
+    if not all(_finite(value) for value in (entry, exit_price, quantity)):
+        result["unpriced_costs"].append("invalid_trade_values")
+        return result
+
+    entry = float(entry)
+    exit_price = float(exit_price)
+    quantity = float(quantity)
+    if entry <= 0 or exit_price <= 0 or quantity <= 0:
+        result["unpriced_costs"].append("non_positive_trade_values")
+        return result
+
+    try:
+        if registry is None:
+            registry = _load_default_economic_registry()
+        classification = classify_registry_asset(asset, registry)
+    except (OSError, ValueError, TypeError) as error:
+        result["unpriced_costs"].append("economic_registry_invalid")
+        result["registry_error_type"] = type(error).__name__
+        return result
+
+    result["valid"] = True
+    result["registry_status"] = classification["status"]
+    result["execution_type"] = classification.get("execution_type")
+    if classification["status"] != "ELIGIBLE":
+        result["unpriced_costs"].extend(classification.get("blockers", []))
+        return result
+
+    item = registry["assets"][asset]
+    fees = item["fees"]
+    entry_fee = fees["entry"]
+    exit_fee = fees["exit"]
+    if not valid_fee_side(entry_fee) or not valid_fee_side(exit_fee):
+        result["unpriced_costs"].append("round_trip_fee_evidence_missing")
+        return result
+
+    entry_notional = entry * quantity
+    exit_notional = exit_price * quantity
+    total_turnover = entry_notional + exit_notional
+    fx = item["fx"]
+    quote_to_account_rate = (
+        float(fx["quote_to_account_rate"]) if fx.get("required") else 1.0
+    )
+
+    def side_cost(side, notional):
+        model = side["model"]
+        value = float(side["value"])
+        if model == "ZERO":
+            return 0.0
+        if model == "FIXED":
+            return value
+        if model == "PERCENT_NOTIONAL":
+            return notional * value / 100.0 * quote_to_account_rate
+        raise ValueError("unsupported verified fee model")
+
+    result["entry_commission_cost"] = side_cost(entry_fee, entry_notional)
+    result["exit_commission_cost"] = side_cost(exit_fee, exit_notional)
+    result["commission_cost"] = (
+        result["entry_commission_cost"] + result["exit_commission_cost"]
+    )
+
+    spread_bps = float(item["spread"]["bid_ask_bps"])
+    result["market_spread_cost"] = (
+        total_turnover * spread_bps / 20000.0 * quote_to_account_rate
+    )
+
+    if fx.get("required"):
+        result["fx_conversion_cost"] = (
+            total_turnover
+            * float(fx["conversion_fee_pct"]) / 100.0
+            * quote_to_account_rate
+        )
+    else:
+        result["fx_conversion_cost"] = 0.0
+
+    # The REAL execution path has no CFD overnight financing.
+    result["overnight_cost"] = 0.0
+    result["known_costs_total"] = (
+        result["commission_cost"]
+        + result["market_spread_cost"]
+        + result["fx_conversion_cost"]
+    )
+    result["complete"] = True
     return result
 
 

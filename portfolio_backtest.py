@@ -54,6 +54,9 @@ def _empty_result(capital):
             "profit_factor": None,
             "max_drawdown_usd": 0.0,
             "max_drawdown_pct": 0.0,
+            "drawdown_basis": "realized_exit_events_only",
+            "intratrade_drawdown_included": False,
+            "unrealized_pnl_included": False,
             "peak_open_risk_usd": 0.0,
             "peak_open_risk_pct_of_equity": 0.0,
             "risk_limit_breach_events": 0,
@@ -73,6 +76,9 @@ def simulate_portfolio(
     max_risk_per_trade_pct=None,
 ):
     """Allocate simultaneous long trades under shared risk and cash limits.
+
+    Drawdown is measured only from realized equity after grouped exit events.
+    Intratrade mark-to-market losses and unrealized P&L are not available here.
 
     Entry events at a timestamp are allocated before exits at that same
     timestamp. This intentionally does not release capital early when an
@@ -349,6 +355,9 @@ def simulate_portfolio(
         "profit_factor": round(gains / losses, 6) if losses > 0 else (None if gains == 0 else None),
         "max_drawdown_usd": round(max_drawdown, 8),
         "max_drawdown_pct": round(max_drawdown_pct, 6),
+        "drawdown_basis": "realized_exit_events_only",
+        "intratrade_drawdown_included": False,
+        "unrealized_pnl_included": False,
         "peak_open_risk_usd": round(peak_open_risk, 8),
         "peak_open_risk_pct_of_equity": round(peak_open_risk_pct, 6),
         "risk_limit_breach_events": risk_limit_breach_events,

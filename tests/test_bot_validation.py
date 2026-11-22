@@ -1,5 +1,6 @@
 
 import unittest
+from datetime import datetime, timezone
 from unittest.mock import patch
 
 import Bot
@@ -252,22 +253,32 @@ class TestBotValidation(unittest.TestCase):
         )
         self.assertFalse(result["tradable"])
 
-    def test_unconfirmed_fx_blocks_candidate(self):
-        with patch.object(
-            Bot,
-            "FX_CONVERSION_CONFIRMED",
-            False,
-        ):
-            result = Bot.apply_validation_gate(
-                self.candidate,
+    def test_unconfirmed_fx_does_not_block_same_currency_asset(self):
+        with patch.object(Bot, "FX_CONVERSION_CONFIRMED", False):
+            blockers = Bot.get_validation_blockers(
                 {"status": "OK"},
+                asset="AAPL",
             )
+
+        self.assertNotIn(
+            "Conversión de divisa pendiente de confirmar",
+            blockers,
+        )
+
+    def test_unconfirmed_fx_blocks_different_currency_asset(self):
+        eur_config = dict(Bot.ASSETS["AAPL"])
+        eur_config["currency"] = "EUR"
+        with patch.object(Bot, "FX_CONVERSION_CONFIRMED", False):
+            with patch.dict(Bot.ASSETS, {"AAPL": eur_config}):
+                blockers = Bot.get_validation_blockers(
+                    {"status": "OK"},
+                    asset="AAPL",
+                )
 
         self.assertIn(
             "Conversión de divisa pendiente de confirmar",
-            result["validation_reasons"],
+            blockers,
         )
-        self.assertFalse(result["tradable"])
 
     def test_no_trade_remains_non_tradable(self):
         result = Bot.apply_validation_gate(
@@ -359,25 +370,23 @@ class TestBotValidation(unittest.TestCase):
         }
         with patch.object(
             Bot,
-            "estimate_etoro_trade_costs",
+            "estimate_verified_registry_trade_costs",
             return_value={
                 "valid": True,
                 "complete": False,
                 "unpriced_costs": [
-                    "execution_type_not_confirmed_in_etoro_ticket",
-                    "live_market_bid_ask_spread_missing",
+                    "execution_type_evidence_missing",
+                    "observed_bid_ask_spread_evidence_missing",
                 ],
             },
         ) as estimate:
             lines = Bot._format_cost_readiness(candidate)
 
-        estimate.assert_called_once_with(
-            "AAPL", 100.0, 110.0, 1.0, side="BUY"
-        )
+        estimate.assert_called_once_with("AAPL", 100.0, 110.0, 1.0)
         report = "\n".join(lines)
         self.assertIn("INCOMPLETO", report)
-        self.assertIn("Tipo REAL/CFD pendiente", report)
-        self.assertIn("Spread bid/ask real no disponible", report)
+        self.assertIn("Tipo de ejecución REAL/CFD pendiente", report)
+        self.assertIn("Spread bid/ask observado y fechado no disponible", report)
         self.assertIn("rentabilidad neta no calculable", report)
 
     def test_cost_readiness_does_not_estimate_without_valid_levels(self):
@@ -386,7 +395,7 @@ class TestBotValidation(unittest.TestCase):
             "entry": 0,
             "target": 110.0,
         }
-        with patch.object(Bot, "estimate_etoro_trade_costs") as estimate:
+        with patch.object(Bot, "estimate_verified_registry_trade_costs") as estimate:
             lines = Bot._format_cost_readiness(candidate)
 
         estimate.assert_not_called()
@@ -401,10 +410,11 @@ class TestBotValidation(unittest.TestCase):
         }
         with patch.object(
             Bot,
-            "estimate_etoro_trade_costs",
+            "estimate_verified_registry_trade_costs",
             return_value={
                 "valid": True,
                 "complete": True,
+                "registry_status": "ELIGIBLE",
                 "unpriced_costs": [],
             },
         ):
@@ -430,7 +440,13 @@ class TestBotValidation(unittest.TestCase):
             "open_positions": [],
             "positions_confirmed": True,
         }
-        candidate = {**self.candidate, "sizing_result": sizing_result}
+        candidate = {
+            **self.candidate,
+            "sizing_result": sizing_result,
+            "data_valid": True,
+            "data_timestamp": datetime.now(timezone.utc).isoformat(),
+            "data_age_minutes": 1.0,
+        }
 
         with patch.object(Bot, "ALLOW_POSITION_SIZING", True), \
              patch.object(Bot, "CLOSE_FEES_CONFIRMED", True), \
@@ -440,7 +456,8 @@ class TestBotValidation(unittest.TestCase):
              patch.object(Bot, "ETORO_FEE_SCHEDULE_CONFIRMED", True), \
              patch.object(Bot, "ETORO_ACCOUNT_CURRENCY_CONFIRMED", True), \
              patch.object(Bot, "ETORO_EXECUTION_PRICE_BASIS_CONFIRMED", True), \
-             patch.object(Bot, "STRATEGY_VALIDATED", True):
+             patch.object(Bot, "STRATEGY_VALIDATED", True), \
+             patch.object(Bot, "classify_asset_economic", return_value={"status": "ELIGIBLE", "blockers": []}):
             result = Bot.apply_validation_gate(candidate, portfolio)
 
         self.assertEqual(result["validation_status"], "APPROVED")
@@ -448,6 +465,139 @@ class TestBotValidation(unittest.TestCase):
         self.assertTrue(result["tradable"])
         self.assertTrue(result["portfolio_admission"]["allowed"])
         self.assertFalse(result["portfolio_admission"]["live_execution_authorized"])
+
+    def test_unverified_twelvedata_daily_split_adjustment_blocks_candidate(self):
+        candidate = {
+            **self.candidate,
+            "data_valid": True,
+            "data_timestamp": datetime.now(timezone.utc).isoformat(),
+            "data_age_minutes": 1.0,
+            "data_provider": "twelvedata",
+            "price_adjustment_verified": False,
+            "price_adjustment_verification_status": (
+                "REQUESTED_NOT_INDEPENDENTLY_VERIFIED"
+            ),
+        }
+        result = Bot.apply_validation_gate(candidate, {"status": "UNKNOWN"})
+        self.assertIn(
+            "Ajuste diario por splits de Twelve Data solicitado, pero no verificado independientemente",
+            result["validation_reasons"],
+        )
+        self.assertFalse(result["tradable"])
+
+    def test_twelvedata_daily_claim_without_config_evidence_is_blocked(self):
+        candidate = {
+            **self.candidate,
+            "data_valid": True,
+            "data_timestamp": datetime.now(timezone.utc).isoformat(),
+            "data_age_minutes": 1.0,
+            "data_provider": "twelvedata",
+            "price_adjustment_verified": True,
+            "price_adjustment_verification_status": "INDEPENDENTLY_VERIFIED",
+            "price_adjustment_verification_source": None,
+            "price_adjustment_verified_at": None,
+        }
+        result = Bot.apply_validation_gate(candidate, {"status": "UNKNOWN"})
+        self.assertIn(
+            "Ajuste diario por splits de Twelve Data solicitado, pero no verificado independientemente",
+            result["validation_reasons"],
+        )
+        self.assertFalse(result["tradable"])
+
+    def test_twelvedata_daily_cannot_pass_with_legacy_true_flag_only(self):
+        candidate = {
+            **self.candidate,
+            "data_valid": True,
+            "data_timestamp": datetime.now(timezone.utc).isoformat(),
+            "data_age_minutes": 1.0,
+            "data_provider": "twelvedata",
+            "price_adjustment_verified": True,
+            "price_adjustment_verification_status": (
+                "REQUESTED_NOT_INDEPENDENTLY_VERIFIED"
+            ),
+        }
+        result = Bot.apply_validation_gate(candidate, {"status": "UNKNOWN"})
+        self.assertIn(
+            "Ajuste diario por splits de Twelve Data solicitado, pero no verificado independientemente",
+            result["validation_reasons"],
+        )
+        self.assertFalse(result["tradable"])
+
+    def test_global_flags_cannot_bypass_unverified_instrument_registry(self):
+        sizing_result = {
+            "status": "SIMULACION_NO_VALIDADA",
+            "validated": False,
+            "risk_amount_usd": 5.0,
+            "position_risk_usd": 4.0,
+            "fixed_costs_usd": 1.0,
+            "total_reserved_risk_usd": 5.0,
+        }
+        portfolio = {
+            "status": "OK",
+            "open_positions": [],
+            "positions_confirmed": True,
+        }
+        candidate = {**self.candidate, "sizing_result": sizing_result}
+        with patch.object(Bot, "ALLOW_POSITION_SIZING", True), \
+             patch.object(Bot, "CLOSE_FEES_CONFIRMED", True), \
+             patch.object(Bot, "SPREADS_CONFIRMED", True), \
+             patch.object(Bot, "FX_CONVERSION_CONFIRMED", True), \
+             patch.object(Bot, "ETORO_EXECUTION_TYPES_CONFIRMED", True), \
+             patch.object(Bot, "ETORO_FEE_SCHEDULE_CONFIRMED", True), \
+             patch.object(Bot, "ETORO_ACCOUNT_CURRENCY_CONFIRMED", True), \
+             patch.object(Bot, "ETORO_EXECUTION_PRICE_BASIS_CONFIRMED", True), \
+             patch.object(Bot, "STRATEGY_VALIDATED", True), \
+             patch.object(Bot, "classify_asset_economic", return_value={
+                 "status": "COSTS_UNVERIFIED",
+                 "blockers": ["round_trip_fee_evidence_missing"],
+             }):
+            result = Bot.apply_validation_gate(candidate, portfolio)
+        self.assertEqual(result["validation_status"], "BLOCKED")
+        self.assertFalse(result["tradable"])
+        self.assertIn(
+            "Elegibilidad económica del instrumento: COSTS_UNVERIFIED.",
+            result["validation_reasons"],
+        )
+        self.assertTrue(any(
+            "round_trip_fee_evidence_missing" in reason
+            for reason in result["validation_reasons"]
+        ))
+
+    def test_global_flags_and_registry_cannot_bypass_missing_market_data_validation(self):
+        sizing_result = {
+            "status": "SIMULACION_NO_VALIDADA",
+            "validated": False,
+            "risk_amount_usd": 5.0,
+            "position_risk_usd": 4.0,
+            "fixed_costs_usd": 1.0,
+            "total_reserved_risk_usd": 5.0,
+        }
+        portfolio = {
+            "status": "OK",
+            "open_positions": [],
+            "positions_confirmed": True,
+        }
+        candidate = {**self.candidate, "sizing_result": sizing_result}
+        with patch.object(Bot, "ALLOW_POSITION_SIZING", True), \
+             patch.object(Bot, "CLOSE_FEES_CONFIRMED", True), \
+             patch.object(Bot, "SPREADS_CONFIRMED", True), \
+             patch.object(Bot, "FX_CONVERSION_CONFIRMED", True), \
+             patch.object(Bot, "ETORO_EXECUTION_TYPES_CONFIRMED", True), \
+             patch.object(Bot, "ETORO_FEE_SCHEDULE_CONFIRMED", True), \
+             patch.object(Bot, "ETORO_ACCOUNT_CURRENCY_CONFIRMED", True), \
+             patch.object(Bot, "ETORO_EXECUTION_PRICE_BASIS_CONFIRMED", True), \
+             patch.object(Bot, "STRATEGY_VALIDATED", True), \
+             patch.object(Bot, "classify_asset_economic", return_value={
+                 "status": "ELIGIBLE", "blockers": []
+             }):
+            result = Bot.apply_validation_gate(candidate, portfolio)
+        self.assertEqual(result["validation_status"], "BLOCKED")
+        self.assertFalse(result["tradable"])
+        self.assertEqual(result["data_validation_status"], "INVALID")
+        self.assertIn(
+            "Datos de mercado no validados o timestamp de datos no verificable",
+            result["validation_reasons"],
+        )
 
     def test_sized_admission_gate_blocks_unconfirmed_open_positions(self):
         sizing_result = {
@@ -515,7 +665,7 @@ class TestBotValidation(unittest.TestCase):
         }
         with patch.object(
             Bot,
-            "estimate_etoro_trade_costs",
+            "estimate_verified_registry_trade_costs",
             return_value={
                 "valid": True,
                 "complete": False,
@@ -527,6 +677,30 @@ class TestBotValidation(unittest.TestCase):
         self.assertEqual(len(messages), 2)
         self.assertIn("SEÑAL TÉCNICA", messages[1])
         self.assertIn("CONFIRMA COSTES", messages[1])
+
+
+
+class TestTwelveDataDailyRequestSuppression(unittest.TestCase):
+
+    @patch("Bot.download_data")
+    def test_unverified_daily_twelvedata_is_skipped_before_api_request(
+        self,
+        mock_download,
+    ):
+        result = Bot.analyze_asset("TSLA", "1d")
+        mock_download.assert_not_called()
+        self.assertEqual(result["action"], "NO TRADE")
+        self.assertIn("no se solicita histórico", result["reason"])
+
+    @patch("Bot.download_data", return_value=None)
+    def test_manual_m15_lab_still_requests_twelvedata(
+        self,
+        mock_download,
+    ):
+        result = Bot.analyze_asset("TSLA", "15m")
+        mock_download.assert_called_once_with("TSLA", "15m")
+        self.assertEqual(result["action"], "NO TRADE")
+
 
 
 if __name__ == "__main__":

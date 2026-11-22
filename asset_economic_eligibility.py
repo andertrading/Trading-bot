@@ -1,0 +1,269 @@
+"""Pre-backtest economic eligibility audit for the daily MVP.
+
+This is a read-only diagnostic. It never accesses an eToro account, portfolio,
+positions or order endpoints, and it never enables sizing or signal delivery.
+Unknown costs and execution details fail closed as COSTS_UNVERIFIED.
+"""
+from __future__ import annotations
+
+import json
+import math
+from typing import Any
+
+from asset_economic_registry import classify_registry_asset as classify_registry_asset_from_registry
+from config import (
+    ACCOUNT_CURRENCY,
+    ASSETS,
+    CLOSE_FEES_CONFIRMED,
+    ETORO_ACCOUNT_CURRENCY_CONFIRMED,
+    ETORO_EXECUTION_PRICE_BASIS_CONFIRMED,
+    ETORO_EXECUTION_TYPES,
+    ETORO_EXECUTION_TYPES_CONFIRMED,
+    ETORO_FEE_SCHEDULE_CONFIRMED,
+    ETORO_FX_CONVERSION_FEE_PCT,
+    ETORO_MARKET_SPREAD_BPS,
+    SPREADS_CONFIRMED,
+)
+
+
+def _valid_non_negative_number(value: Any) -> bool:
+    if isinstance(value, bool):
+        return False
+    try:
+        number = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return False
+    return math.isfinite(number) and number >= 0
+
+
+def classify_asset(
+    asset: str,
+    *,
+    asset_config: dict | None = None,
+    execution_type: str | None = None,
+    execution_type_confirmed: bool | None = None,
+    fee_schedule_confirmed: bool | None = None,
+    close_fees_confirmed: bool | None = None,
+    execution_price_basis_confirmed: bool | None = None,
+    market_spread_bps: float | None = None,
+    spreads_confirmed: bool | None = None,
+    account_currency: str | None = None,
+    account_currency_confirmed: bool | None = None,
+    fx_conversion_fee_pct: float | None = None,
+    quote_to_account_rate: float | None = None,
+    minimum_order_constraints_confirmed: bool | None = None,
+) -> dict:
+    """Classify one asset for the daily long-only, unleveraged REAL MVP.
+
+    ELIGIBLE means all mandatory economic inputs are explicitly verified.
+    INELIGIBLE is reserved for a known hard exclusion (unknown/disabled asset
+    or a confirmed non-REAL execution type under this MVP policy).
+    Missing evidence is COSTS_UNVERIFIED, never silently treated as zero.
+    """
+    config = asset_config if asset_config is not None else ASSETS.get(asset)
+    result = {
+        "asset": asset,
+        "name": (config or {}).get("name", asset),
+        "asset_type": (config or {}).get("type"),
+        "configured_execution_type": None,
+        "execution_type_confirmed": False,
+        "status": None,
+        "blockers": [],
+        "policy": "DAILY_LONG_ONLY_UNLEVERAGED_REAL",
+    }
+
+    if config is None:
+        result["status"] = "INELIGIBLE"
+        result["blockers"] = ["asset_not_configured"]
+        return result
+
+
+    if not config.get("enabled", True):
+        result["status"] = "INELIGIBLE"
+        result["blockers"] = ["asset_disabled_in_configuration"]
+        return result
+
+    registry_mode = (
+        asset_config is None
+        and execution_type is None
+        and execution_type_confirmed is None
+        and fee_schedule_confirmed is None
+        and close_fees_confirmed is None
+        and execution_price_basis_confirmed is None
+        and market_spread_bps is None
+        and spreads_confirmed is None
+        and account_currency is None
+        and account_currency_confirmed is None
+        and fx_conversion_fee_pct is None
+        and quote_to_account_rate is None
+        and minimum_order_constraints_confirmed is None
+        and asset in ASSETS
+    )
+    if registry_mode:
+        registry_result = classify_registry_asset_from_registry(asset)
+        registry_blockers = {
+            "instrument_identity_evidence_missing": ["instrument_identity_not_confirmed_in_instrument_ticket"],
+            "execution_type_evidence_missing": ["execution_type_not_confirmed_in_instrument_ticket"],
+            "round_trip_fee_evidence_missing": [
+                "account_specific_fee_schedule_not_confirmed",
+                "round_trip_close_fee_not_confirmed",
+            ],
+            "observed_bid_ask_spread_evidence_missing": [
+                "bid_ask_spread_measurement_not_confirmed",
+                "observed_bid_ask_spread_missing_or_invalid",
+            ],
+            "execution_price_basis_evidence_missing": [
+                "historical_price_to_execution_price_basis_not_confirmed",
+            ],
+            "minimum_order_rules_evidence_missing": [
+                "minimum_order_and_fractional_quantity_rules_not_confirmed",
+            ],
+            "fx_conversion_evidence_missing": [
+                "trade_FX_conversion_fee_or_rate_not_verified",
+            ],
+            "mvp_requires_REAL_execution": ["mvp_requires_confirmed_REAL_execution"],
+        }
+        mapped_blockers = []
+        for blocker in registry_result["blockers"]:
+            mapped_blockers.extend(registry_blockers.get(blocker, [blocker]))
+        return {
+            "asset": asset,
+            "name": config.get("name", asset),
+            "asset_type": config.get("type"),
+            "configured_execution_type": registry_result.get("execution_type") or ETORO_EXECUTION_TYPES.get(asset),
+            "execution_type_confirmed": (
+                "execution_type_evidence_missing" not in registry_result["blockers"]
+            ),
+            "status": registry_result["status"],
+            "blockers": mapped_blockers,
+            "policy": "DAILY_LONG_ONLY_UNLEVERAGED_REAL",
+            "registry_source_of_truth": True,
+        }
+
+    configured_execution = (
+        execution_type if execution_type is not None
+        else ETORO_EXECUTION_TYPES.get(asset)
+    )
+    execution_confirmed = (
+        ETORO_EXECUTION_TYPES_CONFIRMED
+        if execution_type_confirmed is None
+        else bool(execution_type_confirmed)
+    )
+    result["configured_execution_type"] = (
+        str(configured_execution).upper() if configured_execution else None
+    )
+    result["execution_type_confirmed"] = execution_confirmed
+
+    if execution_confirmed and (
+        configured_execution is None
+        or str(configured_execution).upper() != "REAL"
+    ):
+        result["status"] = "INELIGIBLE"
+        result["blockers"] = ["mvp_requires_confirmed_REAL_execution"]
+        return result
+
+    blockers = []
+    if not execution_confirmed:
+        blockers.append("execution_type_not_confirmed_in_instrument_ticket")
+
+    fee_confirmed = (
+        ETORO_FEE_SCHEDULE_CONFIRMED
+        if fee_schedule_confirmed is None
+        else bool(fee_schedule_confirmed)
+    )
+    if not fee_confirmed:
+        blockers.append("account_specific_fee_schedule_not_confirmed")
+    close_confirmed = (
+        CLOSE_FEES_CONFIRMED
+        if close_fees_confirmed is None
+        else bool(close_fees_confirmed)
+    )
+    if not close_confirmed:
+        blockers.append("round_trip_close_fee_not_confirmed")
+
+    price_basis_confirmed = (
+        ETORO_EXECUTION_PRICE_BASIS_CONFIRMED
+        if execution_price_basis_confirmed is None
+        else bool(execution_price_basis_confirmed)
+    )
+    if not price_basis_confirmed:
+        blockers.append("historical_price_to_execution_price_basis_not_confirmed")
+
+    spread = (
+        ETORO_MARKET_SPREAD_BPS.get(asset)
+        if market_spread_bps is None
+        else market_spread_bps
+    )
+    spread_confirmed = (
+        SPREADS_CONFIRMED
+        if spreads_confirmed is None
+        else bool(spreads_confirmed)
+    )
+    if not spread_confirmed:
+        blockers.append("bid_ask_spread_measurement_not_confirmed")
+    if not _valid_non_negative_number(spread):
+        blockers.append("observed_bid_ask_spread_missing_or_invalid")
+
+    acct_currency = str(
+        account_currency if account_currency is not None else ACCOUNT_CURRENCY
+    ).upper()
+    quote_currency = str(config.get("currency", "")).upper()
+    acct_confirmed = (
+        ETORO_ACCOUNT_CURRENCY_CONFIRMED
+        if account_currency_confirmed is None
+        else bool(account_currency_confirmed)
+    )
+    if not acct_confirmed:
+        blockers.append("account_currency_not_confirmed")
+    if not quote_currency:
+        blockers.append("instrument_quote_currency_missing")
+    elif quote_currency != acct_currency:
+        fx_fee = (
+            ETORO_FX_CONVERSION_FEE_PCT
+            if fx_conversion_fee_pct is None
+            else fx_conversion_fee_pct
+        )
+        if (
+            not _valid_non_negative_number(fx_fee)
+            or not _valid_non_negative_number(quote_to_account_rate)
+            or float(quote_to_account_rate) <= 0
+        ):
+            blockers.append("trade_FX_conversion_fee_or_rate_not_verified")
+
+    if not minimum_order_constraints_confirmed:
+        blockers.append("minimum_order_and_fractional_quantity_rules_not_confirmed")
+
+    result["blockers"] = blockers
+    result["status"] = "ELIGIBLE" if not blockers else "COSTS_UNVERIFIED"
+    return result
+
+
+def build_eligibility_report() -> dict:
+    """Return a deterministic, account-independent report for configured assets."""
+    assets = [
+        classify_asset(asset)
+        for asset in sorted(ASSETS)
+    ]
+    counts = {
+        status: sum(item["status"] == status for item in assets)
+        for status in ("ELIGIBLE", "INELIGIBLE", "COSTS_UNVERIFIED")
+    }
+    return {
+        "schema_version": 1,
+        "audit_scope": "read_only_instrument_economic_eligibility",
+        "account_portfolio_data_accessed": False,
+        "orders_or_alerts_enabled": False,
+        "sizing_enabled": False,
+        "policy": "DAILY_LONG_ONLY_UNLEVERAGED_REAL",
+        "account_currency": ACCOUNT_CURRENCY,
+        "summary": counts,
+        "assets": assets,
+    }
+
+
+def main() -> None:
+    print(json.dumps(build_eligibility_report(), indent=2, sort_keys=True))
+
+
+if __name__ == "__main__":
+    main()

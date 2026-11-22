@@ -12,6 +12,7 @@ from datetime import datetime, timedelta, timezone
 import numpy as np
 import pandas as pd
 import requests
+import exchange_calendars as xcals
 
 logger = logging.getLogger(__name__)
 
@@ -196,6 +197,26 @@ def download_eodhd_daily(asset, configured_currency, remove_incomplete, has_dail
         logger.error("EODHD devolvió fechas inválidas para %s", asset)
         return None
     frame = frame.set_index("Date").sort_index()
+
+    # EODHD can return stale/synthetic bars on UK exchange holidays.
+    # These are not executable LSE sessions and must never enter indicators.
+    calendar = xcals.get_calendar("XLON")
+    session_mask = [
+        bool(calendar.is_session(pd.Timestamp(timestamp.date())))
+        for timestamp in frame.index
+    ]
+    non_session_dates = [
+        str(timestamp.date())
+        for timestamp, is_session in zip(frame.index, session_mask)
+        if not is_session
+    ]
+    if non_session_dates:
+        logger.warning(
+            "EODHD NON-SESSION DAILY BARS EXCLUDED | %s | dates=%s",
+            asset,
+            non_session_dates,
+        )
+        frame = frame.loc[session_mask]
 
     if frame.index.has_duplicates:
         logger.error("EODHD devolvió fechas duplicadas para %s", asset)

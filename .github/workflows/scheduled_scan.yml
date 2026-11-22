@@ -1,10 +1,9 @@
-name: Trading Bot 3.0 - Scheduled Signal Scanner
+name: Trading Bot 3.0 - Daily Swing Scanner (M15 manual lab)
 
 on:
   schedule:
-    # M15: after quarter-hour candles close; avoid the top of the hour.
-    - cron: "3,18,33,48 * * * *"
-    # Daily swing scan after UTC daily crypto close and global equity sessions.
+    # Production MVP: daily swing only, after UTC daily crypto close.
+    # M15 is available only through a deliberate manual dispatch for lab use.
     - cron: "8 0 * * *"
   workflow_dispatch:
     inputs:
@@ -15,7 +14,7 @@ on:
         options:
           - 15m
           - 1d
-        default: 15m
+        default: 1d
 
 permissions:
   contents: read

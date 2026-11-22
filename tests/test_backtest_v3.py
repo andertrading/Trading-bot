@@ -1,5 +1,6 @@
 import os
 import unittest
+import tempfile
 from unittest.mock import patch
 from contextlib import redirect_stdout
 from io import StringIO
@@ -55,6 +56,14 @@ class TestBacktestV3(unittest.TestCase):
         ):
             with self.assertRaises(ValueError):
                 backtest_v3.get_assets()
+
+    def test_default_timeframe_is_daily_swing_only(self):
+        with patch.dict(
+            backtest_v3.os.environ,
+            {},
+            clear=True,
+        ):
+            self.assertEqual(backtest_v3.get_timeframes(), ("1d",))
 
     def test_timeframe_filter_selects_only_requested_intervals(self):
         with patch.dict(
@@ -235,6 +244,9 @@ class TestBacktestV3(unittest.TestCase):
             "data_provider": "twelvedata",
             "price_adjustment_policy": "split_adjusted_ohlc_no_dividend_adjustment",
             "price_adjustment_verified": True,
+            "price_adjustment_verification_status": "INDEPENDENTLY_VERIFIED",
+            "price_adjustment_verification_source": "https://example.org/split-adjustment-audit.json",
+            "price_adjustment_verified_at": "2026-11-22T00:00:00Z",
         })
         with (
             patch.object(backtest_v3, "BACKTEST_DATA_MODE", "download"),
@@ -262,6 +274,78 @@ class TestBacktestV3(unittest.TestCase):
         self.assertIsNone(result)
         self.assertIn("ajuste de precios no está verificado", backtest_v3.DOWNLOAD_ERRORS[("AAPL", "15m")])
 
+    def test_daily_twelvedata_verified_status_without_evidence_is_rejected(self):
+        data = self.make_data()
+        data.attrs.update({
+            "data_provider": "twelvedata",
+            "price_adjustment_policy": "split_adjusted_ohlc_no_dividend_adjustment",
+            "price_adjustment_verified": True,
+            "price_adjustment_verification_status": "INDEPENDENTLY_VERIFIED",
+            "price_adjustment_verification_source": None,
+            "price_adjustment_verified_at": None,
+        })
+        with (
+            patch.object(backtest_v3, "BACKTEST_DATA_MODE", "download"),
+            patch.object(backtest_v3, "download_data", return_value=data),
+        ):
+            result = backtest_v3.download_history("AAPL", "1d", asset="AAPL")
+        self.assertIsNone(result)
+        self.assertIn(
+            "no tiene evidencia independiente válida",
+            backtest_v3.DOWNLOAD_ERRORS[("AAPL", "1d")],
+        )
+
+    def test_legacy_twelvedata_daily_snapshot_true_flag_is_not_trusted(self):
+        index = pd.date_range(
+            "2024-01-01T00:00:00Z",
+            periods=220,
+            freq="D",
+        )
+        close = pd.Series(100.0, index=index)
+        data = pd.DataFrame({
+            "Open": close,
+            "High": close + 1.0,
+            "Low": close - 1.0,
+            "Close": close,
+            "Volume": 1000.0,
+        }, index=index)
+        data.attrs.update({
+            "data_provider": "twelvedata",
+            "price_adjustment_policy": "split_adjusted_ohlc_no_dividend_adjustment",
+            "price_adjustment_verified": True,
+            # Simulates a legacy manifest with no independent verification status.
+        })
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.object(backtest_v3, "SNAPSHOT_DIR", backtest_v3.Path(tmpdir)):
+                backtest_v3._save_snapshot("AAPL", "AAPL", "1d", data)
+                with self.assertRaisesRegex(
+                    ValueError,
+                    "no tiene evidencia independiente válida",
+                ):
+                    backtest_v3._load_snapshot("AAPL", "AAPL", "1d")
+
+    def test_backtest_rejects_daily_twelvedata_without_independent_split_verification(self):
+        data = self.make_data()
+        data.attrs.update({
+            "data_provider": "twelvedata",
+            "price_adjustment_policy": "split_adjusted_ohlc_no_dividend_adjustment",
+            "price_adjustment_verified": False,
+            "price_adjustment_verification_status": (
+                "REQUESTED_NOT_INDEPENDENTLY_VERIFIED"
+            ),
+        })
+        with (
+            patch.object(backtest_v3, "BACKTEST_DATA_MODE", "download"),
+            patch.object(backtest_v3, "download_data", return_value=data),
+        ):
+            result = backtest_v3.download_history("AAPL", "1d", asset="AAPL")
+        self.assertIsNone(result)
+        self.assertIn(
+            "ajuste de precios no está verificado",
+            backtest_v3.DOWNLOAD_ERRORS[("AAPL", "1d")],
+        )
+
     def test_snapshot_metadata_records_provider_and_adjustment_policy(self):
         data = self.make_data()
         metadata = backtest_v3._snapshot_metadata(
@@ -282,6 +366,9 @@ class TestBacktestV3(unittest.TestCase):
             "data_provider": "twelvedata",
             "price_adjustment_policy": "split_adjusted_ohlc_no_dividend_adjustment",
             "price_adjustment_verified": True,
+            "price_adjustment_verification_status": "INDEPENDENTLY_VERIFIED",
+            "price_adjustment_verification_source": "https://example.org/split-adjustment-audit.json",
+            "price_adjustment_verified_at": "2026-11-22T00:00:00Z",
         })
         daily_metadata = backtest_v3._snapshot_metadata(
             "AAPL",
@@ -293,6 +380,14 @@ class TestBacktestV3(unittest.TestCase):
             "twelvedata",
         )
         self.assertEqual(daily_metadata["period_requested"], "2y")
+        self.assertEqual(
+            daily_metadata["price_adjustment_verification_status"],
+            "INDEPENDENTLY_VERIFIED",
+        )
+        self.assertEqual(
+            daily_metadata["price_adjustment_verification_source"],
+            "https://example.org/split-adjustment-audit.json",
+        )
 
         daily_data.attrs.update({
             "price_source_detail": "LSE primary; SIX alternate OHLC repair",
@@ -382,10 +477,96 @@ class TestBacktestV3(unittest.TestCase):
             },
         )
         self.assertAlmostEqual(fields["commission_cost_usd"], 4.0)
-        self.assertAlmostEqual(fields["hypothetical_risk_budget_usd"], 2.5)
-        self.assertAlmostEqual(fields["result_R_after_known_fees"], 0.4)
+        self.assertAlmostEqual(fields["hypothetical_risk_budget_usd"], 7.5)
+        self.assertAlmostEqual(fields["result_R_after_known_fees"], 1.4667)
         self.assertFalse(fields["costs_complete"])
-        self.assertIn("live_market_bid_ask_spread_missing", fields["unpriced_costs"])
+        self.assertIn("live_market_bid_ask_spread_missing", fields["scenario_unpriced_costs"])
+        self.assertIn("round_trip_fee_evidence_missing", fields["unpriced_costs"])
+
+    def test_registry_incomplete_overrides_legacy_complete_cost_flag(self):
+        with (
+            patch.object(
+                backtest_v3,
+                "estimate_etoro_trade_costs",
+                return_value={
+                    "complete": True,
+                    "known_costs_total": 0.0,
+                    "commission_cost": 0.0,
+                    "market_spread_cost": 0.0,
+                    "fx_conversion_cost": 0.0,
+                    "overnight_cost": 0.0,
+                    "unpriced_costs": [],
+                    "assumptions": [],
+                },
+            ),
+            patch.object(
+                backtest_v3,
+                "estimate_verified_registry_trade_costs",
+                return_value={
+                    "valid": True,
+                    "complete": False,
+                    "registry_status": "COSTS_UNVERIFIED",
+                    "known_costs_total": None,
+                    "unpriced_costs": ["round_trip_fee_evidence_missing"],
+                },
+            ),
+        ):
+            fields = backtest_v3._estimate_backtest_cost_fields(
+                "AAPL",
+                {
+                    "entry": 100.0, "exit": 110.0, "stop": 95.0, "score": 90,
+                    "entry_time": "2026-11-20T10:00:00",
+                    "exit_time": "2026-11-20T11:00:00",
+                },
+            )
+        self.assertFalse(fields["costs_complete"])
+        self.assertEqual(fields["registry_costs_status"], "COSTS_UNVERIFIED")
+        self.assertIsNone(fields["verified_costs_total_usd"])
+        self.assertIn("round_trip_fee_evidence_missing", fields["unpriced_costs"])
+
+    def test_verified_registry_costs_produce_separate_net_result(self):
+        with (
+            patch.object(
+                backtest_v3,
+                "estimate_etoro_trade_costs",
+                return_value={
+                    "complete": False,
+                    "known_costs_total": 0.0,
+                    "commission_cost": 0.0,
+                    "market_spread_cost": None,
+                    "fx_conversion_cost": 0.0,
+                    "overnight_cost": None,
+                    "unpriced_costs": ["live_market_bid_ask_spread_missing"],
+                    "assumptions": [],
+                },
+            ),
+            patch.object(
+                backtest_v3,
+                "estimate_verified_registry_trade_costs",
+                return_value={
+                    "valid": True,
+                    "complete": True,
+                    "registry_status": "ELIGIBLE",
+                    "known_costs_total": 1.0,
+                    "unpriced_costs": [],
+                },
+            ),
+        ):
+            fields = backtest_v3._estimate_backtest_cost_fields(
+                "AAPL",
+                {
+                    "entry": 100.0, "exit": 110.0, "stop": 95.0, "score": 90,
+                    "entry_time": "2026-11-20T10:00:00",
+                    "exit_time": "2026-11-20T11:00:00",
+                },
+            )
+        self.assertTrue(fields["costs_complete"])
+        self.assertEqual(fields["unpriced_costs"], "")
+        self.assertIn("live_market_bid_ask_spread_missing", fields["scenario_unpriced_costs"])
+        self.assertEqual(fields["registry_costs_status"], "ELIGIBLE")
+        self.assertAlmostEqual(fields["verified_costs_total_usd"], 1.0)
+        self.assertAlmostEqual(fields["verified_net_pnl_usd"], 14.0)
+        self.assertAlmostEqual(fields["verified_result_R"], 1.8667)
 
     def test_metrics_report_known_fee_adjusted_results_separately(self):
         metrics = backtest_v3.calculate_metrics([
@@ -407,6 +588,8 @@ class TestBacktestV3(unittest.TestCase):
         self.assertAlmostEqual(metrics["known_fee_adjusted_average_R"], 0.15)
         self.assertEqual(metrics["trades_with_complete_costs"], 0)
         self.assertEqual(metrics["trades_with_unpriced_costs"], 2)
+        self.assertIsNone(metrics["verified_cost_adjusted_total_R"])
+        self.assertEqual(metrics["trades_with_verified_costs"], 0)
 
     def test_run_backtest_rejects_invalid_history_before_indicators(self):
         data = self.make_execution_data()

@@ -77,7 +77,7 @@ class TestPortfolioBacktest(unittest.TestCase):
             entry_time="2026-01-01T10:00:00Z",
             exit_time="2026-01-01T11:00:00Z",
             entry=100.0,
-            stop=100.0 - (2.5 / 900.0 * 100.0),
+            stop=100.0 - (7.5 / 900.0 * 100.0),
             score=90,
         )
         second = self.make_trade(
@@ -136,6 +136,20 @@ class TestPortfolioBacktest(unittest.TestCase):
         self.assertAlmostEqual(result["summary"]["ending_equity_usd"], 1000.0)
         self.assertAlmostEqual(result["summary"]["max_drawdown_usd"], 0.0)
 
+    def test_drawdown_summary_discloses_realized_only_basis(self):
+        result = simulate_portfolio(
+            [self.make_trade(result_R=-1.0)],
+            capital_usd=1000.0,
+        )
+
+        summary = result["summary"]
+        self.assertEqual(
+            summary["drawdown_basis"],
+            "realized_exit_events_only",
+        )
+        self.assertFalse(summary["intratrade_drawdown_included"])
+        self.assertFalse(summary["unrealized_pnl_included"])
+
     def test_drawdown_percentage_uses_equity_peak(self):
         winning = self.make_trade(
             asset="AAPL",
@@ -158,11 +172,11 @@ class TestPortfolioBacktest(unittest.TestCase):
 
         self.assertAlmostEqual(
             result["summary"]["max_drawdown_usd"],
-            2.5125,
+            7.6125,
         )
         self.assertAlmostEqual(
             result["summary"]["max_drawdown_pct"],
-            0.25,
+            0.75,
         )
 
     def test_open_risk_percentage_tracks_realized_loss_and_blocks_new_risk(self):

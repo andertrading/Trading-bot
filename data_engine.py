@@ -1300,6 +1300,109 @@ def _log_dataframe_timestamps(provider, asset, interval, df):
 # TWELVE DATA
 # ---------------------------------------------------------------------
 
+def _validate_twelvedata_instrument_metadata(asset, config, meta):
+    """Reject incomplete or inconsistent Twelve Data instrument metadata."""
+    if not isinstance(meta, dict):
+        return False
+
+    exchange = meta.get("exchange")
+    provider_type = meta.get("type")
+    if not all(
+        isinstance(value, str) and value.strip()
+        for value in (exchange, provider_type)
+    ):
+        logger.error(
+            "IDENTIDAD DE INSTRUMENTO INCOMPLETA | %s | faltan exchange o type",
+            asset,
+        )
+        return False
+
+    configured_type = config.get("type")
+    expected_type = {
+        "STOCK": "Common Stock",
+        "ETF": "ETF",
+        "CRYPTO": "Digital Currency",
+    }.get(configured_type)
+
+    if expected_type is None or provider_type.strip().casefold() != expected_type.casefold():
+        logger.error(
+            "TIPO DE INSTRUMENTO INCOMPATIBLE | %s | esperado=%s | recibido=%s",
+            asset,
+            expected_type,
+            provider_type,
+        )
+        return False
+
+    # Twelve Data documents MIC codes for securities, but not for digital
+    # currencies. Do not reject crypto merely because no MIC exists.
+    mic_code = meta.get("mic_code")
+    if configured_type != "CRYPTO" and not (
+        isinstance(mic_code, str) and mic_code.strip()
+    ):
+        logger.error(
+            "MIC DE INSTRUMENTO NO VERIFICABLE | %s | falta mic_code",
+            asset,
+        )
+        return False
+
+    expected_exchange = config.get("twelvedata_exchange")
+    if expected_exchange is not None and (
+        not isinstance(expected_exchange, str)
+        or exchange.strip().casefold() != expected_exchange.strip().casefold()
+    ):
+        logger.error(
+            "BOLSA INCOMPATIBLE | %s | esperada=%s | recibida=%s",
+            asset,
+            expected_exchange,
+            exchange,
+        )
+        return False
+
+    expected_mic = config.get("twelvedata_mic_code")
+    if expected_mic is not None and (
+        not isinstance(expected_mic, str)
+        or not isinstance(mic_code, str)
+        or mic_code.strip().upper() != expected_mic.strip().upper()
+    ):
+        logger.error(
+            "MIC INCOMPATIBLE | %s | esperado=%s | recibido=%s",
+            asset,
+            expected_mic,
+            mic_code,
+        )
+        return False
+
+    expected_timezone = {
+        "XNYS": "America/New_York",
+        "XLON": "Europe/London",
+    }.get(config.get("market_calendar"))
+
+    if expected_timezone is not None:
+        provider_timezone = meta.get("exchange_timezone")
+        if (
+            not isinstance(provider_timezone, str)
+            or provider_timezone.strip() != expected_timezone
+        ):
+            logger.error(
+                "ZONA HORARIA DE INSTRUMENTO INCOMPATIBLE | %s | esperado=%s | recibido=%s",
+                asset,
+                expected_timezone,
+                provider_timezone,
+            )
+            return False
+
+    logger.info(
+        "IDENTIDAD TWELVE DATA | %s | exchange=%s | mic_code=%s | type=%s | timezone=%s",
+        asset,
+        exchange.strip(),
+        mic_code.strip().upper() if isinstance(mic_code, str) else "N/A",
+        provider_type.strip(),
+        meta.get("exchange_timezone"),
+    )
+    return True
+
+
+
 def _twelvedata_request(params):
     global _last_api_request
 
@@ -1346,6 +1449,12 @@ def _download_twelvedata(
         "adjust": "splits" if interval == "1d" else "none",
         "apikey": api_key,
     }
+    # Ask Twelve Data for the configured listing rather than relying on
+    # symbol-only resolution when the exchange/MIC are known.
+    if config.get("twelvedata_exchange"):
+        params["exchange"] = config["twelvedata_exchange"]
+    if config.get("twelvedata_mic_code"):
+        params["mic_code"] = config["twelvedata_mic_code"]
 
     if start_date is None and end_date is None:
         params["outputsize"] = 5000
@@ -1377,6 +1486,9 @@ def _download_twelvedata(
                 "MONEDA NO VERIFICABLE | %s | falta metadata",
                 asset,
             )
+            return None
+
+        if not _validate_twelvedata_instrument_metadata(asset, config, meta):
             return None
 
         provider_symbol = meta.get("symbol")
@@ -1830,6 +1942,61 @@ def _download_yahoo_alternate_daily(
         return None
 
 
+def _trusted_primary_ohlc_columns(primary_row):
+    """Return primary OHLC fields that remain structurally trustworthy.
+
+    A field that itself violates OHLC ordering is excluded from comparison,
+    because that is the field the alternate listing may be repairing.
+    Other valid primary fields must agree with the alternate listing.
+    """
+    values = {}
+    for column in ("Open", "High", "Low", "Close"):
+        value = pd.to_numeric(
+            pd.Series([primary_row.get(column)]), errors="coerce"
+        ).iloc[0]
+        values[column] = (
+            float(value) if np.isfinite(value) and float(value) > 0 else None
+        )
+
+    trusted = {
+        column for column, value in values.items() if value is not None
+    }
+    open_price = values["Open"]
+    high_price = values["High"]
+    low_price = values["Low"]
+    close_price = values["Close"]
+
+    if (
+        high_price is not None
+        and any(value is not None and high_price < value
+                for value in (low_price, open_price, close_price))
+    ):
+        trusted.discard("High")
+    if (
+        low_price is not None
+        and any(value is not None and low_price > value
+                for value in (high_price, open_price, close_price))
+    ):
+        trusted.discard("Low")
+    if (
+        open_price is not None
+        and (
+            ("High" in trusted and open_price > high_price)
+            or ("Low" in trusted and open_price < low_price)
+        )
+    ):
+        trusted.discard("Open")
+    if (
+        close_price is not None
+        and (
+            ("High" in trusted and close_price > high_price)
+            or ("Low" in trusted and close_price < low_price)
+        )
+    ):
+        trusted.discard("Close")
+    return trusted
+
+
 def _patch_incoherent_daily_ohlc_from_alternate(
     dataframe, alternate_dataframe, asset, alternate_ticker
 ):
@@ -1870,6 +2037,7 @@ def _patch_incoherent_daily_ohlc_from_alternate(
 
     patched = dataframe.copy()
     maximum_deviation = 0.0
+    maximum_ohlc_deviation = 0.0
     for timestamp in invalid_index:
         if timestamp not in alternate_dataframe.index:
             logger.error(
@@ -1878,9 +2046,7 @@ def _patch_incoherent_daily_ohlc_from_alternate(
                 timestamp,
             )
             return None, None
-        primary_close = pd.to_numeric(
-            pd.Series([patched.at[timestamp, "Close"]]), errors="coerce"
-        ).iloc[0]
+        primary_row = patched.loc[timestamp]
         alternate_row = alternate_dataframe.loc[timestamp]
         if isinstance(alternate_row, pd.DataFrame):
             logger.error("Fecha alternativa duplicada al reparar %s", asset)
@@ -1888,25 +2054,33 @@ def _patch_incoherent_daily_ohlc_from_alternate(
         if _invalid_ohlc_mask(alternate_dataframe.loc[[timestamp]]).iloc[0]:
             logger.error("Vela alternativa defectuosa | %s | %s", asset, timestamp)
             return None, None
-        alternate_close = float(alternate_row["Close"])
-        if (
-            not np.isfinite(primary_close)
-            or float(primary_close) <= 0
-            or not np.isfinite(alternate_close)
-            or alternate_close <= 0
-        ):
-            logger.error("No se puede verificar el precio de reparación | %s", asset)
-            return None, None
-        deviation = abs(float(primary_close) / alternate_close - 1.0) * 100.0
-        if deviation > MAX_ALTERNATE_CLOSE_DEVIATION_PCT:
+
+        trusted_columns = _trusted_primary_ohlc_columns(primary_row)
+        if not trusted_columns:
             logger.error(
-                "Divergencia entre listings superior al límite | %s | %s | %.4f%%",
+                "No hay campos OHLC primarios fiables para contrastar la reparación | %s | %s",
                 asset,
                 timestamp,
-                deviation,
             )
             return None, None
-        maximum_deviation = max(maximum_deviation, deviation)
+
+        for column in sorted(trusted_columns):
+            primary_value = float(primary_row[column])
+            alternate_value = float(alternate_row[column])
+            deviation = abs(primary_value / alternate_value - 1.0) * 100.0
+            if deviation > MAX_ALTERNATE_CLOSE_DEVIATION_PCT:
+                logger.error(
+                    "Divergencia OHLC entre listings superior al límite | %s | %s | %s | %.4f%%",
+                    asset,
+                    timestamp,
+                    column,
+                    deviation,
+                )
+                return None, None
+            maximum_ohlc_deviation = max(maximum_ohlc_deviation, deviation)
+            if column == "Close":
+                maximum_deviation = max(maximum_deviation, deviation)
+
         for column in ("Open", "High", "Low", "Close"):
             patched.at[timestamp, column] = float(alternate_row[column])
 
@@ -1922,6 +2096,8 @@ def _patch_incoherent_daily_ohlc_from_alternate(
         "ohlc_repair_count": len(invalid_index),
         "ohlc_repair_source_ticker": alternate_ticker,
         "ohlc_repair_max_close_deviation_pct": round(maximum_deviation, 6),
+        "ohlc_repair_max_trusted_field_deviation_pct": round(maximum_ohlc_deviation, 6),
+        "ohlc_repair_comparison_policy": "all structurally trustworthy primary OHLC fields <= 0.5% deviation",
     }
     logger.warning(
         "YAHOO ALTERNATE OHLC REPAIR | %s | repaired=%s | source=%s | max_close_deviation=%.4f%%",
@@ -2328,8 +2504,37 @@ def _download_yahoo(asset, config, interval):
 # DESCARGA PRINCIPAL
 # ---------------------------------------------------------------------
 
+def _has_independent_twelvedata_split_adjustment_evidence(config):
+    """Require a sourced, timestamped audit record before trusting daily split adjustment."""
+    if not isinstance(config, dict):
+        return False
+    evidence = config.get("twelvedata_daily_adjustment_verification")
+    if not isinstance(evidence, dict):
+        return False
+    if evidence.get("status") != "INDEPENDENTLY_VERIFIED":
+        return False
+    source = evidence.get("source")
+    if not isinstance(source, str) or not source.strip().startswith("https://"):
+        return False
+    verified_at = evidence.get("verified_at")
+    try:
+        timestamp = pd.Timestamp(verified_at)
+    except (TypeError, ValueError):
+        return False
+    if pd.isna(timestamp) or timestamp.tzinfo is None:
+        return False
+    return timestamp <= pd.Timestamp.now(tz="UTC")
+
+
+def is_twelvedata_daily_adjustment_verified(asset):
+    """Public readiness check used by the production scanner."""
+    return _has_independent_twelvedata_split_adjustment_evidence(
+        _asset_config(asset)
+    )
+
+
 def _attach_market_data_metadata(dataframe, asset, interval):
-    """Attach explicit, provider-verified OHLC adjustment metadata."""
+    """Attach adjustment-policy metadata without overstating empirical verification."""
     extended_daily_backtest = (
         interval == "1d"
         and os.getenv(
@@ -2353,7 +2558,40 @@ def _attach_market_data_metadata(dataframe, asset, interval):
     dataframe = dataframe.copy()
     dataframe.attrs["data_provider"] = provider
     dataframe.attrs["price_adjustment_policy"] = policy
-    dataframe.attrs["price_adjustment_verified"] = True
+
+    if provider == "twelvedata" and interval == "1d":
+        # This flag may only be enabled for an asset after independent
+        # corporate-action reconciliation has been completed and recorded.
+        independently_verified = is_twelvedata_daily_adjustment_verified(asset)
+        dataframe.attrs["price_adjustment_verified"] = independently_verified
+        dataframe.attrs["price_adjustment_verification_status"] = (
+            "INDEPENDENTLY_VERIFIED"
+            if independently_verified
+            else "REQUESTED_NOT_INDEPENDENTLY_VERIFIED"
+        )
+        evidence = (_asset_config(asset) or {}).get(
+            "twelvedata_daily_adjustment_verification"
+        )
+        dataframe.attrs["price_adjustment_verification_source"] = (
+            evidence.get("source") if independently_verified else None
+        )
+        dataframe.attrs["price_adjustment_verified_at"] = (
+            evidence.get("verified_at") if independently_verified else None
+        )
+    elif provider == "twelvedata" and interval == "15m":
+        dataframe.attrs["price_adjustment_verified"] = True
+        dataframe.attrs["price_adjustment_verification_status"] = (
+            "DOCUMENTED_RAW_MODE"
+        )
+        dataframe.attrs["price_adjustment_verification_source"] = None
+        dataframe.attrs["price_adjustment_verified_at"] = None
+    else:
+        dataframe.attrs["price_adjustment_verified"] = True
+        dataframe.attrs["price_adjustment_verification_status"] = (
+            "PROVIDER_POLICY_ACCEPTED"
+        )
+        dataframe.attrs["price_adjustment_verification_source"] = None
+        dataframe.attrs["price_adjustment_verified_at"] = None
     return dataframe
 
 
