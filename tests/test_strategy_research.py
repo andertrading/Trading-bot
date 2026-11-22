@@ -14,6 +14,7 @@ from strategy_research import (
     mtf_daily_price_confirmed_pullback,
     daily_swing_trend_pullback,
     daily_swing_ema_reclaim,
+    daily_swing_donchian_breakout,
     _asset_class_universes,
 )
 
@@ -143,6 +144,61 @@ class TestDailySwingEmaReclaim(unittest.TestCase):
         )
         self.assertEqual(
             daily_swing_ema_reclaim(data, "AAPL", "1d", index=1)["action"],
+            "NO TRADE",
+        )
+
+
+class TestDailySwingDonchianBreakout(unittest.TestCase):
+
+    def _history(self, close=110.0, ema50=104.0, ema200=100.0):
+        rows = [
+            {
+                "High": 105.0, "Close": 103.0,
+                "EMA50": 102.0, "EMA200": 100.0,
+                "ATR": 2.0, "ATR_PERCENT": 2.0,
+            }
+            for _ in range(20)
+        ]
+        rows.append({
+            "High": 120.0, "Close": close,
+            "EMA50": ema50, "EMA200": ema200,
+            "ATR": 2.0, "ATR_PERCENT": 2.0,
+        })
+        return pd.DataFrame(rows)
+
+    def test_daily_breakout_uses_only_prior_twenty_completed_highs(self):
+        result = daily_swing_donchian_breakout(
+            self._history(), "AAPL", "1d", index=20
+        )
+        self.assertEqual(result["action"], "BUY CANDIDATE")
+        self.assertEqual(result["timeframe"], "1d")
+        self.assertFalse(result["tradable"])
+        self.assertFalse(result["validated"])
+
+    def test_current_candle_high_cannot_create_its_own_breakout(self):
+        data = self._history(close=104.0)
+        self.assertGreater(data.iloc[20]["High"], 105.0)
+        result = daily_swing_donchian_breakout(
+            data, "AAPL", "1d", index=20
+        )
+        self.assertEqual(result["action"], "NO TRADE")
+
+    def test_daily_breakout_rejects_wrong_timeframe_and_weak_trend(self):
+        data = self._history()
+        self.assertEqual(
+            daily_swing_donchian_breakout(data, "AAPL", "15m", index=20)["action"],
+            "NO TRADE",
+        )
+        weak = self._history(ema50=99.0, ema200=100.0)
+        self.assertEqual(
+            daily_swing_donchian_breakout(weak, "AAPL", "1d", index=20)["action"],
+            "NO TRADE",
+        )
+
+    def test_daily_breakout_requires_twenty_valid_prior_bars(self):
+        short = self._history().iloc[:20]
+        self.assertEqual(
+            daily_swing_donchian_breakout(short, "AAPL", "1d", index=19)["action"],
             "NO TRADE",
         )
 
