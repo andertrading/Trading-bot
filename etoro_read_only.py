@@ -1031,17 +1031,20 @@ def normalize_instrument_eligibility(
                 value = config.get(field)
                 if value is not None:
                     percentages[field] = _decimal(value, field)
-                    # eToro may return zero bounds when SL/TP is disabled
-                    # for this leverage configuration. Preserve those values as
-                    # unavailable metadata; require strictly positive bounds only
-                    # when the account/instrument explicitly enables SL/TP.
+                    # A zero minimum is a valid boundary (no minimum
+                    # distance constraint). Maximum/default percentages must
+                    # remain strictly positive when supplied. Negative values
+                    # are never valid, and enabled SL/TP still requires all six
+                    # fields to be present.
+                    is_minimum = field in {
+                        "minStopLossPercentage", "minTakeProfitPercentage"
+                    }
                     if percentages[field] < 0 or (
-                        percentages[field] == 0
-                        and config["allowStopLossTakeProfit"]
+                        percentages[field] == 0 and not is_minimum
                     ):
                         raise EtoroAPIError(
-                            f"{field} debe ser positivo cuando "
-                            "allowStopLossTakeProfit está habilitado"
+                            f"{field} debe ser no negativo"
+                            if is_minimum else f"{field} debe ser positivo"
                         )
             if config["allowStopLossTakeProfit"] and len(percentages) != len(percentage_fields):
                 raise EtoroAPIError("Faltan límites de stop/take profit en leverage config")
