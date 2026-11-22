@@ -253,12 +253,24 @@ class TestBotValidation(unittest.TestCase):
         )
         self.assertFalse(result["tradable"])
 
-    def test_unconfirmed_fx_blocks_candidate(self):
-        with patch.object(
-            Bot,
-            "FX_CONVERSION_CONFIRMED",
-            False,
-        ):
+    def test_unconfirmed_fx_does_not_block_same_currency_asset(self):
+        with patch.object(Bot, "FX_CONVERSION_CONFIRMED", False):
+            result = Bot.apply_validation_gate(
+                self.candidate,
+                {"status": "OK"},
+            )
+
+        self.assertNotIn(
+            "Conversión de divisa pendiente de confirmar",
+            result["validation_reasons"],
+        )
+        self.assertFalse(result["tradable"])
+
+    def test_unconfirmed_fx_blocks_different_currency_asset(self):
+        eur_config = dict(Bot.ASSETS["AAPL"])
+        eur_config["currency"] = "EUR"
+        with patch.object(Bot, "FX_CONVERSION_CONFIRMED", False), \\
+             patch.dict(Bot.ASSETS, {"AAPL": eur_config}):
             result = Bot.apply_validation_gate(
                 self.candidate,
                 {"status": "OK"},
