@@ -134,7 +134,13 @@ def classify_registry_asset(symbol: str, registry: dict | None = None) -> dict:
         blockers.append("observed_bid_ask_spread_evidence_missing")
 
     basis = item["price_basis"]
-    if not basis.get("confirmed") or not _has_evidence(basis):
+    if (
+        not basis.get("confirmed") or not _has_evidence(basis)
+        or any(
+            not isinstance(basis.get(field), str) or not basis.get(field).strip()
+            for field in ("historical_basis", "execution_basis", "mapping_rule")
+        )
+    ):
         blockers.append("execution_price_basis_evidence_missing")
 
     minimum = item["minimum_order"]
