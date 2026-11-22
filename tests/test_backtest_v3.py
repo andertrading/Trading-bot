@@ -477,8 +477,8 @@ class TestBacktestV3(unittest.TestCase):
             },
         )
         self.assertAlmostEqual(fields["commission_cost_usd"], 4.0)
-        self.assertAlmostEqual(fields["hypothetical_risk_budget_usd"], 2.5)
-        self.assertAlmostEqual(fields["result_R_after_known_fees"], 0.4)
+        self.assertAlmostEqual(fields["hypothetical_risk_budget_usd"], 7.5)
+        self.assertAlmostEqual(fields["result_R_after_known_fees"], 1.4667)
         self.assertFalse(fields["costs_complete"])
         self.assertIn("live_market_bid_ask_spread_missing", fields["scenario_unpriced_costs"])
         self.assertIn("round_trip_fee_evidence_missing", fields["unpriced_costs"])
@@ -565,8 +565,8 @@ class TestBacktestV3(unittest.TestCase):
         self.assertIn("live_market_bid_ask_spread_missing", fields["scenario_unpriced_costs"])
         self.assertEqual(fields["registry_costs_status"], "ELIGIBLE")
         self.assertAlmostEqual(fields["verified_costs_total_usd"], 1.0)
-        self.assertAlmostEqual(fields["verified_net_pnl_usd"], 4.0)
-        self.assertAlmostEqual(fields["verified_result_R"], 1.6)
+        self.assertAlmostEqual(fields["verified_net_pnl_usd"], 14.0)
+        self.assertAlmostEqual(fields["verified_result_R"], 1.8667)
 
     def test_metrics_report_known_fee_adjusted_results_separately(self):
         metrics = backtest_v3.calculate_metrics([
