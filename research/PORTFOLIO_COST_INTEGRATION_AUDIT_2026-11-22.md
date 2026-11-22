@@ -166,7 +166,19 @@ Therefore, an asset-level `ELIGIBLE` status must not be treated as proof that ev
 
 This enforcement must occur in the portfolio allocator, not only in the signal-level hypothetical cost report.
 
-### 6. Realized net P&L exactly once
+### R-multiple denominator must be explicit
+
+The current per-trade `verified_result_R` is calculated as verified net P&L divided by `actual_risk_budget = quantity * (entry - stop)`. That denominator is **gross price risk** and excludes fees/spread/FX. It is a net P&L expressed in units of gross stop-risk, not a net R based on all-in risk.
+
+The portfolio implementation must avoid silently changing or conflating these definitions. Preserve separately named values if both are useful:
+
+- `net_pnl_usd`: verified net cash P&L.
+- `net_R_on_gross_stop_risk`: net P&L divided by gross stop-risk budget.
+- `net_R_on_all_in_stop_risk`: net P&L divided by the all-in stop-risk budget including verified costs.
+
+The denominator used for each reported metric must be explicit in CSV column names and summary metadata.
+
+### 7. Realized net P&L exactly once
 
 At exit, calculate verified round-trip costs once using the allocated quantity and actual simulated exit price:
 
@@ -178,7 +190,7 @@ Then use net P&L for equity, subsequent risk budgets, return, win rate, profit f
 
 Never subtract `result_R_after_known_fees` or any hypothetical-size cost field from portfolio P&L. That would mix position sizes and can double-count costs.
 
-### 7. Fail-closed net reporting
+### 8. Fail-closed net reporting
 
 A portfolio net metric is valid only when every accepted and closed trade has complete verified costs and verified execution-price basis. If one trade is incomplete:
 
@@ -189,7 +201,7 @@ A portfolio net metric is valid only when every accepted and closed trade has co
 
 The current registry state (0/12 eligible) means this gate must remain closed.
 
-### 8. Stop-gap risk is not a hard maximum
+### 9. Stop-gap risk is not a hard maximum
 
 Even a correct all-in loss calculation at the stop price does not guarantee a hard 1% maximum loss. The backtest explicitly models a gap through the stop by exiting at the next candle's open, which can be materially worse than the stop. Daily swing positions are exposed to overnight/weekend gaps, halts, and liquidity shocks.
 
@@ -200,7 +212,7 @@ Therefore:
 - Add gap-stress scenarios and report the frequency/severity of losses beyond the planned budget.
 - If a guaranteed maximum loss is a non-negotiable requirement, the strategy/instrument must support a genuinely guaranteed stop mechanism with its own verified availability and fee model. Ordinary stop orders do not provide that guarantee.
 
-### 9. Risk-limit semantics
+### 10. Risk-limit semantics
 
 The hard 1% per-trade and 3% aggregate limits must apply to modeled all-in stop loss, not only price movement to the stop. Add tests for simultaneous entries, fixed commissions, variable spread/FX costs, and costs that make a candidate infeasible under the risk budget.
 
