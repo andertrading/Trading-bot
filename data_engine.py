@@ -1868,16 +1868,18 @@ def _trusted_primary_ohlc_columns(primary_row):
         trusted.discard("Low")
     if (
         open_price is not None
-        and high_price is not None
-        and low_price is not None
-        and not low_price <= open_price <= high_price
+        and (
+            ("High" in trusted and open_price > high_price)
+            or ("Low" in trusted and open_price < low_price)
+        )
     ):
         trusted.discard("Open")
     if (
         close_price is not None
-        and high_price is not None
-        and low_price is not None
-        and not low_price <= close_price <= high_price
+        and (
+            ("High" in trusted and close_price > high_price)
+            or ("Low" in trusted and close_price < low_price)
+        )
     ):
         trusted.discard("Close")
     return trusted
