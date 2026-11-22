@@ -343,3 +343,12 @@ Fuentes de listing:
 - Metadata de ejemplo Twelve Data (AAPL / NASDAQ / XNAS): https://twelvedata.com/docs/ai/ai-data-assistant
 
 No se han fijado valores esperados para CSPX/CNDX hasta confirmar el formato exacto de metadata que devuelve Twelve Data para esos símbolos. Tampoco se fuerza un MIC a las criptomonedas.
+
+
+### Ventaja bruta frente al coste por operación
+
+En la muestra diaria completa del mismo artefacto, la ventaja bruta media por operación queda por debajo del coste modelado en ambas clases:
+- Acciones USA: la comisión de ida y vuelta equivale a 0.40 R. Expectativa bruta observada: baseline +0.203 R/trade, Donchian +0.175 R/trade y EMA reclaim +0.126 R/trade.
+- Cripto: el coste porcentual modelado equivale a una media de 0.371–0.385 R/trade. Expectativa bruta observada: baseline -0.008 R/trade, Donchian +0.162 R/trade y EMA reclaim +0.085 R/trade.
+
+La comparación es previa a spread y usa hipótesis públicas de eToro, no tickets verificados. Indica que las estrategias actuales no generan suficiente ventaja bruta para absorber los costes; no basta con cambiar el capital ni con ampliar el número de operaciones. La siguiente investigación debe buscar una mejora de expectancy neta con validación fuera de muestra, no aumentar frecuencia ni relajar los filtros.
