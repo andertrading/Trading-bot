@@ -279,6 +279,24 @@ def compare(asset, eod, yahoo, exchange, alternate, yahoo_yf, alternate_yf):
     price_errors = _price_error_metrics(eod, yahoo_yf, "_eodhd", "_yahoo_yfinance")
     six_errors = _price_error_metrics(eod, alternate_yf, "_eodhd", "_six_yfinance")
     chart_vs_yfinance = _price_error_metrics(yahoo, yahoo_yf, "_yahoo_chart", "_yahoo_yfinance")
+    full_lse_six = (
+        yahoo_yf.add_suffix("_lse")
+        .join(alternate_yf.add_suffix("_six"), how="inner")
+    )
+    full_lse_six_errors = _price_error_metrics(
+        yahoo_yf, alternate_yf, "_lse", "_six"
+    )
+    full_lse_six_outliers = {}
+    for col in ("Open", "High", "Low", "Close"):
+        error = (
+            full_lse_six[f"{col}_lse"] / full_lse_six[f"{col}_six"] - 1.0
+        ).abs() * 100
+        full_lse_six_outliers[col] = {
+            "over_0_5pct": int((error > 0.5).sum()),
+            "over_1pct": int((error > 1.0).sum()),
+            "over_2pct": int((error > 2.0).sum()),
+            "dates_over_1pct": [str(day) for day in full_lse_six.index[error > 1.0]],
+        }
     yahoo_integrity = ohlc_integrity(yahoo)
     yahoo_yfinance_integrity = ohlc_integrity(yahoo_yf)
     eodhd_integrity = ohlc_integrity(eod)
@@ -305,6 +323,11 @@ def compare(asset, eod, yahoo, exchange, alternate, yahoo_yf, alternate_yf):
         "price_abs_pct_error": price_errors,
         "yahoo_chart_price_abs_pct_error": chart_price_errors,
         "yahoo_chart_vs_yfinance_price_abs_pct_error": chart_vs_yfinance,
+        "five_year_lse_vs_six_yfinance_price_abs_pct_error": full_lse_six_errors,
+        "five_year_lse_vs_six_yfinance_outliers": full_lse_six_outliers,
+        "five_year_lse_six_overlap_sessions": int(len(full_lse_six)),
+        "five_year_lse_six_first_date": str(full_lse_six.index.min()),
+        "five_year_lse_six_last_date": str(full_lse_six.index.max()),
         "six_yfinance_vs_eodhd_price_abs_pct_error": six_errors,
         "alternate_repair_assessment": alternate_repair_assessment,
         "yahoo_research_quality_gate": "PASS" if not blockers else "FAIL",
