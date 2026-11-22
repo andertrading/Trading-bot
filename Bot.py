@@ -1062,7 +1062,7 @@ def no_trade(asset, timeframe, reason):
     }
 
 
-def get_validation_blockers(portfolio_status):
+def get_validation_blockers(portfolio_status, asset=None):
     blockers = []
 
     if not ALLOW_POSITION_SIZING:
@@ -1085,7 +1085,21 @@ def get_validation_blockers(portfolio_status):
             "Correspondencia entre OHLC históricos y precios bid/ask ejecutables de eToro no verificada"
         )
 
-    if not FX_CONVERSION_CONFIRMED:
+    asset_config = ASSETS.get(asset) if asset else None
+    if asset_config is not None:
+        fx_required = (
+            str(asset_config.get("currency") or "").upper()
+            != str(ACCOUNT_CURRENCY).upper()
+        )
+    else:
+        fx_required = any(
+            str(item.get("currency") or "").upper()
+            != str(ACCOUNT_CURRENCY).upper()
+            for item in ASSETS.values()
+            if item.get("enabled", True)
+        )
+
+    if fx_required and not FX_CONVERSION_CONFIRMED:
         blockers.append(
             "Conversión de divisa pendiente de confirmar"
         )
@@ -1151,7 +1165,10 @@ def apply_validation_gate(result, portfolio_status):
     result["strategy_status"] = result.get("status")
     result["provisional_risk_pct"] = provisional_risk_pct
 
-    blockers = get_validation_blockers(portfolio_status)
+    blockers = get_validation_blockers(
+        portfolio_status,
+        asset=result.get("asset"),
+    )
 
     try:
         economic_eligibility = classify_asset_economic(result.get("asset"))
