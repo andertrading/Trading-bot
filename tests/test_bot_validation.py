@@ -1,5 +1,6 @@
 
 import unittest
+from datetime import datetime, timezone
 from unittest.mock import patch
 
 import Bot
@@ -433,7 +434,7 @@ class TestBotValidation(unittest.TestCase):
             **self.candidate,
             "sizing_result": sizing_result,
             "data_valid": True,
-            "data_timestamp": "2026-01-01T00:00:00+00:00",
+            "data_timestamp": datetime.now(timezone.utc).isoformat(),
             "data_age_minutes": 1.0,
         }
 
