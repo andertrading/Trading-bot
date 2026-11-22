@@ -167,6 +167,38 @@ class MarketEvidenceTests(unittest.TestCase):
         self.assertEqual(client.quote_requests, 0)
         self.assertEqual(client.cost_payloads, [])
 
+    def test_eligibility_failure_isolated_to_affected_instrument(self):
+        class OneInstrumentFailureClient(FakeMarketEvidenceClient):
+            def __init__(self):
+                super().__init__()
+                self.eligibility_requests = []
+
+            def get_validated_instrument_eligibility(self, ids):
+                self.eligibility_requests.append(list(ids))
+                if ids == [101]:
+                    raise EtoroAPIError("direction inválida en leverage config: 'BUY_SIDE'")
+                return super().get_validated_instrument_eligibility(ids)
+
+        client = OneInstrumentFailureClient()
+        report = collect_market_evidence(
+            client,
+            symbols={
+                "AAPL": {"market_calendar": "XNYS", "type": "STOCK"},
+                "BTC": {"market_calendar": "24/7", "type": "CRYPTO"},
+            },
+            now_utc=datetime(2026, 11, 22, 12, 0, tzinfo=timezone.utc),
+        )
+
+        self.assertEqual(client.eligibility_requests, [[101], [102]])
+        self.assertEqual(report["summary"]["status"], "PARTIAL")
+        self.assertIsNone(report["assets"]["AAPL"]["eligibility"])
+        self.assertIn(
+            "direction inválida",
+            " ".join(report["assets"]["AAPL"]["errors"]),
+        )
+        self.assertIsNotNone(report["assets"]["BTC"]["eligibility"])
+        self.assertIsNotNone(report["assets"]["BTC"]["hypothetical_open_cost"])
+
     def test_missing_eligibility_record_marks_capture_partial(self):
         client = FakeMarketEvidenceClient()
         original = client.get_validated_instrument_eligibility
