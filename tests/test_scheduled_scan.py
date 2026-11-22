@@ -134,7 +134,7 @@ class ScheduledScanTests(unittest.TestCase):
         self.assertEqual(paper["trades"]["paper-fill-1"]["status"], "OPEN")
         self.assertEqual(result["paper_bars_processed"], 1)
         self.assertEqual(result["paper_forward"]["open_trades"], 1)
-        self.assertFalse(result["paper_forward"]["costs_included")
+        self.assertFalse(result["paper_forward"]["costs_included"])
 
     def test_same_candle_does_not_create_duplicate_signal(self):
         store = MemoryStore("url", "token")
