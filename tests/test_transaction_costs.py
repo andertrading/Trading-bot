@@ -64,6 +64,7 @@ class TestEtoroTransactionCosts(unittest.TestCase):
             item["fx"].update({
                 "required": True,
                 "conversion_fee_pct": 0.2,
+                "conversion_fee_unit": "PERCENT",
                 "quote_to_account_rate": 1.1,
                 "confirmed": True,
                 "source": "verified FX schedule",
