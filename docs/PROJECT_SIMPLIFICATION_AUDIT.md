@@ -393,3 +393,10 @@ La mejora de costes es visible, pero no compensa la falta de ventaja neta. Añad
 Fuentes públicas Bitvavo:
 - Comisiones por tipo de orden y volumen: https://support.bitvavo.com/hc/es/articles/4405175148689--Cu%C3%A1l-es-la-comisi%C3%B3n-de-trading-cuando-compro-o-vendo-criptomonedas
 - Pares USDC con comisiones de 0.05% o inferiores: https://bitvavo.com/en/news/usdc-pairs
+
+
+### Position sizing remains deliberately blocked
+
+The production validation gate requires a complete `sizing_result` and independently confirmed portfolio risk before a candidate can become an approved manual signal. `ALLOW_POSITION_SIZING` remains disabled, and `Bot.run_scan()` does not invent a size when the registry is incomplete or portfolio exposure is unknown. This is intentional: the current registry has no economically eligible assets, and the bot must not infer the user's real open positions.
+
+The next sizing implementation must be a clearly labelled virtual/paper calculation using the 1,000 USD reference capital and fully evidenced round-trip costs. It must remain separate from the user's real account and must not mark a candidate as tradable until the account-specific execution and portfolio-risk requirements are satisfied.
