@@ -58,7 +58,7 @@ class MarketEvidenceTests(unittest.TestCase):
         client = FakeMarketEvidenceClient()
         now = datetime(2026, 11, 22, 12, 0, tzinfo=timezone.utc)
         report = collect_market_evidence(client, symbols={
-            "AAPL": {"market_calendar": "XNYS"}, "BTC": {"market_calendar": "24/7"}
+            "AAPL": {"market_calendar": "XNYS", "type": "STOCK"}, "BTC": {"market_calendar": "24/7", "type": "CRYPTO"}
         }, now_utc=now)
         self.assertEqual(report["summary"]["status"], "COMPLETE", report)
         self.assertEqual(report["assets"]["AAPL"]["quote"]["spread_absolute"], "2")
@@ -90,7 +90,7 @@ class MarketEvidenceTests(unittest.TestCase):
             )
             return result
         client.get_validated_instrument_eligibility = higher_minimum
-        collect_market_evidence(client, symbols={"AAPL": {"market_calendar": "XNYS"}},
+        collect_market_evidence(client, symbols={"AAPL": {"market_calendar": "XNYS", "type": "STOCK"}},
             now_utc=datetime(2026, 11, 22, 12, 0, tzinfo=timezone.utc))
         self.assertEqual(client.cost_payloads[0]["amount"], "300")
 
@@ -107,11 +107,38 @@ class MarketEvidenceTests(unittest.TestCase):
             )
             return result
         client.get_validated_instrument_eligibility = potential
-        report = collect_market_evidence(client, symbols={"AAPL": {"market_calendar": "XNYS"}},
+        report = collect_market_evidence(client, symbols={"AAPL": {"market_calendar": "XNYS", "type": "STOCK"}},
             now_utc=datetime(2026, 11, 22, 12, 0, tzinfo=timezone.utc))
         self.assertEqual(len(client.cost_payloads), 0)
         self.assertEqual(report["assets"]["AAPL"]["hypothetical_open_cost"]["status"], "SKIPPED")
 
+
+    def test_instrument_type_mismatch_blocks_quote_and_cost_capture(self):
+        class WrongTypeClient(FakeMarketEvidenceClient):
+            def search_instrument_by_symbol(self, symbol):
+                response = super().search_instrument_by_symbol(symbol)
+                if symbol == "BTC":
+                    response.data["results"][0]["type"] = "ETF"
+                return response
+
+        client = WrongTypeClient()
+        report = collect_market_evidence(
+            client,
+            symbols={"AAPL": {"market_calendar": "XNYS", "type": "STOCK"},
+                     "BTC": {"market_calendar": "24/7", "type": "CRYPTO"}},
+            now_utc=datetime(2026, 11, 22, 12, 0, tzinfo=timezone.utc),
+        )
+
+        self.assertEqual(report["summary"]["status"], "PARTIAL")
+        self.assertEqual(report["summary"]["resolved_instruments"], 1)
+        self.assertIsNotNone(report["assets"]["AAPL"]["quote"])
+        self.assertIsNone(report["assets"]["BTC"]["quote"])
+        self.assertTrue(any(
+            "instrument type does not match" in error
+            for error in report["assets"]["BTC"]["errors"]
+        ))
+        self.assertEqual(client.quote_requests, 1)
+        self.assertEqual(len(client.cost_payloads), 1)
 
     def test_duplicate_instrument_ids_block_both_configured_assets(self):
         class DuplicateInstrumentClient(FakeMarketEvidenceClient):
@@ -123,8 +150,8 @@ class MarketEvidenceTests(unittest.TestCase):
         client = DuplicateInstrumentClient()
         report = collect_market_evidence(
             client,
-            symbols={"AAPL": {"market_calendar": "XNYS"},
-                     "BTC": {"market_calendar": "24/7"}},
+            symbols={"AAPL": {"market_calendar": "XNYS", "type": "STOCK"},
+                     "BTC": {"market_calendar": "24/7", "type": "CRYPTO"}},
             now_utc=datetime(2026, 11, 22, 12, 0, tzinfo=timezone.utc),
         )
 
@@ -152,7 +179,7 @@ class MarketEvidenceTests(unittest.TestCase):
         client.get_validated_instrument_eligibility = incomplete
         report = collect_market_evidence(
             client,
-            symbols={"AAPL": {"market_calendar": "XNYS"}, "BTC": {"market_calendar": "24/7"}},
+            symbols={"AAPL": {"market_calendar": "XNYS", "type": "STOCK"}, "BTC": {"market_calendar": "24/7", "type": "CRYPTO"}},
             now_utc=datetime(2026, 11, 22, 12, 0, tzinfo=timezone.utc),
         )
 
