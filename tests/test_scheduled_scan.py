@@ -33,6 +33,19 @@ class MemoryStore:
         return 0
 
 
+def make_approved_daily_candidate(now):
+    candidate = make_candidate(now)
+    candidate.update({
+        "timeframe": "1d",
+        "direction": "LONG",
+        "validation_status": "APPROVED",
+        "tradable": True,
+        "validated": True,
+        "economic_eligibility": {"status": "ELIGIBLE", "blockers": []},
+    })
+    return candidate
+
+
 def make_candidate(now):
     return {
         "action": "BUY CANDIDATE",
@@ -585,10 +598,12 @@ class ScheduledScanTests(unittest.TestCase):
     def test_chart_failure_falls_back_to_text_alert(
         self, build_messages, generate_chart, send_text
     ):
-        result = scheduled_scan._send_signal_report(
-            self.scan, self.scan["results"][0],
+        candidate = make_approved_daily_candidate(self.now)
+        with patch.object(scheduled_scan, "STRATEGY_VALIDATED", True):
+            result = scheduled_scan._send_signal_report(
+            self.scan, candidate,
             {"expires_at": "2026-11-21T12:30:00+00:00", "signal_id": "chart-fallback"},
-        )
+            )
         self.assertTrue(result)
         build_messages.assert_called_once()
         generate_chart.assert_called_once()
@@ -604,10 +619,12 @@ class ScheduledScanTests(unittest.TestCase):
     def test_photo_send_failure_falls_back_to_text(
         self, build_messages, generate_chart, send_photo, send_text
     ):
-        result = scheduled_scan._send_signal_report(
-            self.scan, self.scan["results"][0],
+        candidate = make_approved_daily_candidate(self.now)
+        with patch.object(scheduled_scan, "STRATEGY_VALIDATED", True):
+            result = scheduled_scan._send_signal_report(
+            self.scan, candidate,
             {"expires_at": "2026-11-21T12:30:00+00:00", "signal_id": "photo-fallback"},
-        )
+            )
         self.assertTrue(result)
         send_photo.assert_called_once()
         self.assertIn("Gráfico técnico", send_photo.call_args.args[1])
@@ -634,7 +651,7 @@ class ScheduledScanTests(unittest.TestCase):
                 "expires_at": "2026-11-21T12:30:00+00:00",
                 "signal_id": "long-report",
             },
-        )
+            )
 
         self.assertTrue(result)
         send_text.assert_called_once_with("X" * 1800)
