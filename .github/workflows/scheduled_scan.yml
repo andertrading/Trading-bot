@@ -27,7 +27,10 @@ concurrency:
 jobs:
   scan:
     # Explicit opt-in prevents API usage until credentials and storage are ready.
-    if: ${{ vars.SIGNAL_AUTOMATION_ENABLED == 'true' }}
+    # Scheduled runs require repository opt-in. A deliberate manual
+    # dispatch is also allowed for paper-only validation without enabling
+    # recurring automation; alert and strategy gates remain independent.
+    if: ${{ vars.SIGNAL_AUTOMATION_ENABLED == 'true' || github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -61,10 +64,11 @@ jobs:
           import os
           required = [
               "TWELVE_DATA_API_KEY",
-              "EODHD_API_KEY",
               "UPSTASH_REDIS_REST_URL",
               "UPSTASH_REDIS_REST_TOKEN",
           ]
+          if os.environ["SCAN_TIMEFRAME"] == "1d":
+              required.append("EODHD_API_KEY")
           missing = [name for name in required if not os.getenv(name)]
           if missing:
               raise SystemExit("Faltan GitHub Actions secrets: " + ", ".join(missing))
