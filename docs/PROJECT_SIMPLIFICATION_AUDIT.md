@@ -1,7 +1,7 @@
 # Trading Bot 3.0 — audit de simplificación y prioridades
 
 Fecha: 2026-11-22  
-Estado: propuesta de arquitectura; investigación solamente. No cambia producción ni habilita señales.
+Estado: propuesta de arquitectura y primer diagnóstico implementado; investigación solamente. No cambia producción ni habilita señales.
 
 ## Resumen ejecutivo
 
@@ -88,7 +88,7 @@ Un workflow verde solo demuestra que el proceso terminó; no demuestra edge. No 
 ## Orden de ejecución recomendado
 
 1. Completar la matriz de ejecución y costes de los 12 instrumentos, con evidencia del ticket/mercado; empezar por los ETF y acciones existentes. No pedir datos de cartera.
-2. Construir un informe automático 'asset_economic_eligibility' que clasifique 'ELIGIBLE', 'INELIGIBLE' o 'COSTS_UNVERIFIED'.
+2. Construir y ejecutar 'asset_economic_eligibility.py', informe automático que clasifica 'ELIGIBLE', 'INELIGIBLE' o 'COSTS_UNVERIFIED'. El comando es 'python asset_economic_eligibility.py'.
 3. Crear un dataset canónico diario y una prueba de solapamiento live/backtest para el subconjunto elegible.
 4. Ejecutar el MVP diario en ese subconjunto; mantener M15 y cripto en investigación separada.
 5. Añadir costes completos al paper-forward antes de usar sus estadísticas para tomar decisiones.
@@ -101,7 +101,19 @@ Un workflow verde solo demuestra que el proceso terminó; no demuestra edge. No 
 - Twelve Data, planes y límites: https://twelvedata.com/pricing
 - Twelve Data, cobertura histórica: https://support.twelvedata.com/en/articles/5656039-how-to-get-historical-prices
 
-Las tarifas públicas no sustituyen al ticket concreto de la cuenta. La página española de eToro indica que las comisiones de acciones pueden ser 1 o 2 USD por lado según residencia/mercado, que los ETF tienen comisión de operación publicada como cero, y que el coste de spread de mercado sigue existiendo. La página también indica restricciones de CFD para nuevos usuarios españoles desde agosto de 2024. Confirmar siempre la clasificación exacta en la cuenta y el ticket del instrumento.
+Las tarifas públicas no sustituyen al ticket concreto de la cuenta. La página española de eToro consultada el 22-11-2026 indica:
+
+- Acciones: comisión de 1 o 2 USD al abrir y cerrar, según residencia y mercado; el ticket muestra el coste aplicable.
+- ETF: comisión de operación publicada como cero, pero sigue existiendo el market spread.
+- Tanto acciones como ETF: algunas compras sin apalancamiento pueden ejecutarse como CFD por restricciones del producto. La ventana de ejecución identifica expresamente cualquier CFD.
+- Cripto: comisión por niveles; Bronze/Silver/Gold pagan 1% por posición, con descuentos en niveles superiores. El spread de mercado es variable.
+- CFD de acciones/ETF: 0,15% por operación de apertura/cierre; CFD cripto: 1%. Pueden añadirse costes nocturnos y spread de mercado.
+- La página indica que desde el 2 de agosto de 2024 los nuevos usuarios residentes en España no pueden operar CFD. No inferir la situación de una cuenta existente: comprobar el ticket y las condiciones aplicables.
+- Las cuentas USD y las cuentas locales tienen reglas de conversión distintas. La conversión de depósitos/fondos es un coste separado del FX de la operación.
+
+Para el universo actual, los 12 activos están configurados en USD y la cuenta está confirmada en USD, por lo que no se presupone FX de operación en esos símbolos; los costes de financiación de depósitos en EUR, si existen, se mantienen separados. En los ETF LSE se debe comprobar además cualquier impuesto o cargo de mercado aplicable al instrumento concreto. No asumir que «ETF sin comisión» significa «coste total cero».
+
+Fuente principal: https://www.etoro.com/es/trading/fees/ (consultada 22-11-2026). Fuentes complementarias: https://www.etoro.com/es/trading/fees/cfd-spreads/ y https://www.etoro.com/es/trading/fees/cfd-overnight-fees/.
 
 ## Resultado esperado
 
