@@ -1,10 +1,12 @@
 import unittest
+from unittest.mock import Mock
 
 import pandas as pd
 
 from research.etf_provider_overlap_audit import (
     _price_error_metrics,
     assess_alternate_repairs,
+    load_twelvedata_daily,
     ohlc_integrity,
 )
 
@@ -80,6 +82,55 @@ class TestEtfProviderOverlapQuality(unittest.TestCase):
             result["alternate_repair_issues"][0]["reason"],
             "alternate_date_missing",
         )
+
+    def test_twelvedata_loader_requires_exact_xlon_usd_etf_and_parses_daily_bars(self):
+        search_payload = {
+            "status": "ok",
+            "data": [{
+                "symbol": "CSPX",
+                "instrument_name": "iShares Core S&P 500 UCITS ETF",
+                "exchange": "London Stock Exchange",
+                "mic_code": "XLON",
+                "currency": "USD",
+                "instrument_type": "ETF",
+            }],
+        }
+        series_payload = {
+            "meta": {
+                "symbol": "CSPX",
+                "mic_code": "XLON",
+                "currency": "USD",
+            },
+            "values": [{
+                "datetime": "2026-03-02",
+                "open": "100",
+                "high": "103",
+                "low": "99",
+                "close": "102",
+                "volume": "1000",
+            }],
+        }
+        search_response = Mock()
+        search_response.json.return_value = search_payload
+        search_response.raise_for_status.return_value = None
+        series_response = Mock()
+        series_response.json.return_value = series_payload
+        series_response.raise_for_status.return_value = None
+        session = Mock()
+        session.get.side_effect = [search_response, series_response]
+
+        result = load_twelvedata_daily(
+            session, "CSPX",
+            pd.Timestamp("2026-03-01").date(),
+            pd.Timestamp("2026-03-03").date(),
+            "test-token",
+        )
+
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result.iloc[0]["High"], 103.0)
+        self.assertEqual(result.iloc[0]["Volume"], 1000.0)
+        self.assertEqual(result.index[0], pd.Timestamp("2026-03-02").date())
+        self.assertEqual(session.get.call_count, 2)
 
     def test_price_error_metrics_reports_tail_discrepancies(self):
         left = pd.DataFrame(
