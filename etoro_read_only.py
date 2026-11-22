@@ -477,6 +477,69 @@ def normalize_realtime_quotes(
     return quotes
 
 
+
+
+def normalize_instrument_display_data(response: EtoroResponse, expected_instrument_ids: list[int]) -> dict[int, Mapping[str, Any]]:
+    """Validate eToro v1 display metadata for an exact instrument ID set."""
+    if response.status_code != 200 or not isinstance(response.data, Mapping):
+        raise EtoroAPIError("Los metadatos de instrumentos no son una respuesta HTTP 200 válida")
+    if (not isinstance(expected_instrument_ids, list) or not expected_instrument_ids
+        or any(isinstance(v, bool) or not isinstance(v, int) or v <= 0 for v in expected_instrument_ids)
+        or len(set(expected_instrument_ids)) != len(expected_instrument_ids)):
+        raise EtoroAPIError("Los instrumentIds esperados para metadatos no son válidos")
+    items=response.data.get("instrumentDisplayDatas")
+    if not isinstance(items,list):
+        raise EtoroAPIError("Falta instrumentDisplayDatas en los metadatos")
+    expected=set(expected_instrument_ids); normalized={}
+    for index,item in enumerate(items):
+        if not isinstance(item,Mapping):
+            raise EtoroAPIError(f"Metadato de instrumento inválido: {index}")
+        iid=item.get("instrumentID"); eid=item.get("exchangeID")
+        if isinstance(iid,bool) or not isinstance(iid,int) or iid<=0:
+            raise EtoroAPIError(f"instrumentID inválido en metadatos: {index}")
+        if iid not in expected or iid in normalized:
+            raise EtoroAPIError("Metadatos de instrumentos inesperados o duplicados")
+        if isinstance(eid,bool) or not isinstance(eid,int) or eid<0:
+            raise EtoroAPIError(f"exchangeID inválido en metadatos: {index}")
+        symbol=item.get("symbolFull"); source=item.get("priceSource")
+        if not isinstance(symbol,str) or not symbol.strip():
+            raise EtoroAPIError(f"symbolFull ausente en metadatos: {index}")
+        if not isinstance(source,str) or not source.strip():
+            raise EtoroAPIError(f"priceSource ausente en metadatos: {index}")
+        normalized[iid]={"instrument_id":iid,"exchange_id":eid,"symbol_full":symbol.strip(),"price_source":source.strip()}
+    if set(normalized)!=expected:
+        raise EtoroAPIError("Los metadatos no cubren todos los instrumentos esperados")
+    return normalized
+
+
+def normalize_supported_exchanges(response: EtoroResponse, expected_exchange_ids: list[int]) -> dict[int,str]:
+    """Validate eToro exchange IDs and their public descriptions."""
+    if response.status_code!=200 or not isinstance(response.data,Mapping):
+        raise EtoroAPIError("Los mercados no son una respuesta HTTP 200 válida")
+    if (not isinstance(expected_exchange_ids,list)
+        or any(isinstance(v,bool) or not isinstance(v,int) or v<=0 for v in expected_exchange_ids)
+        or len(set(expected_exchange_ids))!=len(expected_exchange_ids)):
+        raise EtoroAPIError("Los exchangeIds esperados no son válidos")
+    items=response.data.get("exchangeInfo")
+    if not isinstance(items,list):
+        raise EtoroAPIError("Falta exchangeInfo en la respuesta de mercados")
+    expected=set(expected_exchange_ids); normalized={}
+    for index,item in enumerate(items):
+        if not isinstance(item,Mapping):
+            raise EtoroAPIError(f"Mercado inválido: {index}")
+        eid=item.get("exchangeID"); description=item.get("exchangeDescription")
+        if isinstance(eid,bool) or not isinstance(eid,int) or eid<=0:
+            raise EtoroAPIError(f"exchangeID inválido en respuesta de mercados: {index}")
+        if eid not in expected or eid in normalized:
+            raise EtoroAPIError("Mercados inesperados o duplicados")
+        if not isinstance(description,str) or not description.strip():
+            raise EtoroAPIError(f"exchangeDescription ausente: {index}")
+        normalized[eid]=description.strip()
+    if set(normalized)!=expected:
+        raise EtoroAPIError("La respuesta de mercados no cubre todos los exchangeIds")
+    return normalized
+
+
 def resolve_unique_instrument_by_symbol(
     response: EtoroResponse,
     symbol: str,
@@ -1033,6 +1096,8 @@ class EtoroReadOnlyClient:
             ("GET", "/api/v2/market-data/rates"),
             ("GET", "/api/v1/market-data/instruments/rates"),
             ("GET", "/api/v1/market-data/search"),
+            ("GET", "/api/v1/market-data/instruments"),
+            ("GET", "/api/v1/market-data/exchanges"),
             ("GET", "/api/v2/market-data/instruments"),
             ("POST", "/api/v2/trading/info/costs"),
             ("POST", "/api/v2/trading/info/eligibility"),
@@ -1151,6 +1216,26 @@ class EtoroReadOnlyClient:
             "/api/v2/market-data/instruments",
             params={"symbols": symbol.strip(), "pageSize": page_size},
         )
+
+    def get_instrument_display_data(self, instrument_ids: list[int]) -> EtoroResponse:
+        """Fetch public display metadata for a bounded set of instrument IDs."""
+        if (not isinstance(instrument_ids,list) or not 1<=len(instrument_ids)<=100
+            or any(isinstance(v,bool) or not isinstance(v,int) or v<=0 for v in instrument_ids)
+            or len(set(instrument_ids))!=len(instrument_ids)):
+            raise ValueError("instrument_ids debe contener entre 1 y 100 IDs únicos")
+        return self._request("GET","/api/v1/market-data/instruments",
+            params={"instrumentIds":",".join(str(v) for v in instrument_ids)})
+
+    def get_supported_exchanges(self, exchange_ids: list[int]) -> EtoroResponse:
+        """Fetch public exchange descriptions for a bounded set of exchange IDs."""
+        if (not isinstance(exchange_ids,list) or len(exchange_ids)>100
+            or any(isinstance(v,bool) or not isinstance(v,int) or v<=0 for v in exchange_ids)
+            or len(set(exchange_ids))!=len(exchange_ids)):
+            raise ValueError("exchange_ids debe contener hasta 100 IDs positivos y únicos")
+        if not exchange_ids:
+            return EtoroResponse({"exchangeInfo":[]},200,{})
+        return self._request("GET","/api/v1/market-data/exchanges",
+            params={"exchangeIds":",".join(str(v) for v in exchange_ids)})
 
     def search_instruments(
         self,
