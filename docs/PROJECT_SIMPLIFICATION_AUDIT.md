@@ -177,3 +177,10 @@ La auditoría descargó datos reales de EODHD, Yahoo LSE y, como contraste indep
 - No cambiar producción ni aceptar estrategia alguna a partir de esta auditoría.
 
 Artefacto reproducible: ejecución [44980363657](https://github.com/andertrading/Trading-bot/actions/runs/44980363657), artefacto etf-provider-overlap-audit. CI de tests del mismo commit: [44980363667](https://github.com/andertrading/Trading-bot/actions/runs/44980363667), correcto.
+
+
+### Reparación OHLC: endurecimiento tras auditoría de proveedores
+
+La reparación desde el listing SIX ya no compara únicamente el cierre. Para cada vela defectuosa compara contra el listing alternativo todos los campos OHLC primarios que sigan siendo estructuralmente fiables; solo excluye el campo primario que incumple las relaciones OHLC y que se pretende reparar. Si un campo fiable difiere más del 0,5%, se rechaza la reparación completa. Esto evita aceptar una vela con cierre parecido pero máximo/mínimo sustancialmente distinto.
+
+La auditoría histórica del 22/11/2026 también confirma que el 24/10/2025 fue una sesión de negociación de LSE; la falta de vela válida de CSPX/CNDX es un hueco de proveedor, no un festivo. No se completa con interpolación ni con precios de un broker minorista. La evidencia externa de precios de Trading 212 se conserva como pista de investigación, no como feed certificado ni como dato de backtest.
