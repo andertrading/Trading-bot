@@ -421,9 +421,15 @@ def normalize_realtime_quotes(
         if bid <= 0 or ask <= 0 or ask < bid:
             raise EtoroAPIError(f"Bid/ask inválido o cruzado para instrumento {instrument_id}")
 
-        date_value = item.get("date")
+        timestamp_fields = ("date", "timestamp")
+        present_timestamps = [field for field in timestamp_fields if field in item]
+        if len(present_timestamps) != 1:
+            raise EtoroAPIError(
+                f"Se esperaba exactamente un campo date/timestamp en cotización {instrument_id}"
+            )
+        date_value = item[present_timestamps[0]]
         if not isinstance(date_value, str):
-            raise EtoroAPIError(f"Fecha ausente en cotización {instrument_id}")
+            raise EtoroAPIError(f"Fecha ausente o inválida en cotización {instrument_id}")
         try:
             quote_time = datetime.fromisoformat(
                 date_value[:-1] + "+00:00" if date_value.endswith("Z") else date_value
