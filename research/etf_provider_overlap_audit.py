@@ -50,7 +50,10 @@ def load_eodhd(session, asset, spec, token, start, end):
         raise RuntimeError(f"{asset}: EODHD fechas duplicadas")
     for col in ("open", "high", "low", "close"):
         frame[col] = pd.to_numeric(frame[col], errors="coerce")
-    frame["volume"] = pd.to_numeric(frame.get("volume", 0), errors="coerce")
+    if "volume" not in frame.columns:
+        frame["volume"] = 0.0
+    frame["volume"] = pd.to_numeric(frame["volume"], errors="coerce")
+    frame = frame[["open", "high", "low", "close", "volume"]]
     splits = get_json(session, f"{BASE_EODHD}/splits/{spec['eodhd']}", {
         "api_token": token, "from": start.isoformat(),
         "to": end.isoformat(), "fmt": "json",
@@ -83,8 +86,10 @@ def load_yahoo(session, asset, spec, start, end):
     if str(meta.get("currency", "")).upper() != "USD":
         raise RuntimeError(f"{asset}: Yahoo moneda inesperada")
     exchange = str(meta.get("fullExchangeName") or meta.get("exchangeName") or "")
-    if not exchange:
-        raise RuntimeError(f"{asset}: Yahoo mercado no verificable")
+    if not exchange or not any(
+        marker in exchange.lower() for marker in ("london", "lse")
+    ):
+        raise RuntimeError(f"{asset}: Yahoo no confirma listing LSE ({exchange or 'sin mercado'})")
     quote = (result.get("indicators", {}).get("quote") or [{}])[0]
     timestamps = result.get("timestamp") or []
     if not timestamps:
