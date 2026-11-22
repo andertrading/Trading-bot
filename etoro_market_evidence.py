@@ -185,7 +185,7 @@ def main() -> int:
     output.write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     print(json.dumps(report["summary"], ensure_ascii=False))
     print(f"Informe guardado: {output}")
-    return 0 if report["summary"]["resolved_instruments"] else 1
+    return 0 if report["summary"]["status"] == "COMPLETE" else 2
 
 
 if __name__ == "__main__":
