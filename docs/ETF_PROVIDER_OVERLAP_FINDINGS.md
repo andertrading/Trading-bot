@@ -46,6 +46,17 @@ The controlled GitHub Actions run executed `data_engine._download_yahoo(..., "1d
 
 This is a useful fail-closed result: the repair routine itself works on real downloaded data, but the full history is still not usable because a missing session remains. The smoke test did not produce an accepted backtest dataframe for either ETF. Do not bypass the gap validator or silently forward-fill the missing candle.
 
+### EODHD one-year live-history validation
+
+A narrow data-integrity correction was added to `eodhd_provider.py`: daily rows whose dates are not LSE sessions are excluded using the XLON exchange calendar before split adjustment and gap validation. This addresses two CNDX EODHD rows dated on London market holidays (2026-05-04 and 2026-08-31).
+
+The actual production EODHD helper was then run with the existing API key:
+- CSPX: **252 valid sessions**, 2025-11-24 to 2026-11-20; zero non-session rows after filtering.
+- CNDX: **252 valid sessions**, same period; zero non-session rows after filtering.
+- Both passed the production daily-gap validator.
+
+This makes the current one-year EODHD feed suitable as a consistent basis for live daily scans and a limited one-year paper-data baseline. It does **not** replace the need for a clean five-year independent history or provide enough evidence for strategy optimization/production approval.
+
 ### Missing-session source audit and alternative-provider access
 
 The missing-session audit shows:
@@ -85,9 +96,9 @@ Within the recent EODHD overlap, the Yahoo LSE 2026-03-02 bar is internally inco
 
 1. Add provider-quality checks that test OHLC coherence **and** cross-provider range anomalies on the overlapping window.
 2. Reject the CSPX Yahoo LSE extended history for any research that depends on High/Low until the source or repair method is validated.
-3. Resolve the 2025-10-24 LSE session using an independently validated source; current Yahoo/EODHD/SIX data do not provide a valid cross-check, so keep rejecting the history until one is available.
-4. Do not upgrade Twelve Data or EODHD solely for this project yet; first establish whether a viable strategy exists using currently available data and costs.
-5. Re-run the production smoke test only after the missing-session source is validated, and require complete exchange-calendar coverage.
+3. Resolve the 2025-10-24 LSE session using an independently validated source; current Yahoo/EODHD/SIX data do not provide a valid cross-check, so keep rejecting the five-year Yahoo history until one is available.
+4. Use the calendar-validated one-year EODHD feed only for live daily scans and controlled paper-data collection; do not treat it as five-year strategy validation.
+5. Do not upgrade Twelve Data or EODHD solely for this project yet; first establish whether a viable strategy exists using currently available data and costs.
 6. Investigate SIX as a CSPX historical source, but do not substitute or patch highs until its older history is independently validated.
 7. Keep EODHD as the current live daily source; do not switch production routing based on this diagnostic.
 8. Do not run new strategy optimization until the historical/live OHLC basis is consistent enough for the chosen research window.
