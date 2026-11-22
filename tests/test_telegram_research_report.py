@@ -49,6 +49,12 @@ class TestTelegramResearchReport(unittest.TestCase):
             "validated": True,
             "economic_eligibility": {"status": "ELIGIBLE", "blockers": []},
         })
+        self.scan.update({
+            "technical_candidates_found": 1,
+            "candidates_blocked": 0,
+            "validated_candidates": 1,
+            "no_trade_count": 23,
+        })
         with (
             patch.object(Bot, "TELEGRAM_ENABLED", True),
             patch.object(Bot, "SIGNAL_ALERTS_ENABLED", True),
@@ -58,6 +64,9 @@ class TestTelegramResearchReport(unittest.TestCase):
 
         self.assertEqual(result, "sent:2")
         self.assertEqual(send_text.call_count, 2)
+        summary = send_text.call_args_list[0].args[0]
+        self.assertIn("Candidatas pendientes de validación: <b>0</b>", summary)
+        self.assertIn("Candidatas validadas para operativa: <b>1</b>", summary)
         full_report = send_text.call_args_list[1].args[0]
         self.assertIn("Ventana para entrar: <b>30 min</b>", full_report)
         send_photo.assert_called_once()
