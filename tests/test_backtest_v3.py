@@ -1,5 +1,6 @@
 import os
 import unittest
+import tempfile
 from unittest.mock import patch
 from contextlib import redirect_stdout
 from io import StringIO
@@ -262,6 +263,36 @@ class TestBacktestV3(unittest.TestCase):
             result = backtest_v3.download_history("AAPL", "15m", asset="AAPL")
         self.assertIsNone(result)
         self.assertIn("ajuste de precios no está verificado", backtest_v3.DOWNLOAD_ERRORS[("AAPL", "15m")])
+
+    def test_legacy_twelvedata_daily_snapshot_true_flag_is_not_trusted(self):
+        index = pd.date_range(
+            "2024-01-01T00:00:00Z",
+            periods=220,
+            freq="D",
+        )
+        close = pd.Series(100.0, index=index)
+        data = pd.DataFrame({
+            "Open": close,
+            "High": close + 1.0,
+            "Low": close - 1.0,
+            "Close": close,
+            "Volume": 1000.0,
+        }, index=index)
+        data.attrs.update({
+            "data_provider": "twelvedata",
+            "price_adjustment_policy": "split_adjusted_ohlc_no_dividend_adjustment",
+            "price_adjustment_verified": True,
+            # Simulates a legacy manifest with no independent verification status.
+        })
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.object(backtest_v3, "SNAPSHOT_DIR", backtest_v3.Path(tmpdir)):
+                backtest_v3._save_snapshot("AAPL", "AAPL", "1d", data)
+                with self.assertRaisesRegex(
+                    ValueError,
+                    "no está verificado independientemente",
+                ):
+                    backtest_v3._load_snapshot("AAPL", "AAPL", "1d")
 
     def test_backtest_rejects_daily_twelvedata_without_independent_split_verification(self):
         data = self.make_data()
