@@ -239,9 +239,10 @@ def _exchange_calendar_for_asset(asset):
 def _market_for_asset(asset):
     calendar_name = _market_calendar_name(asset)
     market_key = {"XLON": "LONDON", "XNYS": "US"}.get(calendar_name)
-    if market_key is None:
-        raise ValueError(f"Calendario bursátil no configurado para {asset}")
-    return MARKET_CONFIG[market_key]
+    # Legacy backtest helpers sometimes evaluate synthetic assets such as
+    # "UNKNOWN" without a live config entry. Keep their historical US-session
+    # fallback; live scans separately reject unknown calendars below.
+    return MARKET_CONFIG[market_key or "US"]
 
 
 def _session_for_asset(asset):
@@ -761,8 +762,12 @@ def is_intraday_market_open(asset, now=None):
     """
     if _asset_config(asset) is None:
         return False
-    if asset in CRYPTO_ASSETS:
+    calendar_name = _market_calendar_name(asset)
+    if calendar_name == "24/7":
         return True
+    if calendar_name not in {"XLON", "XNYS"}:
+        logger.error("INTRADAY SCAN BLOCKED | %s | unknown market calendar", asset)
+        return False
 
     if now is None:
         now_utc = datetime.now(timezone.utc)
