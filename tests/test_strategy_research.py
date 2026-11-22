@@ -12,7 +12,27 @@ from strategy_research import (
     _portfolio_allocated_cost_trades,
     _net_portfolio_cost_scenarios,
     mtf_daily_price_confirmed_pullback,
+    _asset_class_universes,
 )
+
+
+class TestAssetClassUniverseIsolation(unittest.TestCase):
+
+    def test_separates_stocks_and_crypto_without_mixing_etfs(self):
+        groups = _asset_class_universes(
+            ["AAPL", "BTC", "CSPX", "ETH", "MSFT"],
+            assets_config={
+                "AAPL": {"type": "STOCK"},
+                "BTC": {"type": "CRYPTO"},
+                "CSPX": {"type": "ETF"},
+                "ETH": {"type": "CRYPTO"},
+                "MSFT": {"type": "STOCK"},
+            },
+        )
+        self.assertEqual(groups, {
+            "US_STOCKS": ["AAPL", "MSFT"],
+            "CRYPTO": ["BTC", "ETH"],
+        })
 
 
 class TestDailyPriceConfirmedMtfStrategy(unittest.TestCase):
