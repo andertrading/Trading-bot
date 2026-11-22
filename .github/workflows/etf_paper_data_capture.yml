@@ -1,9 +1,8 @@
 name: Trading Bot 3.0 - ETF Paper Data Capture
 
 on:
-  schedule:
-    # After the London cash session close in both winter and summer.
-    - cron: "35 17 * * 1-5"
+  # Manual only: EODHD requests may consume paid API credits.
+  # Do not schedule captures without explicit user authorization.
   workflow_dispatch:
 
 permissions:
