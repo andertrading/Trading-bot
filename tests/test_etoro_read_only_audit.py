@@ -12,12 +12,15 @@ from etoro_read_only_audit import _resolution_error_status, run_audit
 class FakeAuditClient:
     def __init__(self, *, account_ok=True, missing_symbols=(), rejected_fields=()):
         self.account_ok = account_ok
+        self.account_snapshot_calls = 0
         self.missing_symbols = set(missing_symbols)
         self.rejected_fields = set(rejected_fields)
         self.search_calls = []
         self.quote_calls = []
+        self.eligibility_calls = 0
 
     def get_account_snapshot(self, account_currency):
+        self.account_snapshot_calls += 1
         if not self.account_ok:
             raise RuntimeError("private account data must not be logged")
         return EtoroAccountSnapshot(
@@ -47,6 +50,7 @@ class FakeAuditClient:
         }, 200, {})
 
     def get_validated_instrument_eligibility(self, instrument_ids, currency="USD"):
+        self.eligibility_calls += 1
         return {
             instrument_id: SimpleNamespace(supports_long=True)
             for instrument_id in instrument_ids
@@ -72,16 +76,13 @@ class ReadOnlyAuditTests(unittest.TestCase):
     def test_success_report_contains_only_public_ids_and_status_flags(self):
         client = FakeAuditClient()
         report = run_audit(client, self.assets, "USD", self.now)
-        self.assertTrue(report["account_snapshot_schema_valid"])
-        self.assertTrue(report["instrument_eligibility_validated"])
+        self.assertFalse(report["account_portfolio_data_accessed"])
+        self.assertEqual(client.account_snapshot_calls, 0)
+        self.assertFalse(report["instrument_eligibility_validated"])
+        self.assertEqual(report["instrument_eligibility_status"], "NOT_IN_SCOPE")
+        self.assertEqual(client.eligibility_calls, 0)
         self.assertTrue(report["complete_realtime_quotes_validated"])
-        self.assertTrue(report["gross_position_stop_risk_diagnostic_validated"])
-        self.assertTrue(report["complete_position_risk_validated"])
         self.assertFalse(report["portfolio_risk_admission_ready"])
-        self.assertEqual(
-            report["position_risk_scope"],
-            "eToro real-account risk only; separate from the bot's virtual paper portfolio",
-        )
         self.assertTrue(report["overall_pass"])
         self.assertEqual(report["instrument_resolution"][0]["instrument_id"], 123)
         self.assertNotIn("available_cash", str(report))
@@ -122,44 +123,12 @@ class ReadOnlyAuditTests(unittest.TestCase):
         self.assertEqual(report["instrument_resolution"][0]["resolution_status"], "ASSET_TYPE_MISMATCH")
 
 
-    def test_account_snapshot_failure_is_redacted_and_blocks_overall_pass(self):
+    def test_audit_never_reads_real_account_portfolio(self):
         client = FakeAuditClient(account_ok=False)
         report = run_audit(client, self.assets, "USD", self.now)
-        self.assertFalse(report["account_snapshot_schema_valid"])
-        self.assertEqual(report["account_snapshot_status"], "RUNTIMEERROR")
-        self.assertFalse(report["gross_position_stop_risk_diagnostic_validated"])
-        self.assertFalse(report["overall_pass"])
-        self.assertNotIn("private account data", str(report))
-
-    def test_account_schema_failure_exposes_only_a_safe_diagnostic_code(self):
-        class SchemaFailingClient(FakeAuditClient):
-            def get_account_snapshot(self, account_currency):
-                raise EtoroAPIError("Falta clientPortfolio; private payload omitted")
-
-        report = run_audit(SchemaFailingClient(), self.assets, "USD", self.now)
-        self.assertEqual(report["account_snapshot_status"], "MISSING_CLIENT_PORTFOLIO")
-        self.assertNotIn("private payload", str(report))
-
-    def test_account_diagnostic_codes_classify_http_and_position_schema_failures(self):
-        class FailingClient(FakeAuditClient):
-            def __init__(self, error):
-                super().__init__()
-                self.error = error
-
-            def get_account_snapshot(self, account_currency):
-                raise self.error
-
-        http_report = run_audit(
-            FailingClient(EtoroAPIError("eToro API respondió HTTP 403")),
-            self.assets, "USD", self.now,
-        )
-        position_report = run_audit(
-            FailingClient(EtoroAPIError("Posición 0 incompleta: faltan cid")),
-            self.assets, "USD", self.now,
-        )
-        self.assertEqual(http_report["account_snapshot_status"], "ETORO_HTTP_403")
-        self.assertEqual(position_report["account_snapshot_status"], "POSITION_MISSING_FIELDS")
-        self.assertEqual(position_report["account_snapshot_missing_fields"], ["cid"])
+        self.assertFalse(report["account_portfolio_data_accessed"])
+        self.assertEqual(client.account_snapshot_calls, 0)
+        self.assertTrue(report["overall_pass"])
 
     def test_expected_asset_types_are_read_from_each_asset_not_last_loop_value(self):
         client = FakeAuditClient()
@@ -182,24 +151,13 @@ class ReadOnlyAuditTests(unittest.TestCase):
         self.assertFalse(report["overall_pass"])
         self.assertNotIn("sensitive quote payload", str(report))
 
-    def test_long_ineligible_instrument_blocks_overall_pass(self):
+    def test_audit_does_not_query_account_specific_eligibility(self):
         client = FakeAuditClient()
-        client.get_validated_instrument_eligibility = Mock(return_value={
-            123: SimpleNamespace(supports_long=False)
-        })
         report = run_audit(client, self.assets, "USD", self.now)
         self.assertFalse(report["instrument_eligibility_validated"])
-        self.assertFalse(report["overall_pass"])
-
-    def test_eligibility_failure_blocks_overall_pass_without_leaking_details(self):
-        client = FakeAuditClient()
-        client.get_validated_instrument_eligibility = Mock(
-            side_effect=RuntimeError("private eligibility detail")
-        )
-        report = run_audit(client, self.assets, "USD", self.now)
-        self.assertFalse(report["instrument_eligibility_validated"])
-        self.assertFalse(report["overall_pass"])
-        self.assertNotIn("private eligibility detail", str(report))
+        self.assertEqual(report["instrument_eligibility_status"], "NOT_IN_SCOPE")
+        self.assertEqual(client.eligibility_calls, 0)
+        self.assertTrue(report["overall_pass"])
 
     def test_etf_resolution_retries_with_configured_exchange_suffix(self):
         class SuffixedEtfClient(FakeAuditClient):
@@ -243,32 +201,20 @@ class ReadOnlyAuditTests(unittest.TestCase):
         self.assertEqual(client.search_calls, ["CSPX", "CSPX.L"])
 
 
-    def test_audit_reports_redacted_diagnostic_codes_for_post_resolution_failures(self):
+    def test_quote_failure_is_redacted_and_blocks_overall_pass(self):
         client = FakeAuditClient()
-        client.get_validated_instrument_eligibility = Mock(
-            side_effect=EtoroAPIError("eToro respondió HTTP 403: private eligibility payload")
-        )
         client.get_realtime_quotes = Mock(
             side_effect=EtoroAPIError("eToro respondió HTTP 429: private quote payload")
         )
-        with patch(
-            "etoro_read_only_audit.calculate_account_stop_risk_from_client",
-            side_effect=EtoroAPIError("eToro respondió HTTP 503: private position payload"),
-        ):
-            report = run_audit(client, self.assets, "USD", self.now)
-
-        self.assertEqual(report["position_risk_diagnostic_status"], "HTTP_503")
-        self.assertEqual(report["instrument_eligibility_status"], "HTTP_403")
+        report = run_audit(client, self.assets, "USD", self.now)
         self.assertEqual(report["realtime_quotes_status"], "HTTP_429")
-        self.assertFalse(report["gross_position_stop_risk_diagnostic_validated"])
-        self.assertFalse(report["instrument_eligibility_validated"])
         self.assertFalse(report["complete_realtime_quotes_validated"])
+        self.assertFalse(report["overall_pass"])
         self.assertNotIn("private", str(report))
 
     def test_success_report_includes_validated_diagnostic_statuses(self):
         report = run_audit(FakeAuditClient(), self.assets, "USD", self.now)
-        self.assertEqual(report["position_risk_diagnostic_status"], "COMPLETE_NO_OPEN_POSITIONS")
-        self.assertEqual(report["instrument_eligibility_status"], "VALIDATED")
+        self.assertEqual(report["instrument_eligibility_status"], "NOT_IN_SCOPE")
         self.assertEqual(report["realtime_quotes_status"], "VALIDATED")
 
 
@@ -288,7 +234,6 @@ class ReadOnlyAuditTests(unittest.TestCase):
             (EtoroAPIError("El instrumento tiene cotización retrasada"), "QUOTES_NOT_REALTIME"),
             (EtoroAPIError("La respuesta de elegibilidad está incompleta o contiene activos no encontrados"), "ELIGIBILITY_RESULTS_INCOMPLETE"),
             (EtoroAPIError("El desglose no confirma la divisa de cuenta USD"), "RISK_CURRENCY_UNCONFIRMED"),
-            (EtoroAPIError("Al menos una posición del snapshot no tiene stop-loss confirmado"), "RISK_UNBOUNDED_STOP"),
             (EtoroAPIError("eToro devolvió HTTP 403: private payload"), "HTTP_403"),
         )
         for error, expected in cases:
