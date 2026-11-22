@@ -244,7 +244,7 @@ def run_scheduled_scan(timeframe: str) -> dict:
 
     now = datetime.now(timezone.utc)
     store.prune(now=now, retention_days=180, max_terminal_records=10000)
-    scan_result = Bot.run_scan(timeframes=[timeframe])
+    scan_result = Bot.run_scan(timeframes=[timeframe], include_paper_bars=True)
     results = scan_result.get("results", [])
     by_asset = {
         item.get("asset"): item
@@ -272,30 +272,37 @@ def run_scheduled_scan(timeframe: str) -> dict:
         )
         if not all(current.get(field) is not None for field in required_bar_fields):
             continue
-        previous_bar = paper_state.get("processed_bars", {}).get(
-            stored_signal.get("signal_id")
-        )
         paper_risk = stored_signal.get("provisional_risk_pct")
         try:
-            paper_risk = float(paper_risk) if paper_risk is not None else DEFAULT_RISK_PER_TRADE
+            paper_risk = float(paper_risk) if paper_risk is not None else 0.0
         except (TypeError, ValueError, OverflowError):
-            paper_risk = DEFAULT_RISK_PER_TRADE
-        process_signal_bar(
-            paper_state,
-            stored_signal,
-            {
+            paper_risk = 0.0
+
+        bars = current.get("paper_bars")
+        if not isinstance(bars, list) or not bars:
+            # Compatibility for older scan adapters and unit-test fixtures.
+            bars = [{
                 "timestamp": current["data_timestamp"],
                 "open": current["last_open"],
                 "high": current["last_high"],
                 "low": current["last_low"],
                 "close": current["last_price"],
-            },
-            risk_fraction=paper_risk,
-        )
-        if paper_state.get("processed_bars", {}).get(
-            stored_signal.get("signal_id")
-        ) != previous_bar:
-            paper_bars_processed += 1
+            }]
+
+        for completed_bar in bars:
+            previous_bar = paper_state.get("processed_bars", {}).get(
+                stored_signal.get("signal_id")
+            )
+            process_signal_bar(
+                paper_state,
+                stored_signal,
+                completed_bar,
+                risk_fraction=paper_risk,
+            )
+            if paper_state.get("processed_bars", {}).get(
+                stored_signal.get("signal_id")
+            ) != previous_bar:
+                paper_bars_processed += 1
 
     store.update_paper_state(paper_state)
     transitions = 0
