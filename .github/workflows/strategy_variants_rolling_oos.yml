@@ -10,6 +10,7 @@ on:
       - research/net-stop-risk-accounting-20261121
       - research/mtf-daily-price-confirmation-20261122
       - research/etoro-stock-fee-range-20261122
+      - research/mtf-asset-class-cost-isolation-20261122
 
 permissions:
   contents: read
@@ -401,5 +402,6 @@ jobs:
             strategy_research_core_history_calendar_coverage.csv
             strategy_research_core_synchronized_calendar.csv
             strategy_research_core_net_aware_portfolio.csv
+            strategy_research_mtf_asset_class_net_portfolio.csv
             provider_freshness.json
             snapshot_quality.json
