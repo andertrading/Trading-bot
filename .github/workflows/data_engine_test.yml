@@ -1,0 +1,174 @@
+name: Trading Bot 3.0 - Data Engine Test
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test-data-engine:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Descargar repositorio
+        uses: actions/checkout@v4
+
+      - name: Preparar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Instalar dependencias
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Probar cobertura completa del motor de datos en vivo
+        env:
+          TWELVE_DATA_API_KEY: ${{ secrets.TWELVE_DATA_API_KEY }}
+          EODHD_API_KEY: ${{ secrets.EODHD_API_KEY }}
+        run: |
+          python - <<'PY'
+          import os
+          import sys
+
+          from config import ASSETS
+          from data_engine import (
+              PROVIDER_MAP,
+              download_data,
+              get_data_timestamp,
+              is_data_fresh,
+          )
+
+          intervals = ("15m", "1d")
+          enabled_assets = sorted(
+              asset
+              for asset, config in ASSETS.items()
+              if isinstance(config, dict) and config.get("enabled") is True
+          )
+
+          expected = {
+              (asset, interval)
+              for asset in enabled_assets
+              for interval in intervals
+          }
+
+          results = {}
+          failures = []
+
+          if not enabled_assets:
+              raise SystemExit("ERROR: No hay activos habilitados en config.py")
+
+          twelve_data_assets = [
+              asset
+              for asset in enabled_assets
+              if PROVIDER_MAP.get(asset) == "twelvedata"
+          ]
+
+          if twelve_data_assets and not os.environ.get("TWELVE_DATA_API_KEY"):
+              raise SystemExit(
+                  "ERROR: Falta el secreto TWELVE_DATA_API_KEY."
+              )
+
+          eodhd_assets = {"CSPX", "CNDX"} & set(enabled_assets)
+          if eodhd_assets and not os.environ.get("EODHD_API_KEY"):
+              raise SystemExit(
+                  "ERROR: Falta el secreto EODHD_API_KEY para los ETF diarios."
+              )
+
+          print("COBERTURA DEL MOTOR DE DATOS")
+          print(f"Activos habilitados: {len(enabled_assets)}")
+          print(f"Temporalidades: {', '.join(intervals)}")
+          print(f"Combinaciones esperadas: {len(expected)}")
+          print("Proveedores:", {
+              asset: PROVIDER_MAP.get(asset)
+              for asset in enabled_assets
+          })
+          print("----------------------------------------")
+
+          for asset in enabled_assets:
+              provider = PROVIDER_MAP.get(asset)
+
+              if provider not in ("twelvedata", "yahoo"):
+                  failures.append(f"{asset}: proveedor no definido")
+                  print(f"ERROR | {asset} | proveedor no definido")
+                  continue
+
+              for interval in intervals:
+                  key = (asset, interval)
+                  effective_provider = (
+                      "eodhd"
+                      if asset in {"CSPX", "CNDX"} and interval == "1d"
+                      else provider
+                  )
+                  print(
+                      f"\nProbando {asset} | {interval} | {effective_provider}"
+                  )
+
+                  try:
+                      df = download_data(asset, interval)
+
+                      if df is None or df.empty:
+                          failures.append(f"{asset} {interval}: sin datos válidos")
+                          print("ERROR: histórico vacío o rechazado")
+                          continue
+
+                      timestamp = get_data_timestamp(df)
+                      fresh = is_data_fresh(
+                          df,
+                          asset=asset,
+                          interval=interval,
+                      )
+
+                      results[key] = {
+                          "bars": len(df),
+                          "last_timestamp": str(timestamp),
+                          "fresh": fresh,
+                          "provider": effective_provider,
+                      }
+
+                      print(f"OK: {len(df)} velas")
+                      print(f"Última vela UTC: {timestamp}")
+                      print(f"Datos recientes: {fresh}")
+
+                      if not fresh:
+                          failures.append(
+                              f"{asset} {interval}: datos no recientes"
+                          )
+
+                  except Exception as error:
+                      failures.append(
+                          f"{asset} {interval}: {type(error).__name__}"
+                      )
+                      print(
+                          f"ERROR: excepción {type(error).__name__}"
+                      )
+
+          missing = sorted(expected - set(results))
+          if missing:
+              failures.extend(
+                  f"{asset} {interval}: combinación sin resultado"
+                  for asset, interval in missing
+              )
+
+          print("\n========================================")
+          print("RESUMEN DE COBERTURA")
+          print(f"Combinaciones válidas: {len(results)}/{len(expected)}")
+          print(f"Fallos: {len(failures)}")
+
+          for (asset, interval), result in sorted(results.items()):
+              print(
+                  f"{asset:6} | {interval:3} | {result['provider']:10} "
+                  f"| {result['bars']:5} velas | fresca={result['fresh']}"
+              )
+
+          if failures:
+              print("\nFALLOS DETECTADOS:")
+              for failure in failures:
+                  print(f"- {failure}")
+              sys.exit(1)
+
+          print("\nCOBERTURA COMPLETA Y DATOS RECIENTES: OK")
+          PY

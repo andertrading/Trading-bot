@@ -1,0 +1,210 @@
+name: Trading Bot 3.0 - Yahoo ETF Alternate Listings
+
+on:
+  workflow_dispatch:
+
+  pull_request:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/yahoo_etf_alternate_listing.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  yahoo-etf-diagnostic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Descargar repositorio
+        uses: actions/checkout@v4
+      - name: Preparar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Instalar dependencias
+        run: |
+          python -m pip install --upgrade pip
+          pip install pandas numpy requests
+      - name: Comparar cotizaciones LSE y SIX sin cambiar el proveedor activo
+        run: |
+          python - <<'PY'
+          from datetime import datetime, timedelta, timezone
+          from email.utils import parsedate_to_datetime
+          import time
+          import numpy as np
+          import pandas as pd
+          import requests
+
+          BASE = "https://query1.finance.yahoo.com/v8/finance/chart"
+          SYMBOLS = {
+              "CSPX_LSE": ("CSPX.L", "USD", "LSE"),
+              "CSPX_SIX": ("CSSPX.SW", "USD", "SIX"),
+              "CNDX_LSE": ("CNDX.L", "USD", "LSE"),
+              "CNDX_SIX": ("CSNDX.SW", "USD", "SIX"),
+          }
+          INTERVALS = {"15m": ("15m", 60), "1d": ("1d", 3650)}
+          session = requests.Session()
+          session.headers.update({
+              "User-Agent": (
+                  "Mozilla/5.0 (X11; Linux x86_64) "
+                  "AppleWebKit/537.36 (KHTML, like Gecko) "
+                  "Chrome/131.0.0.0 Safari/537.36"
+              ),
+              "Accept": "application/json,text/plain,*/*",
+          })
+          failures = []
+          rate_limited = False
+          print("DIAGNÓSTICO ETF: comparación LSE frente a SIX")
+          print("No se modifica PROVIDER_MAP ni config.py.")
+          print("Pausa de 30 s entre consultas; ante HTTP 429 se espera y se reintenta una sola vez.")
+          print("=" * 78)
+
+          for label, (symbol, expected_currency, exchange) in SYMBOLS.items():
+              if rate_limited:
+                  break
+              for interval, (yahoo_interval, lookback_days) in INTERVALS.items():
+                  now = datetime.now(timezone.utc)
+                  params = {
+                      "period1": int((now - timedelta(days=lookback_days)).timestamp()),
+                      "period2": int(now.timestamp()),
+                      "interval": yahoo_interval,
+                      "events": "history",
+                      "includeAdjustedClose": "true",
+                  }
+                  print(f"\n{label} | {symbol} | {exchange} | {interval}", flush=True)
+                  try:
+                      response = session.get(
+                          f"{BASE}/{symbol}",
+                          params=params,
+                          timeout=30,
+                      )
+                      print(f"HTTP inicial: {response.status_code}", flush=True)
+
+                      if response.status_code == 429:
+                          retry_after = response.headers.get("Retry-After", "").strip()
+                          try:
+                              wait_seconds = int(retry_after)
+                          except (TypeError, ValueError):
+                              try:
+                                  retry_date = parsedate_to_datetime(retry_after)
+                                  if retry_date.tzinfo is None:
+                                      retry_date = retry_date.replace(tzinfo=timezone.utc)
+                                  wait_seconds = max(
+                                      0,
+                                      int((retry_date - datetime.now(timezone.utc)).total_seconds()),
+                                  )
+                              except (TypeError, ValueError, OverflowError):
+                                  wait_seconds = 90
+
+                          # Nunca reintentar antes de un Retry-After largo.
+                          # Si supera el presupuesto del diagnóstico, abortar.
+                          if wait_seconds > 180:
+                              print(
+                                  f"Retry-After={wait_seconds} s supera el límite "
+                                  "de espera del diagnóstico. Se aborta sin reintentar.",
+                                  flush=True,
+                              )
+                              rate_limited = True
+                              break
+
+                          wait_seconds = max(wait_seconds, 5)
+                          print(
+                              f"Yahoo ha limitado las peticiones. "
+                              f"Retry-After={retry_after or 'no indicado'}. "
+                              f"Esperando {wait_seconds} s antes de un único reintento.",
+                              flush=True,
+                          )
+                          time.sleep(wait_seconds)
+                          response = session.get(
+                              f"{BASE}/{symbol}",
+                              params=params,
+                              timeout=30,
+                          )
+                          print(f"HTTP tras reintento: {response.status_code}", flush=True)
+                          if response.status_code == 429:
+                              print(
+                                  "BLOQUEO PERSISTENTE HTTP 429. "
+                                  "Se detienen las consultas para no intensificar el límite.",
+                                  flush=True,
+                              )
+                              rate_limited = True
+                              break
+
+                      response.raise_for_status()
+                      chart = response.json().get("chart", {})
+                      if chart.get("error"):
+                          raise RuntimeError(str(chart["error"]))
+                      results = chart.get("result") or []
+                      if not results:
+                          raise RuntimeError("Yahoo no devolvió result")
+                      result = results[0]
+                      meta = result.get("meta", {})
+                      currency = meta.get("currency")
+                      exchange_name = meta.get("fullExchangeName") or meta.get("exchangeName")
+                      print(f"Moneda: {currency} | Mercado: {exchange_name}")
+                      if currency != expected_currency:
+                          raise RuntimeError(f"Moneda incompatible: {currency}")
+                      timestamps = result.get("timestamp") or []
+                      quote_list = result.get("indicators", {}).get("quote") or []
+                      if not timestamps or not quote_list:
+                          raise RuntimeError("Histórico vacío")
+                      quote = quote_list[0]
+                      df = pd.DataFrame({
+                          "Open": quote.get("open", []),
+                          "High": quote.get("high", []),
+                          "Low": quote.get("low", []),
+                          "Close": quote.get("close", []),
+                          "Volume": quote.get("volume", []),
+                      }, index=pd.to_datetime(timestamps, unit="s", utc=True))
+                      # Excluir solo la vela aún en curso; las cerradas defectuosas
+                      # se informan y nunca se reparan ni se ocultan.
+                      if interval == "15m":
+                          df = df[df.index <= pd.Timestamp(now - timedelta(minutes=15))]
+                      else:
+                          df = df[df.index.date < now.date()]
+                      for column in ("Open", "High", "Low", "Close"):
+                          df[column] = pd.to_numeric(df[column], errors="coerce")
+                      ohlc = df[["Open", "High", "Low", "Close"]]
+                      finite = np.isfinite(ohlc.to_numpy()).all(axis=1)
+                      positive = (ohlc > 0).all(axis=1)
+                      coherent = (
+                          (df["High"] >= df["Low"])
+                          & (df["High"] >= df["Open"])
+                          & (df["High"] >= df["Close"])
+                          & (df["Low"] <= df["Open"])
+                          & (df["Low"] <= df["Close"])
+                      )
+                      invalid = ~(finite & positive & coherent)
+                      print(f"Velas cerradas: {len(df)}")
+                      print(f"Velas OHLC defectuosas: {int(invalid.sum())}")
+                      print(f"Última vela UTC: {df.index[-1] if not df.empty else 'N/A'}")
+                      if invalid.any():
+                          print("MUESTRA DE VELAS DEFECTUOSAS:")
+                          print(df.loc[invalid].head(10).to_string())
+                      if len(df) < 220:
+                          failures.append(f"{symbol} {interval}: menos de 220 velas")
+                      if invalid.any():
+                          failures.append(f"{symbol} {interval}: OHLC defectuoso")
+                      if df.empty:
+                          failures.append(f"{symbol} {interval}: histórico vacío")
+                  except Exception as exc:
+                      failures.append(f"{symbol} {interval}: {type(exc).__name__}: {exc}")
+                      print(f"ERROR: {type(exc).__name__}: {exc}", flush=True)
+
+                  if not rate_limited:
+                      time.sleep(30)
+
+          print("\n" + "=" * 78)
+          print("RESUMEN")
+          for failure in failures:
+              print("FALLO:", failure)
+          if rate_limited:
+              print("RESULTADO INCONCLUSO: Yahoo mantiene el bloqueo HTTP 429.")
+              raise SystemExit(2)
+          if failures:
+              print("El diagnóstico ha terminado con incidencias de datos.")
+              raise SystemExit(1)
+          print("Todas las cotizaciones y temporalidades superan las comprobaciones básicas.")
+          PY

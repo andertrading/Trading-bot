@@ -1,0 +1,40 @@
+name: LEGACY - Backtest (deprecated)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Descargar repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Instalar dependencias
+        run: |
+          python -m pip install --upgrade pip
+          pip install yfinance pandas numpy
+
+      - name: Ejecutar backtesting histórico (legacy)
+        run: python backtest.py
+
+      - name: Guardar resultados históricos (legacy)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: legacy-resultados-backtest
+          path: |
+            resultados_backtest.csv
+            operaciones_backtest.csv
+          if-no-files-found: warn
+          retention-days: 7

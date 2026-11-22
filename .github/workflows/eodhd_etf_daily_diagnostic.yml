@@ -1,0 +1,270 @@
+name: Trading Bot 3.0 - EODHD ETF Daily Diagnostic
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  eodhd-etf-diagnostic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Descargar repositorio
+        uses: actions/checkout@v4
+
+      - name: Preparar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Instalar dependencias
+        run: |
+          python -m pip install --upgrade pip
+          pip install pandas numpy requests
+
+      - name: Validar históricos diarios de los ETF en EODHD
+        env:
+          EODHD_API_KEY: ${{ secrets.EODHD_API_KEY }}
+        run: |
+          python - <<'PY'
+          import os
+          from datetime import datetime, timedelta, timezone
+
+          import numpy as np
+          import pandas as pd
+          import requests
+
+          from data_engine import (
+              _last_completed_daily_session_date,
+              is_data_fresh,
+          )
+
+          API_KEY = os.environ.get("EODHD_API_KEY", "").strip()
+          BASE = "https://eodhd.com/api"
+          ASSETS = {
+              "CSPX": {
+                  "isin": "IE00B5BMR087",
+                  "expected_name": "iShares Core S&P 500",
+              },
+              "CNDX": {
+                  "isin": "IE00B53SZB19",
+                  "expected_name": "iShares NASDAQ 100",
+              },
+          }
+
+          if not API_KEY:
+              raise SystemExit(
+                  "FALTA EL SECRETO EODHD_API_KEY. "
+                  "No se ha realizado ninguna petición."
+              )
+
+          session = requests.Session()
+          session.headers.update({
+              "User-Agent": "TradingBot3.0-DataValidation/1.0",
+              "Accept": "application/json",
+          })
+
+          failures = []
+          print("DIAGNÓSTICO EODHD | ETF | TEMPORALIDAD DIARIA")
+          print("Plan objetivo: gratuito; no se consulta ningún endpoint intradía.")
+          print("Validación estricta: ISIN, mercado LSE, USD, OHLC y frescura.")
+          print("No se modifica PROVIDER_MAP ni config.py.")
+          print("=" * 78)
+
+          now = datetime.now(timezone.utc)
+          start_date = (now - timedelta(days=370)).date().isoformat()
+          end_date = now.date().isoformat()
+
+          for asset, expected in ASSETS.items():
+              print(f"\n{asset} | ISIN={expected['isin']} | LSE")
+              try:
+                  search_response = session.get(
+                      f"{BASE}/search/{expected['isin']}",
+                      params={
+                          "api_token": API_KEY,
+                          "type": "etf",
+                          "exchange": "LSE",
+                          "limit": 20,
+                      },
+                      timeout=30,
+                  )
+                  print(f"HTTP búsqueda: {search_response.status_code}")
+                  if search_response.status_code != 200:
+                      raise RuntimeError(
+                          f"búsqueda EODHD HTTP {search_response.status_code}"
+                      )
+
+                  matches = search_response.json()
+                  if not isinstance(matches, list):
+                      raise RuntimeError(
+                          "respuesta de búsqueda con formato inesperado"
+                      )
+
+                  exact = [
+                      item for item in matches
+                      if (
+                          str(item.get("ISIN", "")).upper() == expected["isin"]
+                          and str(item.get("Exchange", "")).upper() == "LSE"
+                          and str(item.get("Currency", "")).upper() == "USD"
+                          and "ETF" in str(item.get("Type", "")).upper()
+                      )
+                  ]
+
+                  symbols = sorted({
+                      str(item.get("Code", "")).strip()
+                      for item in exact
+                      if str(item.get("Code", "")).strip()
+                  })
+
+                  if len(symbols) != 1:
+                      raise RuntimeError(
+                          "no se ha encontrado una única cotización ETF "
+                          f"LSE/USD para el ISIN exacto; códigos={symbols}"
+                      )
+
+                  code = symbols[0]
+                  listing = next(
+                      item for item in exact
+                      if str(item.get("Code", "")).strip() == code
+                  )
+                  print(
+                      "LISTING OK | "
+                      f"{listing.get('Name')} | "
+                      f"{code}.LSE | {listing.get('Currency')} | "
+                      f"ISIN={listing.get('ISIN')}"
+                  )
+
+                  history_response = session.get(
+                      f"{BASE}/eod/{code}.LSE",
+                      params={
+                          "api_token": API_KEY,
+                          "from": start_date,
+                          "to": end_date,
+                          "period": "d",
+                          "fmt": "json",
+                      },
+                      timeout=45,
+                  )
+                  print(f"HTTP histórico: {history_response.status_code}")
+                  if history_response.status_code != 200:
+                      raise RuntimeError(
+                          f"histórico EODHD HTTP {history_response.status_code}"
+                      )
+
+                  rows = history_response.json()
+                  if not isinstance(rows, list) or not rows:
+                      raise RuntimeError("histórico diario vacío o formato inválido")
+
+                  df = pd.DataFrame(rows)
+                  required = ["date", "open", "high", "low", "close"]
+                  missing = [column for column in required if column not in df.columns]
+                  if missing:
+                      raise RuntimeError(f"faltan campos EOD: {missing}")
+
+                  df["date"] = pd.to_datetime(
+                      df["date"],
+                      utc=True,
+                      errors="coerce",
+                  )
+                  if df["date"].isna().any():
+                      raise RuntimeError("timestamps diarios inválidos")
+
+                  df = df.set_index("date").sort_index()
+                  if df.index.has_duplicates:
+                      raise RuntimeError("fechas diarias duplicadas")
+
+                  # No evaluar la vela de hoy si la sesión aún no ha terminado.
+                  last_completed_date = _last_completed_daily_session_date(
+                      asset,
+                      datetime.now(timezone.utc),
+                  )
+                  df = df[df.index.date <= last_completed_date]
+                  if df.empty:
+                      raise RuntimeError(
+                          "sin velas diarias cerradas después de excluir la sesión actual"
+                      )
+
+                  for column in ("open", "high", "low", "close"):
+                      df[column] = pd.to_numeric(
+                          df[column],
+                          errors="coerce",
+                      )
+
+                  ohlc = df[["open", "high", "low", "close"]]
+                  finite = np.isfinite(ohlc.to_numpy()).all(axis=1)
+                  positive = (ohlc > 0).all(axis=1)
+                  coherent = (
+                      (df["high"] >= df["low"])
+                      & (df["high"] >= df["open"])
+                      & (df["high"] >= df["close"])
+                      & (df["low"] <= df["open"])
+                      & (df["low"] <= df["close"])
+                  )
+                  invalid = ~(finite & positive & coherent)
+
+                  normalised = df.rename(columns={
+                      "open": "Open",
+                      "high": "High",
+                      "low": "Low",
+                      "close": "Close",
+                      "volume": "Volume",
+                  })
+                  if "Volume" not in normalised.columns:
+                      normalised["Volume"] = 0.0
+
+                  fresh = is_data_fresh(
+                      normalised,
+                      asset=asset,
+                      interval="1d",
+                  )
+
+                  volume = pd.to_numeric(
+                      normalised["Volume"],
+                      errors="coerce",
+                  ).fillna(0.0)
+
+                  print(f"Velas diarias: {len(df)}")
+                  print(f"Velas OHLC defectuosas: {int(invalid.sum())}")
+                  print(f"Primera fecha: {df.index[0].date()}")
+                  print(f"Última fecha: {df.index[-1].date()}")
+                  print(f"Datos recientes según calendario LSE: {fresh}")
+                  print(f"Volumen mediano: {float(volume.median()):.2f}")
+                  print(f"Velas con volumen cero: {int((volume <= 0).sum())}")
+
+                  if len(df) < 220:
+                      failures.append(f"{asset}: menos de 220 velas diarias")
+                  if invalid.any():
+                      failures.append(f"{asset}: OHLC diario defectuoso")
+                      print(df.loc[invalid].head(10).to_string())
+                  if not fresh:
+                      failures.append(f"{asset}: histórico diario desactualizado")
+                  if (volume < 0).any():
+                      failures.append(f"{asset}: volumen negativo")
+
+              except requests.RequestException as exc:
+                  # No imprimir la excepción: la URL de EODHD contiene la API key.
+                  failures.append(
+                      f"{asset}: error de red {type(exc).__name__}"
+                  )
+                  print(f"ERROR DE RED: {type(exc).__name__}")
+              except Exception as exc:
+                  failures.append(
+                      f"{asset}: {type(exc).__name__}: {exc}"
+                  )
+                  print(f"ERROR: {type(exc).__name__}: {exc}")
+
+          print("\n" + "=" * 78)
+          print("RESUMEN EODHD")
+          if failures:
+              for failure in failures:
+                  print("FALLO:", failure)
+              raise SystemExit(1)
+
+          print("AMBOS ETF SUPERAN LAS VALIDACIONES DIARIAS BÁSICAS.")
+          print(
+              "Esto valida solo el histórico diario; no autoriza todavía "
+              "el cambio de proveedor ni valida velas de 15 minutos."
+          )
+          PY

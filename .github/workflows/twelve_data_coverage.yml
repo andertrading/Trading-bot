@@ -1,0 +1,123 @@
+
+name: Twelve Data - Asset Coverage Test
+
+on:
+  workflow_dispatch:
+
+jobs:
+  coverage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check market data coverage
+        env:
+          TWELVE_DATA_API_KEY: ${{ secrets.TWELVE_DATA_API_KEY }}
+        run: |
+          python - <<'PY'
+          import os
+          import sys
+          import json
+          import time
+          import urllib.request
+          import urllib.parse
+          import urllib.error
+
+          api_key = os.environ.get("TWELVE_DATA_API_KEY")
+
+          if not api_key:
+              print("ERROR: API key missing.")
+              sys.exit(1)
+
+          assets = {
+              "CSPX": "CSPX:LSE",
+              "CNDX": "CNDX:LSE",
+              "TSLA": "TSLA",
+              "NVDA": "NVDA",
+              "AAPL": "AAPL",
+              "MSFT": "MSFT",
+              "TTWO": "TTWO",
+              "BTC": "BTC/USD",
+              "ETH": "ETH/USD",
+              "SOL": "SOL/USD",
+              "XLM": "XLM/USD",
+              "XRP": "XRP/USD"
+          }
+
+          intervals = ["15min", "1day"]
+          results = []
+
+          print("Starting Twelve Data coverage test")
+          print("Assets:", len(assets))
+          print("Timeframes:", intervals)
+          print("-----------------------------------")
+
+          for name, symbol in assets.items():
+              for interval in intervals:
+                  params = urllib.parse.urlencode({
+                      "symbol": symbol,
+                      "interval": interval,
+                      "outputsize": 5000,
+                      "apikey": api_key
+                  })
+
+                  url = "https://api.twelvedata.com/time_series?" + params
+                  request = urllib.request.Request(url)
+
+                  try:
+                      with urllib.request.urlopen(request, timeout=40) as response:
+                          data = json.loads(response.read().decode())
+
+                      values = data.get("values", [])
+
+                      if values:
+                          first = values[-1].get("datetime")
+                          last = values[0].get("datetime")
+
+                          status = "OK"
+                          count = len(values)
+                          message = ""
+
+                      else:
+                          status = "NO DATA"
+                          count = 0
+                          message = data.get("message", "No historical data")
+
+                          if data.get("code") == 429:
+                              status = "RATE LIMIT"
+
+                      results.append((name, interval, status, count))
+                      print(
+                          f"{name:6} | {interval:5} | {status:10} "
+                          f"| bars={count} | first={first if values else '-'} "
+                          f"| last={last if values else '-'}"
+                      )
+
+                      if message:
+                          print("  Detail:", message)
+
+                  except urllib.error.HTTPError as error:
+                      print(f"{name} | {interval} | HTTP ERROR {error.code}")
+                      results.append((name, interval, "HTTP ERROR", 0))
+
+                  except Exception as error:
+                      print(
+                          f"{name} | {interval} | ERROR "
+                          f"| {type(error).__name__}"
+                      )
+                      results.append((name, interval, "ERROR", 0))
+
+                  time.sleep(9)
+
+          print("-----------------------------------")
+          print("COVERAGE SUMMARY")
+
+          successful = sum(1 for r in results if r[2] == "OK")
+          print(f"Successful tests: {successful}/{len(results)}")
+
+          for name, interval, status, count in results:
+              if status != "OK":
+                  print(f"CHECK REQUIRED: {name} {interval}: {status}")
+
+          print("Test completed.")
+          PY

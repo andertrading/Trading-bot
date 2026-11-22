@@ -1,0 +1,109 @@
+# eToro market-data audit and integration status
+
+**Current status:** the manual audit validates instrument discovery, exchange metadata and market quotes only. It does not access the real-account portfolio, balances, positions, pending orders, account-specific eligibility or account risk. It never submits, modifies or cancels orders.
+
+## Current audit scope
+
+The workflow `.github/workflows/etoro_read_only_audit.yml` runs `etoro_read_only_audit.py` manually using the repository's `ETORO_API_KEY` and `ETORO_USER_KEY` secrets.
+
+The active audit path makes these read-only market-data requests:
+
+1. `GET /api/v1/market-data/search` — resolve each configured symbol to one exact eToro instrument and verify its instrument class.
+2. `GET /api/v1/market-data/instruments` — retrieve instrument display metadata, including `instrumentID`, `exchangeID`, `symbolFull` and `priceSource`.
+3. `GET /api/v1/market-data/exchanges` — resolve the exchange IDs to exchange descriptions.
+4. `GET /api/v1/market-data/instruments/rates` — validate a complete bid/ask quote set and timestamps for the resolved instruments.
+
+The audit does **not** call the account PnL, position-breakdown, eligibility or what-if-cost endpoints. The client contains legacy read-only helpers for some of those endpoints, but they are outside the active audit path and must not be used as inputs or constraints for Trading Bot 3.0. In particular, the user's real-money portfolio is not part of the bot's virtual paper portfolio or its $1,000 reference capital.
+
+## Exchange-calendar mapping
+
+The calendar is derived from the exchange description returned by eToro, not from `priceSource`:
+
+- `LSE` / London Stock Exchange → `XLON`.
+- `Nasdaq` and `NYSE` → `XNYS`, the supported common US-equity session calendar. In `exchange_calendars`, `NASDAQ` is an alias for `XNYS`.
+- `Digital Currency` for a configured crypto instrument → `24/7`.
+- Unknown or ambiguous exchange descriptions are rejected; the price feed name is not used as a fallback to guess a listing venue.
+
+The configured calendar must match the eToro-derived calendar for every enabled instrument before the quote request is admitted.
+
+## Live eToro audit result — 2026-11-22
+
+The user-triggered audit returned:
+
+- Instrument resolution: **12/12 resolved**, with the expected ETF/STOCK/CRYPTO classifications.
+- Instrument display metadata: **VALIDATED**.
+- Exchange metadata: **VALIDATED**.
+- Exchange-to-calendar mapping: **12/12 matched**.
+- Market quote validation: **VALIDATED_WITH_CLOSED_MARKETS**.
+- Overall audit: **PASS**.
+- `account_portfolio_data_accessed`: `false`.
+- `instrument_eligibility_status`: `NOT_IN_SCOPE` (expected; not a failed check).
+- `portfolio_risk_admission_ready`: `false` (intentionally not assessed by this market-data audit).
+
+Resolved instruments and venues:
+
+| Symbol | eToro instrument ID | eToro exchange | Calendar | eToro symbol |
+|---|---:|---|---|---|
+| CSPX | 3434 | LSE | XLON | CSPX.L |
+| CNDX | 8015 | LSE | XLON | CNDX.L |
+| TSLA | 1111 | Nasdaq | XNYS | TSLA |
+| NVDA | 1137 | Nasdaq | XNYS | NVDA |
+| AAPL | 1001 | Nasdaq | XNYS | AAPL |
+| MSFT | 1004 | Nasdaq | XNYS | MSFT |
+| TTWO | 1388 | Nasdaq | XNYS | TTWO |
+| BTC | 100000 | Digital Currency | 24/7 | BTC |
+| ETH | 100001 | Digital Currency | 24/7 | ETH |
+| SOL | 100063 | Digital Currency | 24/7 | SOL |
+| XLM | 100020 | Digital Currency | 24/7 | XLM |
+| XRP | 100003 | Digital Currency | 24/7 | XRP |
+
+At the time of this run, the London and US exchanges were closed:
+
+- CSPX and CNDX were accepted as `CLOSED_LAST_SESSION` quotes from the last completed XLON session.
+- TSLA, NVDA, AAPL, MSFT and TTWO were accepted as `CLOSED_LAST_SESSION` quotes from the last completed US session.
+- BTC, ETH, SOL, XLM and XRP had `FRESH` quotes.
+
+This is why `market_quotes_validated` is `true` while `complete_realtime_quotes_validated` is `false`. A last-session quote is accepted for audit diagnostics only; it is not a fresh entry price and must not be used to generate an actionable entry while that exchange is closed.
+
+## Quote validation policy
+
+- A quote is considered fresh when its timestamp is no more than 30 seconds old.
+- A timestamp more than five seconds in the future is rejected. A small clock skew of up to five seconds is tolerated; the observed crypto timestamps were four seconds ahead of the audit clock.
+- For a closed exchange only, a quote may be accepted as `last_session` when its timestamp falls inside the last completed exchange session and is no more than seven days old.
+- A stale quote while its exchange is open is rejected.
+- A stale quote for a 24/7 crypto instrument or an instrument without a known calendar is rejected.
+- A delayed, incomplete, duplicate, crossed or invalid bid/ask set is rejected.
+
+To verify all listed instruments with fresh quotes, rerun the manual audit during the overlap of the London and US regular trading sessions. A successful closed-market audit must not be confused with complete real-time quote validation.
+
+## Strategy and signal-release gates
+
+Passing this audit does not approve a trading strategy or enable alerts. The following production safeguards remain intentionally disabled until separately validated:
+
+- `STRATEGY_VALIDATED = False`.
+- `ALLOW_POSITION_SIZING = False`.
+- `ETORO_EXECUTION_TYPES_CONFIRMED = False`.
+- `ETORO_FEE_SCHEDULE_CONFIRMED = False`.
+- `ETORO_EXECUTION_PRICE_BASIS_CONFIRMED = False`.
+- Close fees, spreads and FX conversion remain unconfirmed.
+- `SIGNAL_ALERTS_ENABLED` defaults to `false`.
+- The bot remains paper/manual-signal-only and has no automatic execution path.
+
+Historical research has not established a robust positive net edge after realistic trading costs. No strategy is approved for trade-ready alerts. Keep the strategy and alert gates closed while prospective paper-forward evidence is collected.
+
+## Safety boundary
+
+1. Do not query or use the user's real-money holdings, balances, open positions, pending orders or stop risk as bot inputs or constraints.
+2. Keep the virtual paper portfolio and its $1,000 reference capital separate from the user's eToro account.
+3. Do not use last-session or delayed prices as actionable entry prices.
+4. Do not infer eToro execution prices from Yahoo Finance or Twelve Data OHLC data. Their price basis must be validated separately against eToro bid/ask quotes.
+5. Do not enable sizing or alerts merely because instrument resolution or the market-data audit passes.
+6. Never add order creation, modification, closure, cancellation or other trading-write operations.
+
+## Official and technical references
+
+- eToro API authentication: https://api-portal.etoro.com/core/getting-started/authentication
+- eToro API documentation portal: https://api-portal.etoro.com/
+- eToro authentication guide: https://api-portal.etoro.com/core/getting-started/authentication
+- eToro market-order guide (includes the documented instrument-search example and market-rate guidance): https://api-portal.etoro.com/guides/market-orders
+- `exchange_calendars` calendar aliases: https://github.com/gerrymanoim/exchange_calendars/blob/master/exchange_calendars/calendar_utils.py

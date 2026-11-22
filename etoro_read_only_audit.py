@@ -1,0 +1,476 @@
+"""Manual, read-only eToro audit.
+
+The report contains only public instrument IDs and pass/fail flags. It never
+prints balances, positions, order details, credentials, or raw API responses.
+"""
+from __future__ import annotations
+
+from datetime import datetime, timezone
+import json
+import os
+import sys
+from typing import Any, Mapping
+
+from config import ACCOUNT_CURRENCY, ASSETS
+from etoro_read_only import (
+    EtoroConfigurationError,
+    EtoroReadOnlyClient,
+    normalize_instrument_display_data,
+    normalize_supported_exchanges,
+    resolve_unique_instrument_by_symbol,
+)
+from etoro_position_risk import calculate_account_stop_risk_from_client
+
+
+def _resolution_error_status(exc: Exception) -> str:
+    """Return a stable, non-sensitive code for a failed read-only validation."""
+    message = str(exc)
+    if "HTTP " in message:
+        suffix = message.split("HTTP ", 1)[1][:3]
+        if suffix.isdigit():
+            return f"HTTP_{suffix}"
+
+    # Exact, generic markers emitted by the strict response normalizers.
+    # Never include exception text, payload fragments, symbols, or account data.
+    known = (
+        # More specific post-search normalizers must precede generic search errors.
+        ("La respuesta de cotizaciones no es un objeto JSON", "QUOTES_RESPONSE_SCHEMA_INVALID"),
+        # Instrument search
+        ("Falta la lista results", "SEARCH_RESULTS_MISSING"),
+        ("Falta el estado de paginación", "SEARCH_PAGINATION_MISSING"),
+        ("requiere páginas adicionales", "SEARCH_PAGINATION_INCOMPLETE"),
+        ("Se esperaba un único símbolo exacto", "EXACT_SYMBOL_MATCH_COUNT"),
+        ("instrumentId válido", "INVALID_INSTRUMENT_ID"),
+        ("no tiene displayName", "MISSING_DISPLAY_NAME"),
+        ("no tiene type", "MISSING_INSTRUMENT_TYPE"),
+        ("contiene un instrumento inválido", "INVALID_SEARCH_ITEM"),
+        ("no es un objeto JSON", "INVALID_SEARCH_RESPONSE"),
+        ("no devolvió HTTP 200", "SEARCH_HTTP_ERROR"),
+        # Instrument eligibility
+        ("La elegibilidad no es una respuesta HTTP 200 válida", "ELIGIBILITY_RESPONSE_INVALID"),
+        ("La respuesta de elegibilidad no incluye el campo currency", "ELIGIBILITY_CURRENCY_MISSING"),
+        ("La respuesta de elegibilidad no está en USD", "ELIGIBILITY_CURRENCY_MISMATCH"),
+        ("La divisa de la respuesta de elegibilidad no es válida", "ELIGIBILITY_CURRENCY_INVALID"),
+        ("Los instrumentIds esperados no son válidos", "ELIGIBILITY_EXPECTED_IDS_INVALID"),
+        ("Los instrumentIds esperados contienen duplicados", "ELIGIBILITY_EXPECTED_IDS_DUPLICATED"),
+        ("no está en USD", "ELIGIBILITY_CURRENCY_MISMATCH"),
+        ("respuesta de elegibilidad está incompleta", "ELIGIBILITY_RESULTS_INCOMPLETE"),
+        ("Elegibilidad inválida", "ELIGIBILITY_ITEM_INVALID"),
+        ("Campo ", "ELIGIBILITY_FIELD_INVALID"),
+        ("Falta la configuración de apalancamiento", "ELIGIBILITY_LEVERAGE_CONFIG_MISSING"),
+        ("leverage config", "ELIGIBILITY_LEVERAGE_CONFIG_INVALID"),
+        ("Faltan límites de exposición", "ELIGIBILITY_EXPOSURE_LIMITS_MISSING"),
+        ("no cubre todos los instrumentos", "ELIGIBILITY_INSTRUMENTS_INCOMPLETE"),
+        # Realtime quotes
+        ("Las cotizaciones no son una respuesta HTTP 200 completa", "QUOTES_RESPONSE_INVALID"),
+        ("instrumentId inválido en cotización", "QUOTES_INSTRUMENT_ID_INVALID"),
+        ("Instrumento inesperado en cotizaciones", "QUOTES_UNEXPECTED_INSTRUMENT"),
+        ("Fecha ausente en cotización", "QUOTES_TIMESTAMP_MISSING"),
+        ("Fecha inválida en cotización", "QUOTES_TIMESTAMP_INVALID"),
+        ("no incluye zona horaria", "QUOTES_TIMESTAMP_TIMEZONE_MISSING"),
+        ("La fecha de cotización", "QUOTES_TIMESTAMP_NOT_UTC"),
+        ("now_utc debe incluir zona horaria UTC", "QUOTES_CLOCK_INVALID"),
+        ("max_age_seconds debe ser un entero positivo", "QUOTES_MAX_AGE_INVALID"),
+        ("Error de conexión con eToro", "ETORO_CONNECTION_ERROR"),
+        ("eToro devolvió una respuesta JSON inválida", "ETORO_INVALID_JSON_RESPONSE"),
+        ("lista de instrumentos esperados no es válida", "QUOTES_EXPECTED_IDS_INVALID"),
+        ("lista de instrumentos esperados contiene duplicados", "QUOTES_EXPECTED_IDS_DUPLICATED"),
+        ("Falta la lista de resultados de cotizaciones", "QUOTES_RESULTS_MISSING"),
+        ("cotización retrasada", "QUOTES_NOT_REALTIME"),
+        ("Faltan cotizaciones para instrumentos", "QUOTES_INSTRUMENTS_INCOMPLETE"),
+        ("Cotización futura", "QUOTES_TIMESTAMP_FUTURE"),
+        ("Cotización obsoleta con mercado abierto", "QUOTES_STALE_MARKET_OPEN"),
+        ("Cotización obsoleta para instrumento", "QUOTES_STALE_24_7_OR_UNKNOWN"),
+        ("Cotización fuera de la última sesión", "QUOTES_OUTSIDE_LAST_SESSION"),
+        ("Calendario bursátil no disponible", "MARKET_CALENDAR_UNAVAILABLE"),
+        ("Cotización obsoleta o futura", "QUOTES_STALE_OR_FUTURE"),
+        ("Bid/ask inválido o cruzado", "QUOTES_BID_ASK_INVALID"),
+        ("Cotización duplicada", "QUOTES_DUPLICATED"),
+        ("Cotización inválida", "QUOTES_ITEM_INVALID"),
+        # Position breakdown / stop-risk diagnostics
+        ("El desglose de posiciones no es una respuesta HTTP 200 válida", "RISK_BREAKDOWN_RESPONSE_INVALID"),
+        ("CID esperado inválido", "RISK_CID_INVALID"),
+        ("El desglose no confirma la divisa", "RISK_CURRENCY_UNCONFIRMED"),
+        ("timestamp", "RISK_TIMESTAMP_INVALID"),
+        ("desglose de posiciones está obsoleto", "RISK_BREAKDOWN_STALE"),
+        ("contiene mirrors", "RISK_MIRRORS_UNSUPPORTED"),
+        ("Falta la lista de instrumentos del desglose", "RISK_BREAKDOWN_INSTRUMENTS_MISSING"),
+        ("Posición ", "RISK_POSITION_SCHEMA_INVALID"),
+        ("Falta positions para instrumento", "RISK_POSITION_LIST_MISSING"),
+        ("El desglose no contiene todas las posiciones esperadas", "RISK_POSITIONS_INCOMPLETE"),
+        ("no coincide entre endpoints", "RISK_ENDPOINT_INSTRUMENT_MISMATCH"),
+        ("no tiene stop-loss confirmado", "RISK_UNBOUNDED_STOP"),
+        ("no contiene CID", "RISK_CID_MISSING"),
+        ("Solo se puede valorar settlementType=real", "RISK_UNSUPPORTED_SETTLEMENT"),
+        ("apalancada", "RISK_LEVERAGE_UNSUPPORTED"),
+        ("El stop no es fijo", "RISK_STOP_TYPE_UNSUPPORTED"),
+        ("no está en USD", "RISK_CURRENCY_UNSUPPORTED"),
+        ("no es válida o no está sincronizada", "RISK_QUOTE_INVALID"),
+        ("no es válido", "RISK_CALCULATION_INVALID"),
+    )
+    for marker, code in known:
+        if marker in message:
+            return code
+    if type(exc).__name__ == "EtoroAPIError":
+        return "ETORO_API_VALIDATION_ERROR"
+    return type(exc).__name__.upper()
+
+
+def _resolve_asset(
+    client: EtoroReadOnlyClient,
+    symbol: str,
+    asset: Mapping[str, Any],
+) -> tuple[Mapping[str, Any] | None, str]:
+    """Resolve an exact eToro symbol, including configured exchange suffixes."""
+    candidates = [symbol]
+    configured_market_symbol = asset.get("yahoo")
+    # eToro lists some London ETFs with the exchange suffix (e.g. CSPX.L).
+    # Reuse the explicitly configured market symbol only when it is the same
+    # base ticker plus a suffix; never fuzzy-match or guess an instrument ID.
+    if (
+        isinstance(configured_market_symbol, str)
+        and configured_market_symbol.startswith(symbol + ".")
+        and configured_market_symbol not in candidates
+    ):
+        candidates.append(configured_market_symbol)
+
+    item = None
+    last_status = "UNRESOLVED"
+    for candidate_index, candidate in enumerate(candidates):
+        try:
+            response = client.search_instrument_by_symbol(candidate, page_size=100)
+            item = resolve_unique_instrument_by_symbol(response, candidate)
+            break
+        except Exception as exc:
+            last_status = _resolution_error_status(exc)
+            can_try_suffix = (
+                candidate_index + 1 < len(candidates)
+                and last_status in {"HTTP_404", "EXACT_SYMBOL_MATCH_COUNT"}
+            )
+            if not can_try_suffix:
+                return None, last_status
+
+    if item is None:
+        return None, last_status
+
+    expected_type = asset.get("type")
+    actual_type = _fee_class(item.get("instrumentType"))
+    if (
+        not isinstance(expected_type, str)
+        or actual_type is None
+        or actual_type != expected_type.strip().upper()
+    ):
+        return None, "ASSET_TYPE_MISMATCH"
+    return item, "RESOLVED"
+
+
+def _account_snapshot_missing_fields(exc: Exception) -> list[str]:
+    message = str(exc)
+    marker = "incompleta: faltan "
+    if marker not in message:
+        return []
+    raw_fields = message.split(marker, 1)[1].split(";", 1)[0]
+    allowed = {
+        "positionId", "instrumentId", "cid", "mirrorId", "isBuy",
+        "openRate", "stopLossRate", "amount", "leverage", "units",
+        "settlementTypeId", "isNoStopLoss",
+    }
+    return [field.strip() for field in raw_fields.split(",") if field.strip() in allowed]
+
+
+def _account_snapshot_status(exc: Exception) -> str:
+    """Return a redacted diagnostic code; never expose account/API payloads."""
+    message = str(exc)
+    if "HTTP " in message:
+        suffix = message.split("HTTP ", 1)[1][:3]
+        if suffix.isdigit():
+            return f"ETORO_HTTP_{suffix}"
+
+    known_failures = (
+        ("La respuesta de cuenta no es un objeto JSON", "INVALID_ACCOUNT_RESPONSE"),
+        ("Solo se admite la divisa configurada", "UNSUPPORTED_ACCOUNT_CURRENCY"),
+        ("Falta clientPortfolio", "MISSING_CLIENT_PORTFOLIO"),
+        ("Falta la lista explícita de posiciones", "MISSING_POSITIONS"),
+        ("Falta la lista explícita de mirrors", "MISSING_MIRRORS"),
+        ("contiene mirrors/copy trading", "UNSUPPORTED_COPY_TRADING"),
+        ("Falta la lista explícita de órdenes pendientes", "MISSING_PENDING_ORDERS"),
+        ("Orden pendiente inválida", "INVALID_PENDING_ORDER"),
+        ("mirrorId inválido en orden", "INVALID_PENDING_ORDER_MIRROR_ID"),
+        ("órdenes pendientes mirror/copy", "UNSUPPORTED_MIRROR_PENDING_ORDER"),
+        ("órdenes de entrada pendientes", "UNQUANTIFIED_PENDING_ENTRY_ORDER"),
+        ("Falta la lista explícita de órdenes Market-if-touched", "MISSING_MIT_ORDERS"),
+        ("Market-if-touched", "UNQUANTIFIED_MIT_ORDER"),
+        ("clientPortfolio.unrealizedPnL", "INVALID_UNREALIZED_PNL"),
+        ("Esquema ambiguo o incompleto", "AMBIGUOUS_ACCOUNT_SCHEMA"),
+        ("Las listas de órdenes de la cuenta están incompletas", "INCOMPLETE_ACCOUNT_ORDER_LISTS"),
+        ("Orden activa inválida", "INVALID_ACTIVE_ORDER"),
+        ("Importe negativo", "NEGATIVE_ORDER_AMOUNT"),
+        ("El efectivo disponible calculado es negativo", "NEGATIVE_AVAILABLE_CASH"),
+        ("Posición inválida", "INVALID_POSITION"),
+        ("incompleta: faltan", "POSITION_MISSING_FIELDS"),
+        ("Posición " , "INVALID_POSITION_SCHEMA"),
+        ("positionId inválido", "INVALID_POSITION_ID"),
+        ("instrumentId inválido", "INVALID_INSTRUMENT_ID"),
+        ("cid inválido", "INVALID_POSITION_CID"),
+        ("más de un CID", "MULTIPLE_POSITION_CIDS"),
+        ("mirrorId inválido", "INVALID_POSITION_MIRROR_ID"),
+        ("mirror/copy no soportadas", "UNSUPPORTED_MIRROR_POSITION"),
+        ("isBuy inválido", "INVALID_POSITION_DIRECTION"),
+        ("isNoStopLoss inválido", "INVALID_POSITION_STOP_FLAG"),
+        ("Tipo de liquidación no reconocido", "UNSUPPORTED_SETTLEMENT_TYPE"),
+        ("Campo numérico inválido", "INVALID_NUMERIC_FIELD"),
+        ("Campo numérico no finito", "NON_FINITE_NUMERIC_FIELD"),
+        ("debe ser positivo en posición", "NON_POSITIVE_POSITION_VALUE"),
+        ("stop loss", "INVALID_STOP_LOSS"),
+        ("Stop loss inválido", "INVALID_STOP_LOSS"),
+    )
+    for marker, code in known_failures:
+        if marker in message:
+            return code
+    if type(exc).__name__ == "EtoroAPIError":
+        return "ETORO_API_VALIDATION_ERROR"
+    return type(exc).__name__.upper()
+
+
+def _fee_class(instrument_type: Any) -> str | None:
+    if not isinstance(instrument_type, str):
+        return None
+    normalized = instrument_type.strip().casefold().replace(" ", "")
+    if normalized in {"stock", "stocks"}:
+        return "STOCK"
+    if normalized in {"etf", "exchange-tradedfund", "exchangetradedfund"}:
+        return "ETF"
+    if normalized in {"crypto", "cryptocurrency", "cryptocurrencies"}:
+        return "CRYPTO"
+    return None
+
+
+def _market_calendar_from_exchange(exchange_description: str | None, price_source: str, asset_type: str) -> str | None:
+    """Map only the confirmed eToro exchange venue to a supported calendar.
+
+    priceSource describes the price feed, not the listing venue, so it must
+    never be used to infer an exchange when exchangeDescription is unknown.
+    XNYS is used as the common US-equity session calendar for NYSE/Nasdaq.
+    """
+    if asset_type == "CRYPTO":
+        return "24/7"
+    venue = exchange_description.casefold().strip() if isinstance(exchange_description, str) else ""
+    london = any(token in venue for token in ("london", "lse"))
+    us = any(token in venue for token in ("nasdaq", "nyse", "new york stock exchange"))
+    if london == us:
+        return None
+    return "XLON" if london else "XNYS"
+
+
+def run_audit(
+    client: EtoroReadOnlyClient,
+    assets: Mapping[str, Mapping[str, Any]],
+    account_currency: str,
+    now_utc: datetime,
+) -> dict[str, Any]:
+    """Audit instrument resolution and market data without reading the user's portfolio.
+
+    Real-account balances, positions, and stop-risk are deliberately excluded
+    from Trading Bot 3.0 and never requested by this audit.
+    """
+    enabled_assets = {
+        symbol: asset
+        for symbol, asset in assets.items()
+        if isinstance(asset, Mapping) and asset.get("enabled") is True
+    }
+
+    resolved: dict[str, Mapping[str, Any]] = {}
+    resolution_status: dict[str, str] = {}
+    for symbol, asset in enabled_assets.items():
+        item, status = _resolve_asset(client, symbol, asset)
+        resolution_status[symbol] = status
+        if item is not None:
+            resolved[symbol] = item
+
+    # Account-specific trading eligibility is intentionally not queried.
+    # The virtual simulator must not depend on the user's real eToro account.
+    eligibility_valid = False
+    eligibility_status = "NOT_IN_SCOPE"
+
+    market_metadata_valid = False
+    market_metadata_status = "NOT_CHECKED"
+    exchange_metadata_valid = False
+    exchange_metadata_status = "NOT_CHECKED"
+    metadata_by_id: dict[int, Mapping[str, Any]] = {}
+    exchange_names: dict[int, str] = {}
+    calendars_by_symbol: dict[str, str] = {}
+    metadata_errors: dict[str, str] = {}
+
+    if resolved and len(resolved) == len(enabled_assets):
+        instrument_ids = [item["instrumentId"] for item in resolved.values()]
+        try:
+            metadata_by_id = normalize_instrument_display_data(
+                client.get_instrument_display_data(instrument_ids), instrument_ids
+            )
+            market_metadata_valid = True
+            market_metadata_status = "VALIDATED"
+            exchange_ids = sorted({
+                data["exchange_id"] for data in metadata_by_id.values()
+                if data["exchange_id"] > 0
+            })
+            exchange_names = normalize_supported_exchanges(
+                client.get_supported_exchanges(exchange_ids), exchange_ids
+            )
+            exchange_metadata_valid = True
+            exchange_metadata_status = "VALIDATED"
+            for symbol, item in resolved.items():
+                metadata = metadata_by_id[item["instrumentId"]]
+                exchange_id = metadata["exchange_id"]
+                calendar_name = _market_calendar_from_exchange(
+                    exchange_names.get(exchange_id),
+                    metadata["price_source"],
+                    _fee_class(item.get("instrumentType")) or "",
+                )
+                configured_calendar = enabled_assets[symbol].get("market_calendar")
+                if calendar_name is None:
+                    metadata_errors[symbol] = "UNSUPPORTED_OR_AMBIGUOUS_EXCHANGE"
+                elif configured_calendar != calendar_name:
+                    metadata_errors[symbol] = "CONFIGURED_MARKET_CALENDAR_MISMATCH"
+                else:
+                    calendars_by_symbol[symbol] = calendar_name
+        except Exception as exc:
+            market_metadata_status = _resolution_error_status(exc)
+            exchange_metadata_status = market_metadata_status
+            metadata_errors = {symbol: market_metadata_status for symbol in resolved}
+
+    quotes_valid = False
+    realtime_quotes_valid = False
+    quotes_status = "NOT_CHECKED"
+    quote_diagnostics: list[dict[str, Any]] = []
+    if (resolved and len(resolved)==len(enabled_assets)
+        and market_metadata_valid and exchange_metadata_valid
+        and len(calendars_by_symbol)==len(enabled_assets)):
+        instrument_ids = [item["instrumentId"] for item in resolved.values()]
+        try:
+            calendars_by_id = {
+                item["instrumentId"]: calendars_by_symbol[symbol]
+                for symbol, item in resolved.items()
+            }
+            quotes = client.get_realtime_quotes(
+                instrument_ids,
+                now_utc,
+                max_age_seconds=30,
+                asset_calendars=calendars_by_id,
+                max_closed_age_seconds=604800,
+            )
+            quotes_valid = True
+            realtime_quotes_valid = all(
+                quote.quote_type == "realtime" for quote in quotes.values()
+            )
+            quotes_status = (
+                "VALIDATED_WITH_CLOSED_MARKETS"
+                if not realtime_quotes_valid
+                else "VALIDATED"
+            )
+            quote_diagnostics = [
+                {
+                    "symbol": symbol,
+                    "market_calendar": calendars_by_id[item["instrumentId"]],
+                    "quote_status": (
+                        "CLOSED_LAST_SESSION"
+                        if quotes[item["instrumentId"]].quote_type == "last_session"
+                        else "FRESH"
+                    ),
+                    "age_seconds": round(
+                        (now_utc - quotes[item["instrumentId"]].timestamp).total_seconds()
+                    ),
+                }
+                for symbol, item in resolved.items()
+            ]
+        except Exception as exc:
+            quotes_valid = False
+            quotes_status = _resolution_error_status(exc)
+            quote_diagnostics = [{"quote_status": quotes_status}]
+
+    instrument_report = [
+        {
+            "symbol": symbol,
+            "expected_asset_type": enabled_assets[symbol].get("type"),
+            "candidate_found": symbol in resolved,
+            "resolution_status": resolution_status[symbol],
+            "instrument_id": (
+                resolved[symbol]["instrumentId"] if symbol in resolved else None
+            ),
+            "instrument_type": (
+                resolved[symbol]["instrumentType"] if symbol in resolved else None
+            ),
+            "display_name": (
+                resolved[symbol]["displayname"] if symbol in resolved else None
+            ),
+            "exchange_id": (
+                metadata_by_id[resolved[symbol]["instrumentId"]]["exchange_id"]
+                if symbol in resolved and resolved[symbol]["instrumentId"] in metadata_by_id else None
+            ),
+            "exchange_description": (
+                exchange_names.get(metadata_by_id[resolved[symbol]["instrumentId"]]["exchange_id"])
+                if symbol in resolved and resolved[symbol]["instrumentId"] in metadata_by_id else None
+            ),
+            "symbol_full": (
+                metadata_by_id[resolved[symbol]["instrumentId"]]["symbol_full"]
+                if symbol in resolved and resolved[symbol]["instrumentId"] in metadata_by_id else None
+            ),
+            "price_source": (
+                metadata_by_id[resolved[symbol]["instrumentId"]]["price_source"]
+                if symbol in resolved and resolved[symbol]["instrumentId"] in metadata_by_id else None
+            ),
+            "market_calendar": calendars_by_symbol.get(symbol),
+            "market_metadata_status": metadata_errors.get(
+                symbol, "VALIDATED" if symbol in calendars_by_symbol else "NOT_VALIDATED"
+            ),
+        }
+        for symbol in enabled_assets
+    ]
+    overall = (
+        len(resolved) == len(enabled_assets)
+        and market_metadata_valid
+        and exchange_metadata_valid
+        and len(calendars_by_symbol) == len(enabled_assets)
+        and quotes_valid
+    )
+    return {
+        "audit_scope": "read-only diagnostics; not authorization to trade",
+        "account_portfolio_data_accessed": False,
+        "instrument_resolution": instrument_report,
+        "market_metadata_validated": market_metadata_valid,
+        "market_metadata_status": market_metadata_status,
+        "exchange_metadata_validated": exchange_metadata_valid,
+        "exchange_metadata_status": exchange_metadata_status,
+        "instrument_eligibility_validated": eligibility_valid,
+        "instrument_eligibility_status": eligibility_status,
+        "market_quotes_validated": quotes_valid,
+        "complete_realtime_quotes_validated": realtime_quotes_valid,
+        "realtime_quotes_status": quotes_status,
+        "quote_diagnostics": quote_diagnostics,
+        "portfolio_risk_admission_ready": False,
+        "overall_pass": overall,
+    }
+
+
+def main() -> int:
+    if not os.getenv("ETORO_API_KEY") or not os.getenv("ETORO_USER_KEY"):
+        print("Audit aborted: read-only eToro credentials are not configured.")
+        return 2
+
+    try:
+        client = EtoroReadOnlyClient()
+    except EtoroConfigurationError:
+        print("Audit aborted: read-only eToro credentials are unavailable.")
+        return 2
+
+    report = run_audit(
+        client,
+        ASSETS,
+        ACCOUNT_CURRENCY,
+        datetime.now(timezone.utc),
+    )
+    print(json.dumps(report, indent=2, sort_keys=True))
+    return 0 if report["overall_pass"] else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
