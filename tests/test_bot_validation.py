@@ -433,6 +433,11 @@ class TestBotValidation(unittest.TestCase):
             "risk_amount_usd": 5.0,
             "position_risk_usd": 4.0,
             "fixed_costs_usd": 1.0,
+            "position_size": 1.0,
+            "entry_price_quote": 100.0,
+            "quote_to_usd": 1.0,
+            "position_notional_usd": 100.0,
+            "available_capital_usd": 1000.0,
             "total_reserved_risk_usd": 5.0,
         }
         portfolio = {
@@ -530,6 +535,11 @@ class TestBotValidation(unittest.TestCase):
             "risk_amount_usd": 5.0,
             "position_risk_usd": 4.0,
             "fixed_costs_usd": 1.0,
+            "position_size": 1.0,
+            "entry_price_quote": 100.0,
+            "quote_to_usd": 1.0,
+            "position_notional_usd": 100.0,
+            "available_capital_usd": 1000.0,
             "total_reserved_risk_usd": 5.0,
         }
         portfolio = {
@@ -570,6 +580,11 @@ class TestBotValidation(unittest.TestCase):
             "risk_amount_usd": 5.0,
             "position_risk_usd": 4.0,
             "fixed_costs_usd": 1.0,
+            "position_size": 1.0,
+            "entry_price_quote": 100.0,
+            "quote_to_usd": 1.0,
+            "position_notional_usd": 100.0,
+            "available_capital_usd": 1000.0,
             "total_reserved_risk_usd": 5.0,
         }
         portfolio = {
@@ -606,6 +621,11 @@ class TestBotValidation(unittest.TestCase):
             "risk_amount_usd": 5.0,
             "position_risk_usd": 4.0,
             "fixed_costs_usd": 1.0,
+            "position_size": 1.0,
+            "entry_price_quote": 100.0,
+            "quote_to_usd": 1.0,
+            "position_notional_usd": 100.0,
+            "available_capital_usd": 1000.0,
             "total_reserved_risk_usd": 5.0,
         }
         candidate = {**self.candidate, "sizing_result": sizing_result}
