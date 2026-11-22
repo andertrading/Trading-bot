@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import math
+from datetime import datetime
 from pathlib import Path
 
 from config import ASSETS, ACCOUNT_CURRENCY
@@ -33,6 +34,20 @@ def _valid_number(value, *, positive=False):
     return math.isfinite(number) and (number > 0 if positive else number >= 0)
 
 
+def _has_evidence(section: dict) -> bool:
+    source = section.get("source")
+    observed_at = section.get("observed_at")
+    if not isinstance(source, str) or not source.strip():
+        return False
+    if not isinstance(observed_at, str) or not observed_at.strip():
+        return False
+    try:
+        timestamp = datetime.fromisoformat(observed_at.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    return timestamp.tzinfo is not None and timestamp.utcoffset() is not None
+
+
 def validate_registry(registry: dict) -> None:
     if not isinstance(registry, dict) or registry.get("schema_version") != 1:
         raise ValueError("unsupported economic registry schema")
@@ -49,6 +64,8 @@ def validate_registry(registry: dict) -> None:
                 raise ValueError(f"{symbol}: missing {section} evidence section")
         instrument = item["instrument"]
         configured = ASSETS[symbol]
+        if not isinstance(instrument.get("confirmed"), bool):
+            raise ValueError(f"{symbol}: instrument confirmation must be boolean")
         if instrument.get("currency") != configured.get("currency"):
             raise ValueError(f"{symbol}: quote currency differs from config")
         if instrument.get("type") != configured.get("type"):
@@ -68,6 +85,7 @@ def validate_registry(registry: dict) -> None:
 
 
 def valid_fee_side(side: dict) -> bool:
+    """Validate fee values; PERCENT means percentage points (0.01 = 0.01%)."""
     if not isinstance(side, dict):
         return False
     model, unit, value = side.get("model"), side.get("unit"), side.get("value")
@@ -86,16 +104,23 @@ def classify_registry_asset(symbol: str, registry: dict | None = None) -> dict:
         return {"asset": symbol, "status": "INELIGIBLE", "blockers": ["asset_not_configured"]}
     item = registry["assets"][symbol]
     blockers = []
+    instrument = item["instrument"]
+    if (
+        not instrument.get("confirmed") or not _has_evidence(instrument)
+        or not isinstance(instrument.get("listing"), str) or not instrument.get("listing").strip()
+    ):
+        blockers.append("instrument_identity_evidence_missing")
+
     execution = item["execution"]
     execution_type = str(execution.get("type") or "").upper()
-    if not execution.get("confirmed") or not execution.get("source") or not execution.get("observed_at"):
+    if not execution.get("confirmed") or not _has_evidence(execution):
         blockers.append("execution_type_evidence_missing")
     elif execution_type != "REAL":
         blockers.append("mvp_requires_REAL_execution")
 
     fees = item["fees"]
     if (
-        not fees.get("confirmed") or not fees.get("source") or not fees.get("observed_at")
+        not fees.get("confirmed") or not _has_evidence(fees)
         or not valid_fee_side(fees.get("entry"))
         or not valid_fee_side(fees.get("exit"))
     ):
@@ -103,18 +128,18 @@ def classify_registry_asset(symbol: str, registry: dict | None = None) -> dict:
 
     spread = item["spread"]
     if (
-        not spread.get("confirmed") or not spread.get("source") or not spread.get("observed_at")
+        not spread.get("confirmed") or not _has_evidence(spread)
         or not _valid_number(spread.get("bid_ask_bps"))
     ):
         blockers.append("observed_bid_ask_spread_evidence_missing")
 
     basis = item["price_basis"]
-    if not basis.get("confirmed") or not basis.get("source") or not basis.get("observed_at"):
+    if not basis.get("confirmed") or not _has_evidence(basis):
         blockers.append("execution_price_basis_evidence_missing")
 
     minimum = item["minimum_order"]
     if (
-        not minimum.get("confirmed") or not minimum.get("source") or not minimum.get("observed_at")
+        not minimum.get("confirmed") or not _has_evidence(minimum)
         or not _valid_number(minimum.get("minimum_notional"), positive=True)
         or not isinstance(minimum.get("fractional_allowed"), bool)
     ):
@@ -125,7 +150,7 @@ def classify_registry_asset(symbol: str, registry: dict | None = None) -> dict:
         blockers.append("fx_conversion_evidence_missing")
     elif fx.get("required"):
         if (
-            not fx.get("source") or not fx.get("observed_at")
+            not _has_evidence(fx)
             or not _valid_number(fx.get("conversion_fee_pct"))
             or not _valid_number(fx.get("quote_to_account_rate"), positive=True)
         ):
