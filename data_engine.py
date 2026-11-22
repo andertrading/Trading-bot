@@ -1345,6 +1345,33 @@ def _validate_twelvedata_instrument_metadata(asset, config, meta):
         )
         return False
 
+    expected_exchange = config.get("twelvedata_exchange")
+    if expected_exchange is not None and (
+        not isinstance(expected_exchange, str)
+        or exchange.strip().casefold() != expected_exchange.strip().casefold()
+    ):
+        logger.error(
+            "BOLSA INCOMPATIBLE | %s | esperada=%s | recibida=%s",
+            asset,
+            expected_exchange,
+            exchange,
+        )
+        return False
+
+    expected_mic = config.get("twelvedata_mic_code")
+    if expected_mic is not None and (
+        not isinstance(expected_mic, str)
+        or not isinstance(mic_code, str)
+        or mic_code.strip().upper() != expected_mic.strip().upper()
+    ):
+        logger.error(
+            "MIC INCOMPATIBLE | %s | esperado=%s | recibido=%s",
+            asset,
+            expected_mic,
+            mic_code,
+        )
+        return False
+
     expected_timezone = {
         "XNYS": "America/New_York",
         "XLON": "Europe/London",
