@@ -39,7 +39,6 @@ ASSETS = {
         "name": "iShares Core S&P 500",
         "yahoo": "CSPX.L",
         "type": "ETF",
-        "market_calendar": "XLON",
         "currency": "USD",
         "enabled": True,
     },
@@ -47,7 +46,6 @@ ASSETS = {
         "name": "iShares Nasdaq 100",
         "yahoo": "CNDX.L",
         "type": "ETF",
-        "market_calendar": "XLON",
         "currency": "USD",
         "enabled": True,
     },
@@ -55,7 +53,6 @@ ASSETS = {
         "name": "Tesla",
         "yahoo": "TSLA",
         "type": "STOCK",
-        "market_calendar": "XNYS",
         "currency": "USD",
         "enabled": True,
     },
@@ -63,7 +60,6 @@ ASSETS = {
         "name": "Nvidia",
         "yahoo": "NVDA",
         "type": "STOCK",
-        "market_calendar": "XNYS",
         "currency": "USD",
         "enabled": True,
     },
@@ -71,7 +67,6 @@ ASSETS = {
         "name": "Apple",
         "yahoo": "AAPL",
         "type": "STOCK",
-        "market_calendar": "XNYS",
         "currency": "USD",
         "enabled": True,
     },
@@ -79,7 +74,6 @@ ASSETS = {
         "name": "Microsoft",
         "yahoo": "MSFT",
         "type": "STOCK",
-        "market_calendar": "XNYS",
         "currency": "USD",
         "enabled": True,
     },
@@ -87,7 +81,6 @@ ASSETS = {
         "name": "Take-Two Interactive",
         "yahoo": "TTWO",
         "type": "STOCK",
-        "market_calendar": "XNYS",
         "currency": "USD",
         "enabled": True,
     },
@@ -95,7 +88,6 @@ ASSETS = {
         "name": "Bitcoin",
         "yahoo": "BTC-USD",
         "type": "CRYPTO",
-        "market_calendar": "24/7",
         "currency": "USD",
         "enabled": True,
     },
@@ -103,7 +95,6 @@ ASSETS = {
         "name": "Ethereum",
         "yahoo": "ETH-USD",
         "type": "CRYPTO",
-        "market_calendar": "24/7",
         "currency": "USD",
         "enabled": True,
     },
@@ -111,7 +102,6 @@ ASSETS = {
         "name": "Solana",
         "yahoo": "SOL-USD",
         "type": "CRYPTO",
-        "market_calendar": "24/7",
         "currency": "USD",
         "enabled": True,
     },
@@ -119,7 +109,6 @@ ASSETS = {
         "name": "Stellar",
         "yahoo": "XLM-USD",
         "type": "CRYPTO",
-        "market_calendar": "24/7",
         "currency": "USD",
         "enabled": True,
     },
@@ -127,7 +116,6 @@ ASSETS = {
         "name": "XRP",
         "yahoo": "XRP-USD",
         "type": "CRYPTO",
-        "market_calendar": "24/7",
         "currency": "USD",
         "enabled": True,
     },
@@ -161,8 +149,10 @@ ETORO_EXECUTION_TYPES = {
 }
 ETORO_EXECUTION_TYPES_CONFIRMED = False
 
-# Tarifas publicadas; se aplican como escenario base/conservador.
-# Acciones reales: máximo del rango publicado ($1-$2 por lado).
+# Tarifas publicadas; el cargo de acciones puede ser 1 o 2 USD por lado
+# según país de residencia y bolsa. La tarifa exacta del ticket ES no está
+# verificada: usar 2 USD por lado como límite superior conservador hasta
+# confirmarla. El research conserva escenarios de 1 y 2 USD por lado.
 ETORO_STOCK_REAL_COMMISSION_USD_PER_SIDE = 2.0
 # Cripto real: tarifa base Bronze/Silver/Gold, sujeta al nivel Club.
 ETORO_CRYPTO_REAL_FEE_PCT_PER_SIDE = 0.01
