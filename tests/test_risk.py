@@ -302,17 +302,19 @@ class TestRiskManager(unittest.TestCase):
                 available_capital_usd=250,
                 quote_to_usd=1,
                 portfolio_risk_usd=0,
-                costs_per_unit_quote=0,
-                fixed_costs_quote=0,
+                costs_per_unit_quote=1,
+                fixed_costs_quote=2,
             )
 
+        expected_size = 248 / 101
         self.assertEqual(result["status"], "SIMULACION_NO_VALIDADA")
-        self.assertAlmostEqual(result["position_size"], 2.5)
-        self.assertAlmostEqual(result["position_notional_usd"], 250)
+        self.assertAlmostEqual(result["position_size"], expected_size)
+        self.assertAlmostEqual(result["position_notional_usd"], expected_size * 100)
+        self.assertAlmostEqual(result["cash_required_usd"], 250)
         self.assertAlmostEqual(result["available_capital_usd"], 250)
         self.assertTrue(result["cash_limited"])
         self.assertLessEqual(
-            result["position_notional_usd"],
+            result["cash_required_usd"],
             result["available_capital_usd"],
         )
         self.assertLess(result["total_reserved_risk_usd"], result["risk_amount_usd"])
