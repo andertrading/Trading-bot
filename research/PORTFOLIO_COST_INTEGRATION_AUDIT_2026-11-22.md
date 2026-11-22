@@ -37,6 +37,20 @@ Sources checked:
 
 This spot-check supports retaining the published-fee values as **scenario assumptions only**. It does not confirm the user's applicable stock fee, Club tier, actual instrument execution type, market spread, or historical OHLC-to-executable-price mapping. The order ticket's estimated-cost display remains the instrument-level evidence source.
 
+## Effect of fixed stock fees at the $1,000 research reference
+
+Using only the bot's configured research capital and risk tiers (not any personal account data):
+
+| Tier | Planned risk budget | $2 round-trip stock fee | $4 round-trip stock fee |
+|---|---:|---:|---:|
+| A (0.75%) | $7.50 | 26.7% of budget | 53.3% of budget |
+| B (0.50%) | $5.00 | 40.0% of budget | 80.0% of budget |
+| C (0.25%) | $2.50 | 80.0% of budget | 160.0% of budget |
+
+The $2 and $4 scenarios correspond to the public $1-per-side and $2-per-side stock commission cases. These ratios exclude market spread and any other execution friction.
+
+Implications: with the conservative $2-per-side assumption, a C-tier stock trade cannot fit inside its $2.50 all-in stop-risk budget even before variable costs. A B-tier trade has only $1 left for price risk and all other costs. This is a meaningful small-capital friction for fixed-fee stocks; it is not evidence that the strategy is profitable or unprofitable, and it is not a reason to increase risk or change brokers without validated evidence. ETF and crypto cost structures differ and must be evaluated separately.
+
 ## Required integration design
 
 ### 1. One source of truth
