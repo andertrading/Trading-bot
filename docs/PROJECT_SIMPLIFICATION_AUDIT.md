@@ -464,3 +464,6 @@ Nota operativa: como este workflow está dentro de la PR #117 y la PR sigue sin 
 
 
 La única excepción aparente en M15 fue AAPL dentro de esa estrategia MTF: 27 operaciones, +14,15R bruto y solo +1,67R tras costes conocidos. La distribución por folds fue inestable: fold 1 = -0,90R (4 trades), fold 2 = +4,30R (15 trades), fold 3 = -1,73R (8 trades). Además, siguen faltando spread y otros costes. No alcanza el tamaño muestral ni la estabilidad necesarios para convertirlo en una excepción operativa.
+
+
+La ventana OOS de esos folds va del **07/12/2025 al 20/11/2026**; los cinco años solicitados no equivalen a cinco años fuera de muestra. El histórico más largo amplía la base de entrenamiento/diagnóstico, pero la evidencia OOS disponible cubre aproximadamente once meses.
