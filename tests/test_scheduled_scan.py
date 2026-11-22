@@ -193,7 +193,9 @@ class ScheduledScanTests(unittest.TestCase):
             result = scheduled_scan.run_scheduled_scan("15m")
 
         run_scan.assert_called_once_with(
-            timeframes=["15m"], include_paper_bars=True
+            timeframes=["15m"],
+            include_paper_bars=True,
+            paper_assets=["BTC"],
         )
         trade = store.state["paper_forward"]["trades"]["paper-replay-1"]
         self.assertEqual(trade["status"], "CLOSED")
