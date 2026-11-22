@@ -1830,6 +1830,59 @@ def _download_yahoo_alternate_daily(
         return None
 
 
+def _trusted_primary_ohlc_columns(primary_row):
+    """Return primary OHLC fields that remain structurally trustworthy.
+
+    A field that itself violates OHLC ordering is excluded from comparison,
+    because that is the field the alternate listing may be repairing.
+    Other valid primary fields must agree with the alternate listing.
+    """
+    values = {}
+    for column in ("Open", "High", "Low", "Close"):
+        value = pd.to_numeric(
+            pd.Series([primary_row.get(column)]), errors="coerce"
+        ).iloc[0]
+        values[column] = (
+            float(value) if np.isfinite(value) and float(value) > 0 else None
+        )
+
+    trusted = {
+        column for column, value in values.items() if value is not None
+    }
+    open_price = values["Open"]
+    high_price = values["High"]
+    low_price = values["Low"]
+    close_price = values["Close"]
+
+    if (
+        high_price is not None
+        and any(value is not None and high_price < value
+                for value in (low_price, open_price, close_price))
+    ):
+        trusted.discard("High")
+    if (
+        low_price is not None
+        and any(value is not None and low_price > value
+                for value in (high_price, open_price, close_price))
+    ):
+        trusted.discard("Low")
+    if (
+        open_price is not None
+        and high_price is not None
+        and low_price is not None
+        and not low_price <= open_price <= high_price
+    ):
+        trusted.discard("Open")
+    if (
+        close_price is not None
+        and high_price is not None
+        and low_price is not None
+        and not low_price <= close_price <= high_price
+    ):
+        trusted.discard("Close")
+    return trusted
+
+
 def _patch_incoherent_daily_ohlc_from_alternate(
     dataframe, alternate_dataframe, asset, alternate_ticker
 ):
@@ -1878,9 +1931,7 @@ def _patch_incoherent_daily_ohlc_from_alternate(
                 timestamp,
             )
             return None, None
-        primary_close = pd.to_numeric(
-            pd.Series([patched.at[timestamp, "Close"]]), errors="coerce"
-        ).iloc[0]
+        primary_row = patched.loc[timestamp]
         alternate_row = alternate_dataframe.loc[timestamp]
         if isinstance(alternate_row, pd.DataFrame):
             logger.error("Fecha alternativa duplicada al reparar %s", asset)
@@ -1888,25 +1939,32 @@ def _patch_incoherent_daily_ohlc_from_alternate(
         if _invalid_ohlc_mask(alternate_dataframe.loc[[timestamp]]).iloc[0]:
             logger.error("Vela alternativa defectuosa | %s | %s", asset, timestamp)
             return None, None
-        alternate_close = float(alternate_row["Close"])
-        if (
-            not np.isfinite(primary_close)
-            or float(primary_close) <= 0
-            or not np.isfinite(alternate_close)
-            or alternate_close <= 0
-        ):
-            logger.error("No se puede verificar el precio de reparación | %s", asset)
-            return None, None
-        deviation = abs(float(primary_close) / alternate_close - 1.0) * 100.0
-        if deviation > MAX_ALTERNATE_CLOSE_DEVIATION_PCT:
+
+        trusted_columns = _trusted_primary_ohlc_columns(primary_row)
+        if not trusted_columns:
             logger.error(
-                "Divergencia entre listings superior al límite | %s | %s | %.4f%%",
+                "No hay campos OHLC primarios fiables para contrastar la reparación | %s | %s",
                 asset,
                 timestamp,
-                deviation,
             )
             return None, None
-        maximum_deviation = max(maximum_deviation, deviation)
+
+        for column in sorted(trusted_columns):
+            primary_value = float(primary_row[column])
+            alternate_value = float(alternate_row[column])
+            deviation = abs(primary_value / alternate_value - 1.0) * 100.0
+            if deviation > MAX_ALTERNATE_CLOSE_DEVIATION_PCT:
+                logger.error(
+                    "Divergencia OHLC entre listings superior al límite | %s | %s | %s | %.4f%%",
+                    asset,
+                    timestamp,
+                    column,
+                    deviation,
+                )
+                return None, None
+            if column == "Close":
+                maximum_deviation = max(maximum_deviation, deviation)
+
         for column in ("Open", "High", "Low", "Close"):
             patched.at[timestamp, column] = float(alternate_row[column])
 
@@ -1922,6 +1980,7 @@ def _patch_incoherent_daily_ohlc_from_alternate(
         "ohlc_repair_count": len(invalid_index),
         "ohlc_repair_source_ticker": alternate_ticker,
         "ohlc_repair_max_close_deviation_pct": round(maximum_deviation, 6),
+        "ohlc_repair_comparison_policy": "all structurally trustworthy primary OHLC fields <= 0.5% deviation",
     }
     logger.warning(
         "YAHOO ALTERNATE OHLC REPAIR | %s | repaired=%s | source=%s | max_close_deviation=%.4f%%",
