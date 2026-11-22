@@ -51,7 +51,8 @@ from data_engine import (
 from strategies import evaluate_signal
 from risk_manager import risk_pct_for_score
 from portfolio import get_portfolio_status, can_add_sized_trade
-from transaction_costs import estimate_etoro_trade_costs
+from transaction_costs import estimate_verified_registry_trade_costs
+from asset_economic_eligibility import classify_asset as classify_asset_economic
 
 
 faulthandler.enable(all_threads=True)
@@ -630,8 +631,8 @@ def _format_cost_readiness(candidate):
             "• Faltan niveles de entrada u objetivo válidos para auditar costes.",
         ]
 
-    estimate = estimate_etoro_trade_costs(
-        candidate.get("asset"), entry_value, target_value, 1.0, side="BUY"
+    estimate = estimate_verified_registry_trade_costs(
+        candidate.get("asset"), entry_value, target_value, 1.0
     )
     if not isinstance(estimate, dict) or not estimate.get("valid"):
         return [
@@ -640,21 +641,14 @@ def _format_cost_readiness(candidate):
         ]
 
     labels = {
-        "execution_type_unknown": "Tipo REAL/CFD no identificado.",
-        "execution_type_not_confirmed_in_etoro_ticket": "Tipo REAL/CFD pendiente de confirmar en el ticket.",
-        "account_specific_fee_tier_not_confirmed": "Comisiones personales y nivel Club pendientes de confirmar.",
-        "account_currency_not_confirmed": "Divisa de cuenta pendiente de confirmar.",
-        "historical_ohlc_to_etoro_execution_price_basis_unverified": "Precios OHLC sin correspondencia verificada con precios ejecutables.",
-        "live_market_bid_ask_spread_missing": "Spread bid/ask real no disponible.",
-        "invalid_market_spread_bps": "Dato de spread no válido.",
-        "fx_conversion_rate_or_fee_missing": "Conversión de divisa sin tarifa o tipo de cambio confirmado.",
-        "cfd_overnight_charge_units_missing": "Unidades de financiación nocturna CFD no disponibles.",
-        "cfd_benchmark_rate_missing": "Referencia de financiación CFD no disponible.",
-        "cfd_crypto_overnight_fee_missing": "Tarifa nocturna de CFD cripto no disponible.",
-        "cfd_short_borrow_rate_missing": "Coste de préstamo para venta en corto no disponible.",
-        "cfd_short_borrow_rate_threshold_ambiguous": "Clasificación de financiación del corto no resuelta.",
-        "invalid_overnight_charge_units": "Unidades de financiación nocturna no válidas.",
-        "invalid_cfd_annual_rate": "Tasa anual CFD no válida.",
+        "instrument_identity_evidence_missing": "Identidad del instrumento y listing/ISIN sin verificar.",
+        "execution_type_evidence_missing": "Tipo de ejecución REAL/CFD pendiente de confirmar en el ticket.",
+        "mvp_requires_REAL_execution": "El MVP exige ejecución REAL; los CFD quedan excluidos.",
+        "round_trip_fee_evidence_missing": "Comisiones de entrada y salida no verificadas.",
+        "observed_bid_ask_spread_evidence_missing": "Spread bid/ask observado y fechado no disponible.",
+        "execution_price_basis_evidence_missing": "Correspondencia entre histórico y precio ejecutable no documentada.",
+        "minimum_order_rules_evidence_missing": "Mínimo de orden y reglas de fraccionamiento no verificados.",
+        "fx_conversion_evidence_missing": "Conversión FX de la operación pendiente de verificar.",
     }
     missing = estimate.get("unpriced_costs", [])
     lines = []
@@ -663,11 +657,14 @@ def _format_cost_readiness(candidate):
         if label not in lines:
             lines.append(label)
 
-    status = (
-        "Parámetros del modelo completos para una unidad de referencia."
-        if estimate.get("complete") and not missing
-        else "INCOMPLETO — rentabilidad neta no calculable."
-    )
+    registry_status = estimate.get("registry_status")
+    if estimate.get("complete") and registry_status == "ELIGIBLE" and not missing:
+        status = "Evidencia económica verificada para una unidad de referencia."
+    elif registry_status == "INELIGIBLE":
+        status = "INELIGIBLE para el MVP REAL."
+    else:
+        status = "INCOMPLETO — rentabilidad neta no calculable."
+
     return [
         f"Estado: {status}",
         *[f"• {line}" for line in lines],
@@ -1153,6 +1150,33 @@ def apply_validation_gate(result, portfolio_status):
     result["provisional_risk_pct"] = provisional_risk_pct
 
     blockers = get_validation_blockers(portfolio_status)
+
+    try:
+        economic_eligibility = classify_asset_economic(result.get("asset"))
+    except Exception:
+        logger.exception("ECONOMIC ELIGIBILITY ERROR")
+        economic_eligibility = {
+            "status": "COSTS_UNVERIFIED",
+            "blockers": ["economic_eligibility_audit_failed"],
+        }
+    result["economic_eligibility"] = economic_eligibility
+    if (
+        not isinstance(economic_eligibility, dict)
+        or economic_eligibility.get("status") != "ELIGIBLE"
+    ):
+        eligibility_status = (
+            economic_eligibility.get("status", "COSTS_UNVERIFIED")
+            if isinstance(economic_eligibility, dict)
+            else "COSTS_UNVERIFIED"
+        )
+        blockers.append(
+            f"Elegibilidad económica del instrumento: {eligibility_status}."
+        )
+        if isinstance(economic_eligibility, dict):
+            blockers.extend(
+                f"Bloqueo económico: {reason}"
+                for reason in economic_eligibility.get("blockers", [])
+            )
 
     try:
         risk_is_valid = (
