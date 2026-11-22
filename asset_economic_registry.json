@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "policy": "DAILY_LONG_ONLY_UNLEVERAGED_REAL",
-  "description": "Per-instrument evidence register. Null or unconfirmed values block eligibility; never infer costs from public estimates or OHLC data.",
+  "description": "Per-instrument evidence register. Null or unconfirmed values block eligibility; never infer costs from public estimates or OHLC data. PERCENT_NOTIONAL values use percentage points: 0.01 means 0.01%, not a decimal fraction of 1.",
   "assets": {
     "CSPX": {
       "instrument": {
@@ -10,7 +10,10 @@
         "listing": "CSPX.LSE",
         "currency": "USD",
         "calendar": "XLON",
-        "isin": null
+        "isin": null,
+        "confirmed": false,
+        "source": null,
+        "observed_at": null
       },
       "execution": {
         "type": null,
@@ -67,7 +70,10 @@
         "listing": "CNDX.LSE",
         "currency": "USD",
         "calendar": "XLON",
-        "isin": null
+        "isin": null,
+        "confirmed": false,
+        "source": null,
+        "observed_at": null
       },
       "execution": {
         "type": null,
@@ -124,7 +130,10 @@
         "listing": "TSLA",
         "currency": "USD",
         "calendar": "XNYS",
-        "isin": null
+        "isin": null,
+        "confirmed": false,
+        "source": null,
+        "observed_at": null
       },
       "execution": {
         "type": null,
@@ -181,7 +190,10 @@
         "listing": "NVDA",
         "currency": "USD",
         "calendar": "XNYS",
-        "isin": null
+        "isin": null,
+        "confirmed": false,
+        "source": null,
+        "observed_at": null
       },
       "execution": {
         "type": null,
@@ -238,7 +250,10 @@
         "listing": "AAPL",
         "currency": "USD",
         "calendar": "XNYS",
-        "isin": null
+        "isin": null,
+        "confirmed": false,
+        "source": null,
+        "observed_at": null
       },
       "execution": {
         "type": null,
@@ -295,7 +310,10 @@
         "listing": "MSFT",
         "currency": "USD",
         "calendar": "XNYS",
-        "isin": null
+        "isin": null,
+        "confirmed": false,
+        "source": null,
+        "observed_at": null
       },
       "execution": {
         "type": null,
@@ -352,7 +370,10 @@
         "listing": "TTWO",
         "currency": "USD",
         "calendar": "XNYS",
-        "isin": null
+        "isin": null,
+        "confirmed": false,
+        "source": null,
+        "observed_at": null
       },
       "execution": {
         "type": null,
@@ -409,7 +430,10 @@
         "listing": "BTC-USD",
         "currency": "USD",
         "calendar": "24/7",
-        "isin": null
+        "isin": null,
+        "confirmed": false,
+        "source": null,
+        "observed_at": null
       },
       "execution": {
         "type": null,
@@ -466,7 +490,10 @@
         "listing": "ETH-USD",
         "currency": "USD",
         "calendar": "24/7",
-        "isin": null
+        "isin": null,
+        "confirmed": false,
+        "source": null,
+        "observed_at": null
       },
       "execution": {
         "type": null,
@@ -523,7 +550,10 @@
         "listing": "SOL-USD",
         "currency": "USD",
         "calendar": "24/7",
-        "isin": null
+        "isin": null,
+        "confirmed": false,
+        "source": null,
+        "observed_at": null
       },
       "execution": {
         "type": null,
@@ -580,7 +610,10 @@
         "listing": "XLM-USD",
         "currency": "USD",
         "calendar": "24/7",
-        "isin": null
+        "isin": null,
+        "confirmed": false,
+        "source": null,
+        "observed_at": null
       },
       "execution": {
         "type": null,
@@ -637,7 +670,10 @@
         "listing": "XRP-USD",
         "currency": "USD",
         "calendar": "24/7",
-        "isin": null
+        "isin": null,
+        "confirmed": false,
+        "source": null,
+        "observed_at": null
       },
       "execution": {
         "type": null,
