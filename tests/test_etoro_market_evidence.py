@@ -1,7 +1,7 @@
 import unittest
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from etoro_market_evidence import EtoroMarketEvidenceClient, collect_market_evidence
 from etoro_read_only import EtoroAPIError, EtoroCostEstimate, EtoroInstrumentEligibility, EtoroQuote, EtoroResponse
@@ -76,6 +76,33 @@ class MarketEvidenceTests(unittest.TestCase):
         self.assertEqual(len(client.cost_payloads), 1)
         self.assertEqual(client.cost_payloads[0]["settlementType"], "real")
         self.assertEqual(client.cost_payloads[0]["leverage"], 1)
+
+    def test_live_capture_uses_fresh_clock_for_each_sequential_request(self):
+        class AdvancingDateTime:
+            calls = 0
+            base = datetime(2026, 11, 22, 12, 0, tzinfo=timezone.utc)
+
+            @classmethod
+            def now(cls, tz=None):
+                cls.calls += 1
+                value = cls.base + timedelta(seconds=8 * (cls.calls - 1))
+                return value if tz is None else value.astimezone(tz)
+
+        client = FakeMarketEvidenceClient()
+        with patch("etoro_market_evidence.datetime", AdvancingDateTime):
+            report = collect_market_evidence(client, symbols={
+                "AAPL": {"market_calendar": "XNYS", "type": "STOCK"},
+                "BTC": {"market_calendar": "24/7", "type": "CRYPTO"},
+            })
+
+        self.assertEqual(report["summary"]["status"], "COMPLETE", report)
+        self.assertEqual(report["assets"]["AAPL"]["quote"]["age_seconds"], 8.0)
+        self.assertEqual(report["assets"]["BTC"]["quote"]["age_seconds"], 8.0)
+        self.assertEqual(len(client.cost_payloads), 1)
+        self.assertEqual(
+            report["assets"]["AAPL"]["hypothetical_open_cost"]["last_updated"],
+            "2026-11-22T12:00:24+00:00",
+        )
 
     def test_cost_query_amount_is_at_least_account_minimum(self):
         client = FakeMarketEvidenceClient()

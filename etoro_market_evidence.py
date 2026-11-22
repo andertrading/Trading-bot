@@ -81,6 +81,7 @@ def collect_market_evidence(client: Any, *, symbols: Mapping[str, Mapping[str, A
                             now_utc: datetime | None = None,
                             sample_amount_usd: Decimal = Decimal("100")) -> dict[str, Any]:
     symbols = ASSETS if symbols is None else symbols
+    clock_is_injected = now_utc is not None
     now_utc = datetime.now(timezone.utc) if now_utc is None else now_utc
     if now_utc.tzinfo is None or now_utc.utcoffset() != timezone.utc.utcoffset(now_utc):
         raise ValueError("now_utc debe estar expresado en UTC")
@@ -192,8 +193,15 @@ def collect_market_evidence(client: Any, *, symbols: Mapping[str, Mapping[str, A
             }
 
         try:
+            # Use a fresh reference immediately before each network request.
+            # The API can return timestamps several seconds after the report's
+            # initial captured_at; reusing that initial timestamp falsely marks
+            # valid crypto quotes and cost estimates as future-dated.
+            quote_reference_now = (
+                now_utc if clock_is_injected else datetime.now(timezone.utc)
+            )
             quote = client.get_realtime_quotes(
-                [iid], now_utc,
+                [iid], quote_reference_now,
                 asset_calendars={iid: symbols[asset].get("market_calendar", "24/7")},
             )[iid]
             midpoint = (quote.bid + quote.ask) / Decimal("2")
@@ -202,7 +210,10 @@ def collect_market_evidence(client: Any, *, symbols: Mapping[str, Mapping[str, A
                 spread_absolute / midpoint * Decimal("10000")
                 if midpoint > 0 else None
             )
-            quote_age_seconds = (now_utc - quote.timestamp).total_seconds()
+            quote_age_reference = (
+                now_utc if clock_is_injected else datetime.now(timezone.utc)
+            )
+            quote_age_seconds = (quote_age_reference - quote.timestamp).total_seconds()
             record["quote"] = {
                 "bid": str(quote.bid),
                 "ask": str(quote.ask),
@@ -232,7 +243,12 @@ def collect_market_evidence(client: Any, *, symbols: Mapping[str, Mapping[str, A
             "amount": str(sample_amount), "orderCurrency": "usd",
         }
         try:
-            estimate: EtoroCostEstimate = client.get_validated_what_if_costs(payload, now_utc)
+            cost_reference_now = (
+                now_utc if clock_is_injected else datetime.now(timezone.utc)
+            )
+            estimate: EtoroCostEstimate = client.get_validated_what_if_costs(
+                payload, cost_reference_now
+            )
             components = {key: str(value) for key, value in sorted(estimate.costs.items())}
             record["hypothetical_open_cost"] = {
                 "scope": "HYPOTHETICAL_OPEN_ONLY", "sample_amount_usd": str(sample_amount),
