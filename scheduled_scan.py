@@ -34,6 +34,31 @@ logging.basicConfig(
 
 
 def _send_signal_report(scan_result: dict, candidate: dict, signal: dict) -> bool:
+    """Send production alerts only for individually admitted daily REAL candidates.
+
+    The global strategy switch is not an override for per-candidate validation.
+    M15 remains a research/lab timeframe and cannot emit operational alerts.
+    """
+    economic = candidate.get("economic_eligibility")
+    if (
+        not isinstance(candidate, dict)
+        or candidate.get("action") != "BUY CANDIDATE"
+        or candidate.get("timeframe") != "1d"
+        or candidate.get("direction", "LONG") != "LONG"
+        or candidate.get("validation_status") != "APPROVED"
+        or candidate.get("tradable") is not True
+        or candidate.get("validated") is not True
+        or not isinstance(economic, dict)
+        or economic.get("status") != "ELIGIBLE"
+        or STRATEGY_VALIDATED is not True
+    ):
+        logger.warning(
+            "OPERATIONAL ALERT BLOCKED | %s | %s | candidate admission incomplete",
+            candidate.get("asset") if isinstance(candidate, dict) else "UNKNOWN",
+            candidate.get("timeframe") if isinstance(candidate, dict) else "UNKNOWN",
+        )
+        return False
+
     report_candidate = dict(candidate)
     report_candidate["expires_at"] = signal["expires_at"]
     report_candidate["generated_at"] = signal.get("generated_at")
