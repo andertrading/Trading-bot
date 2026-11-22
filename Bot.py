@@ -1178,6 +1178,33 @@ def apply_validation_gate(result, portfolio_status):
                 for reason in economic_eligibility.get("blockers", [])
             )
 
+    data_timestamp = result.get("data_timestamp")
+    data_age_minutes = result.get("data_age_minutes")
+    data_validation_ok = False
+    try:
+        parsed_data_timestamp = datetime.fromisoformat(
+            str(data_timestamp).replace("Z", "+00:00")
+        )
+        data_validation_ok = (
+            result.get("data_valid") is True
+            and parsed_data_timestamp.tzinfo is not None
+            and parsed_data_timestamp <= datetime.now(timezone.utc)
+            and isinstance(data_age_minutes, (int, float))
+            and not isinstance(data_age_minutes, bool)
+            and math.isfinite(float(data_age_minutes))
+            and float(data_age_minutes) >= 0
+        )
+    except (TypeError, ValueError, OverflowError):
+        data_validation_ok = False
+
+    result["data_validation_status"] = (
+        "VALID" if data_validation_ok else "INVALID"
+    )
+    if not data_validation_ok:
+        blockers.append(
+            "Datos de mercado no validados o timestamp de datos no verificable"
+        )
+
     try:
         risk_is_valid = (
             isinstance(provisional_risk_pct, (int, float))
