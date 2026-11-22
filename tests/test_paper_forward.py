@@ -130,6 +130,18 @@ class PaperForwardTests(unittest.TestCase):
         self.assertEqual(trade["exit_reason"], "TIME_EXIT")
         self.assertEqual(trade["exit_fill_price"], 101.0)
 
+    def test_zero_provisional_risk_never_creates_a_paper_fill(self):
+        process_signal_bar(
+            self.state, signal(),
+            bar("2026-11-22T10:15:00+00:00", 99, 101, 98, 100),
+            risk_fraction=0.0,
+        )
+        self.assertEqual(
+            self.state["trades"]["s1"]["status"],
+            "REJECTED_INVALID_RISK_POLICY",
+        )
+        self.assertEqual(self.state["open_risk_usd"], 0.0)
+
     def test_hard_per_trade_risk_cap_cannot_be_overridden(self):
         with self.assertRaises(ValueError):
             process_signal_bar(
