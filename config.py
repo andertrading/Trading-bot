@@ -42,6 +42,8 @@ ASSETS = {
         "market_calendar": "XLON",
         "currency": "USD",
         "enabled": True,
+        "twelvedata_exchange": "London Stock Exchange",
+        "twelvedata_mic_code": "XLON",
     },
     "CNDX": {
         "name": "iShares Nasdaq 100",
@@ -50,6 +52,8 @@ ASSETS = {
         "market_calendar": "XLON",
         "currency": "USD",
         "enabled": True,
+        "twelvedata_exchange": "London Stock Exchange",
+        "twelvedata_mic_code": "XLON",
     },
     "TSLA": {
         "name": "Tesla",
