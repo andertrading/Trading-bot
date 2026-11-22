@@ -177,3 +177,10 @@ La auditoría descargó datos reales de EODHD, Yahoo LSE y, como contraste indep
 - No cambiar producción ni aceptar estrategia alguna a partir de esta auditoría.
 
 Artefacto reproducible: ejecución [44980363657](https://github.com/andertrading/Trading-bot/actions/runs/44980363657), artefacto etf-provider-overlap-audit. CI de tests del mismo commit: [44980363667](https://github.com/andertrading/Trading-bot/actions/runs/44980363667), correcto.
+
+
+## Integración del registro económico con el auditor (PR de integración)
+
+El registro individual es la fuente de verdad para los activos configurados. `asset_economic_eligibility.py` conserva su interfaz y el formato del informe existente, pero delega la clasificación de cada activo real configurado en `asset_economic_registry.py`. Los argumentos explícitos de prueba siguen usando la ruta aislada de clasificación para no romper los tests unitarios.
+
+Así se evita mantener dos conjuntos independientes de costes confirmados. Los blockers del registro se traducen al vocabulario histórico del informe para preservar compatibilidad. La integración no conecta el registro con sizing, señales, alertas, paper ledger ni ejecución.
