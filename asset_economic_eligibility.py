@@ -13,6 +13,7 @@ from typing import Any
 from config import (
     ACCOUNT_CURRENCY,
     ASSETS,
+    CLOSE_FEES_CONFIRMED,
     ETORO_ACCOUNT_CURRENCY_CONFIRMED,
     ETORO_EXECUTION_PRICE_BASIS_CONFIRMED,
     ETORO_EXECUTION_TYPES,
@@ -20,6 +21,7 @@ from config import (
     ETORO_FEE_SCHEDULE_CONFIRMED,
     ETORO_FX_CONVERSION_FEE_PCT,
     ETORO_MARKET_SPREAD_BPS,
+    SPREADS_CONFIRMED,
 )
 
 
@@ -40,8 +42,10 @@ def classify_asset(
     execution_type: str | None = None,
     execution_type_confirmed: bool | None = None,
     fee_schedule_confirmed: bool | None = None,
+    close_fees_confirmed: bool | None = None,
     execution_price_basis_confirmed: bool | None = None,
     market_spread_bps: float | None = None,
+    spreads_confirmed: bool | None = None,
     account_currency: str | None = None,
     account_currency_confirmed: bool | None = None,
     fx_conversion_fee_pct: float | None = None,
@@ -108,6 +112,13 @@ def classify_asset(
     )
     if not fee_confirmed:
         blockers.append("account_specific_fee_schedule_not_confirmed")
+    close_confirmed = (
+        CLOSE_FEES_CONFIRMED
+        if close_fees_confirmed is None
+        else bool(close_fees_confirmed)
+    )
+    if not close_confirmed:
+        blockers.append("round_trip_close_fee_not_confirmed")
 
     price_basis_confirmed = (
         ETORO_EXECUTION_PRICE_BASIS_CONFIRMED
@@ -122,6 +133,13 @@ def classify_asset(
         if market_spread_bps is None
         else market_spread_bps
     )
+    spread_confirmed = (
+        SPREADS_CONFIRMED
+        if spreads_confirmed is None
+        else bool(spreads_confirmed)
+    )
+    if not spread_confirmed:
+        blockers.append("bid_ask_spread_measurement_not_confirmed")
     if not _valid_non_negative_number(spread):
         blockers.append("observed_bid_ask_spread_missing_or_invalid")
 
