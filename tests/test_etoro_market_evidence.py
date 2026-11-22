@@ -104,5 +104,31 @@ class MarketEvidenceTests(unittest.TestCase):
         self.assertEqual(report["assets"]["AAPL"]["hypothetical_open_cost"]["status"], "SKIPPED")
 
 
+    def test_missing_eligibility_record_marks_capture_partial(self):
+        client = FakeMarketEvidenceClient()
+        original = client.get_validated_instrument_eligibility
+
+        def incomplete(ids):
+            result = original(ids)
+            result.pop(102, None)
+            return result
+
+        client.get_validated_instrument_eligibility = incomplete
+        report = collect_market_evidence(
+            client,
+            symbols={"AAPL": {"market_calendar": "XNYS"}, "BTC": {"market_calendar": "24/7"}},
+            now_utc=datetime(2026, 11, 22, 12, 0, tzinfo=timezone.utc),
+        )
+
+        self.assertEqual(report["summary"]["status"], "PARTIAL")
+        self.assertEqual(report["summary"]["assets_with_errors"], 1)
+        self.assertTrue(any(
+            error.startswith("eligibility:")
+            for error in report["assets"]["BTC"]["errors"]
+        ))
+        self.assertIsNone(report["assets"]["BTC"]["eligibility"])
+        self.assertIsNone(report["assets"]["BTC"]["hypothetical_open_cost"])
+
+
 if __name__ == "__main__":
     unittest.main()
