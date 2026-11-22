@@ -746,7 +746,10 @@ class CostEstimateValidationTests(unittest.TestCase):
         with self.assertRaises(EtoroAPIError):
             normalize_cost_estimate(response, now_utc=self.now, expected_instrument_id=999)
         stale = dict(self.data, lastUpdated="2026-11-21T11:50:00Z")
-        with self.assertRaises(EtoroAPIError):
+        with self.assertRaisesRegex(
+            EtoroAPIError,
+            r"age_seconds=600\.000.*max_age_seconds=300.*lastUpdated=.*now_utc=",
+        ):
             normalize_cost_estimate(
                 EtoroResponse(stale, 200, {}),
                 now_utc=self.now,

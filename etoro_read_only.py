@@ -861,7 +861,11 @@ def normalize_cost_estimate(
         raise EtoroAPIError("lastUpdated no está expresado en UTC")
     age_seconds = (now_utc - updated).total_seconds()
     if age_seconds < -5 or age_seconds > max_age_seconds:
-        raise EtoroAPIError("La estimación de costes está obsoleta o tiene fecha futura")
+        raise EtoroAPIError(
+            "La estimación de costes está obsoleta o tiene fecha futura "
+            f"(age_seconds={age_seconds:.3f}, max_age_seconds={max_age_seconds}, "
+            f"lastUpdated={updated.isoformat()}, now_utc={now_utc.isoformat()})"
+        )
 
     return EtoroCostEstimate(
         instrument_id=instrument_id,
