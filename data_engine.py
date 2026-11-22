@@ -1301,29 +1301,28 @@ def _log_dataframe_timestamps(provider, asset, interval, df):
 # ---------------------------------------------------------------------
 
 def _validate_twelvedata_instrument_metadata(asset, config, meta):
-    """Reject Twelve Data series without minimally consistent instrument metadata."""
+    """Reject incomplete or inconsistent Twelve Data instrument metadata."""
     if not isinstance(meta, dict):
         return False
 
     exchange = meta.get("exchange")
-    mic_code = meta.get("mic_code")
     provider_type = meta.get("type")
-
     if not all(
         isinstance(value, str) and value.strip()
-        for value in (exchange, mic_code, provider_type)
+        for value in (exchange, provider_type)
     ):
         logger.error(
-            "IDENTIDAD DE INSTRUMENTO INCOMPLETA | %s | faltan exchange, mic_code o type",
+            "IDENTIDAD DE INSTRUMENTO INCOMPLETA | %s | faltan exchange o type",
             asset,
         )
         return False
 
+    configured_type = config.get("type")
     expected_type = {
         "STOCK": "Common Stock",
         "ETF": "ETF",
         "CRYPTO": "Digital Currency",
-    }.get(config.get("type"))
+    }.get(configured_type)
 
     if expected_type is None or provider_type.strip().casefold() != expected_type.casefold():
         logger.error(
@@ -1334,8 +1333,18 @@ def _validate_twelvedata_instrument_metadata(asset, config, meta):
         )
         return False
 
-    # Validate the exchange timezone against the configured market calendar.
-    # Exchange/MIC identity itself is recorded, not guessed from the ticker.
+    # Twelve Data documents MIC codes for securities, but not for digital
+    # currencies. Do not reject crypto merely because no MIC exists.
+    mic_code = meta.get("mic_code")
+    if configured_type != "CRYPTO" and not (
+        isinstance(mic_code, str) and mic_code.strip()
+    ):
+        logger.error(
+            "MIC DE INSTRUMENTO NO VERIFICABLE | %s | falta mic_code",
+            asset,
+        )
+        return False
+
     expected_timezone = {
         "XNYS": "America/New_York",
         "XLON": "Europe/London",
@@ -1359,7 +1368,7 @@ def _validate_twelvedata_instrument_metadata(asset, config, meta):
         "IDENTIDAD TWELVE DATA | %s | exchange=%s | mic_code=%s | type=%s | timezone=%s",
         asset,
         exchange.strip(),
-        mic_code.strip().upper(),
+        mic_code.strip().upper() if isinstance(mic_code, str) else "N/A",
         provider_type.strip(),
         meta.get("exchange_timezone"),
     )
