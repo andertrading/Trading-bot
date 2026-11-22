@@ -40,6 +40,12 @@ The audit mirrored the production repair safeguards (same-date alternate bar, co
 
 This is strong evidence that the existing structural repair routine can repair the detected bad rows. The audit assesses eligibility against the real downloaded rows; the automated tests separately exercise the repair function and extended-download orchestration. It does **not** repair the CSPX high-series anomalies because those bars are structurally valid.
 
+### Live smoke test through the production helper
+
+The controlled GitHub Actions run executed `data_engine._download_yahoo(..., "1d")` against live public market data with the five-year lookback. The actual helper successfully repaired 2 CSPX bars from CSSPX.SW (maximum close deviation 0.2293%) and 9 CNDX bars from CSNDX.SW (0.1744%). It then correctly rejected both complete histories because the LSE session on **2025-10-24 is missing**. The UK exchange calendar identifies it as a valid session (previous session 2025-10-23; next 2025-10-27).
+
+This is a useful fail-closed result: the repair routine itself works on real downloaded data, but the full history is still not usable because a missing session remains. The smoke test did not produce an accepted backtest dataframe for either ETF. Do not bypass the gap validator or silently forward-fill the missing candle.
+
 ### Five-year comparison between the two Yahoo listings
 
 The same-share-class LSE and SIX yfinance histories overlap for 1,236 CSPX sessions and 1,233 CNDX sessions:
@@ -70,9 +76,9 @@ Within the recent EODHD overlap, the Yahoo LSE 2026-03-02 bar is internally inco
 
 1. Add provider-quality checks that test OHLC coherence **and** cross-provider range anomalies on the overlapping window.
 2. Reject the CSPX Yahoo LSE extended history for any research that depends on High/Low until the source or repair method is validated.
-3. Complete the controlled live-network run of the real extended-history helper; verify all repairs and final OHLC integrity.
+3. Resolve the missing 2025-10-24 LSE session using an independently validated same-date source (EODHD/SIX); only fill it if OHLC and close-deviation checks pass, otherwise keep rejecting the history.
 4. Obtain an independent five-year OHLC source before certifying older Yahoo history; EODHD returned only one year in this run.
-5. For CNDX, confirm the repair smoke test and validate the longer history against an independent source.
+5. Re-run the production smoke test after the missing-session handling is fixed, and verify final OHLC integrity and complete exchange-calendar coverage.
 6. Investigate SIX as a CSPX historical source, but do not substitute or patch highs until its older history is independently validated.
 7. Keep EODHD as the current live daily source; do not switch production routing based on this diagnostic.
 8. Do not run new strategy optimization until the historical/live OHLC basis is consistent enough for the chosen research window.
