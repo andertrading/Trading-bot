@@ -15,6 +15,8 @@ from strategy_research import (
     daily_swing_trend_pullback,
     daily_swing_ema_reclaim,
     daily_swing_donchian_breakout,
+    daily_swing_volume_confirmed_breakout,
+    mtf_daily_volume_confirmed_breakout,
     _asset_class_universes,
 )
 
@@ -199,6 +201,106 @@ class TestDailySwingDonchianBreakout(unittest.TestCase):
         short = self._history().iloc[:20]
         self.assertEqual(
             daily_swing_donchian_breakout(short, "AAPL", "1d", index=19)["action"],
+            "NO TRADE",
+        )
+
+
+class TestVolumeConfirmedBreakouts(unittest.TestCase):
+
+    def test_daily_volume_breakout_requires_trend_breakout_and_volume(self):
+        rows = [
+            {
+                "Close": 103.0, "EMA50": 102.0, "EMA200": 100.0,
+                "ATR": 2.0, "ATR_PERCENT": 2.0, "HIGH20": 105.0,
+                "RELATIVE_VOLUME": 1.8,
+            }
+            for _ in range(20)
+        ]
+        rows.append({
+            "Close": 110.0, "EMA50": 104.0, "EMA200": 100.0,
+            "ATR": 2.0, "ATR_PERCENT": 2.0, "HIGH20": 105.0,
+            "RELATIVE_VOLUME": 1.8,
+        })
+        data = pd.DataFrame(rows)
+        result = daily_swing_volume_confirmed_breakout(
+            data, "AAPL", "1d", index=20
+        )
+        self.assertEqual(result["action"], "BUY CANDIDATE")
+        self.assertFalse(result["tradable"])
+        self.assertFalse(result["validated"])
+
+        data.loc[20, "RELATIVE_VOLUME"] = 1.49
+        blocked = daily_swing_volume_confirmed_breakout(
+            data, "AAPL", "1d", index=20
+        )
+        self.assertEqual(blocked["action"], "NO TRADE")
+
+    def test_daily_volume_breakout_rejects_wrong_timeframe_and_weak_trend(self):
+        rows = [
+            {
+                "Close": 103.0, "EMA50": 102.0, "EMA200": 100.0,
+                "ATR": 2.0, "ATR_PERCENT": 2.0, "HIGH20": 105.0,
+                "RELATIVE_VOLUME": 1.8,
+            }
+            for _ in range(20)
+        ]
+        rows.append({
+            "Close": 110.0, "EMA50": 99.0, "EMA200": 100.0,
+            "ATR": 2.0, "ATR_PERCENT": 2.0, "HIGH20": 105.0,
+            "RELATIVE_VOLUME": 1.8,
+        })
+        data = pd.DataFrame(rows)
+        self.assertEqual(
+            daily_swing_volume_confirmed_breakout(
+                data, "AAPL", "15m", index=20
+            )["action"],
+            "NO TRADE",
+        )
+        self.assertEqual(
+            daily_swing_volume_confirmed_breakout(
+                data, "AAPL", "1d", index=20
+            )["action"],
+            "NO TRADE",
+        )
+
+    def test_mtf_volume_breakout_requires_daily_context_and_volume(self):
+        data = pd.DataFrame([{
+            "DAILY_TREND_UP": True,
+            "DAILY_PRICE_ABOVE_EMA200": True,
+            "Close": 110.0, "EMA20": 108.0, "EMA50": 105.0,
+            "RSI": 60.0, "MACD": 2.0, "MACD_SIGNAL": 1.0,
+            "ATR": 2.0, "ATR_PERCENT": 2.0, "HIGH20": 107.0,
+            "RELATIVE_VOLUME": 1.8,
+        }])
+        result = mtf_daily_volume_confirmed_breakout(
+            data, "AAPL", "15m", index=0
+        )
+        self.assertEqual(result["action"], "BUY CANDIDATE")
+        self.assertFalse(result["tradable"])
+        self.assertFalse(result["validated"])
+
+        data.loc[0, "DAILY_PRICE_ABOVE_EMA200"] = False
+        blocked = mtf_daily_volume_confirmed_breakout(
+            data, "AAPL", "15m", index=0
+        )
+        self.assertEqual(blocked["action"], "NO TRADE")
+
+        data.loc[0, "DAILY_PRICE_ABOVE_EMA200"] = True
+        data.loc[0, "RELATIVE_VOLUME"] = 1.0
+        blocked = mtf_daily_volume_confirmed_breakout(
+            data, "AAPL", "15m", index=0
+        )
+        self.assertEqual(blocked["action"], "NO TRADE")
+
+    def test_mtf_volume_breakout_rejects_daily_timeframe(self):
+        data = pd.DataFrame([{
+            "DAILY_TREND_UP": True,
+            "DAILY_PRICE_ABOVE_EMA200": True,
+        }])
+        self.assertEqual(
+            mtf_daily_volume_confirmed_breakout(
+                data, "AAPL", "1d", index=0
+            )["action"],
             "NO TRADE",
         )
 

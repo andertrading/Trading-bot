@@ -320,6 +320,108 @@ def daily_swing_donchian_breakout(data, asset, timeframe, index=-1):
     )
 
 
+def daily_swing_volume_confirmed_breakout(data, asset, timeframe, index=-1):
+    """Daily trend breakout confirmed by unusually high relative volume."""
+    if timeframe != "1d":
+        return {"action": "NO TRADE"}
+    resolved_index = index if index >= 0 else len(data) + index
+    if resolved_index < 20 or resolved_index >= len(data):
+        return {"action": "NO TRADE"}
+
+    row = data.iloc[resolved_index]
+    required = (
+        "Close", "EMA50", "EMA200", "ATR", "ATR_PERCENT",
+        "HIGH20", "RELATIVE_VOLUME",
+    )
+    values = {key: _number(row, key) for key in required}
+    if any(value is None for value in values.values()):
+        return {"action": "NO TRADE"}
+
+    established_uptrend = (
+        values["EMA50"] > values["EMA200"]
+        and values["Close"] > values["EMA50"]
+    )
+    confirmed_breakout = values["Close"] > values["HIGH20"]
+    volume_confirmed = values["RELATIVE_VOLUME"] >= 1.5
+    volatility_ok = (
+        0 < values["ATR_PERCENT"] <= strategies.MAX_ATR_PERCENT
+        and values["ATR"] > 0
+    )
+    if not (
+        established_uptrend
+        and confirmed_breakout
+        and volume_confirmed
+        and volatility_ok
+    ):
+        return {"action": "NO TRADE"}
+
+    return _candidate(
+        data, asset, timeframe, resolved_index,
+        [
+            "Tendencia diaria EMA50 sobre EMA200",
+            "Cierre diario sobre EMA50",
+            "Ruptura del máximo de las 20 sesiones anteriores",
+            "Volumen relativo igual o superior a 1,5",
+        ],
+    )
+
+
+def mtf_daily_volume_confirmed_breakout(data, asset, timeframe, index=-1):
+    """M15 breakout with completed-daily trend and relative-volume confirmation."""
+    if timeframe != "15m":
+        return {"action": "NO TRADE"}
+    row = data.iloc[index]
+    if row.get("DAILY_TREND_UP") is not True and row.get("DAILY_TREND_UP") != 1:
+        return {"action": "NO TRADE"}
+    if (
+        row.get("DAILY_PRICE_ABOVE_EMA200") is not True
+        and row.get("DAILY_PRICE_ABOVE_EMA200") != 1
+    ):
+        return {"action": "NO TRADE"}
+
+    required = (
+        "Close", "EMA20", "EMA50", "RSI", "MACD", "MACD_SIGNAL",
+        "ATR", "ATR_PERCENT", "HIGH20", "RELATIVE_VOLUME",
+    )
+    values = {key: _number(row, key) for key in required}
+    if any(value is None for value in values.values()):
+        return {"action": "NO TRADE"}
+
+    intraday_trend = (
+        values["EMA20"] > values["EMA50"]
+        and values["Close"] > values["EMA20"]
+    )
+    confirmed_breakout = values["Close"] > values["HIGH20"]
+    momentum = (
+        52 <= values["RSI"] <= 75
+        and values["MACD"] > values["MACD_SIGNAL"]
+    )
+    volume_confirmed = values["RELATIVE_VOLUME"] >= 1.5
+    volatility_ok = (
+        0 < values["ATR_PERCENT"] <= strategies.MAX_ATR_PERCENT
+        and values["ATR"] > 0
+    )
+    if not (
+        intraday_trend
+        and confirmed_breakout
+        and momentum
+        and volume_confirmed
+        and volatility_ok
+    ):
+        return {"action": "NO TRADE"}
+
+    return _candidate(
+        data, asset, timeframe, index,
+        [
+            "Tendencia diaria completada alcista y precio sobre EMA200",
+            "EMA20 intradía sobre EMA50",
+            "Ruptura del máximo de las 20 velas anteriores",
+            "RSI y MACD intradía alcistas",
+            "Volumen relativo igual o superior a 1,5",
+        ],
+    )
+
+
 STRATEGIES = {
     "baseline": baseline,
     "trend_pullback_reclaim": trend_pullback_reclaim,
@@ -329,6 +431,8 @@ STRATEGIES = {
     "daily_swing_trend_pullback": daily_swing_trend_pullback,
     "daily_swing_ema_reclaim": daily_swing_ema_reclaim,
     "daily_swing_donchian_breakout": daily_swing_donchian_breakout,
+    "daily_swing_volume_confirmed_breakout": daily_swing_volume_confirmed_breakout,
+    "mtf_daily_volume_confirmed_breakout": mtf_daily_volume_confirmed_breakout,
 }
 
 
