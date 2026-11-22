@@ -49,6 +49,16 @@ class FakeAuditClient:
             "pagination": {"hasNext": False, "nextPageToken": None, "pageSize": page_size},
         }, 200, {})
 
+    def get_instrument_display_data(self, instrument_ids):
+        return EtoroResponse({"instrumentDisplayDatas":[{
+            "instrumentID":iid,"exchangeID":1,"symbolFull":"TSLA","priceSource":"Nasdaq"
+        } for iid in instrument_ids]},200,{})
+
+    def get_supported_exchanges(self, exchange_ids):
+        return EtoroResponse({"exchangeInfo":[{
+            "exchangeID":eid,"exchangeDescription":"NASDAQ"
+        } for eid in exchange_ids]},200,{})
+
     def get_validated_instrument_eligibility(self, instrument_ids, currency="USD"):
         self.eligibility_calls += 1
         return {
@@ -97,9 +107,37 @@ class ReadOnlyAuditTests(unittest.TestCase):
         self.assertFalse(report["portfolio_risk_admission_ready"])
         self.assertTrue(report["overall_pass"])
         self.assertEqual(report["instrument_resolution"][0]["instrument_id"], 123)
+        self.assertTrue(report["market_metadata_validated"])
+        self.assertTrue(report["exchange_metadata_validated"])
+        self.assertEqual(report["instrument_resolution"][0]["exchange_description"], "NASDAQ")
+        self.assertEqual(report["instrument_resolution"][0]["market_calendar"], "XNYS")
         self.assertNotIn("available_cash", str(report))
         self.assertNotIn("positions", str(report))
         self.assertEqual(client.quote_calls[0][0], [123])
+
+    def test_unknown_exchange_blocks_quotes_and_overall_pass(self):
+        class UnknownExchangeClient(FakeAuditClient):
+            def get_supported_exchanges(self, exchange_ids):
+                return EtoroResponse({"exchangeInfo":[{
+                    "exchangeID":eid,"exchangeDescription":"Unmapped Venue"
+                } for eid in exchange_ids]},200,{})
+        client=UnknownExchangeClient()
+        report=run_audit(client,self.assets,"USD",self.now)
+        self.assertFalse(report["overall_pass"])
+        self.assertTrue(report["market_metadata_validated"])
+        self.assertEqual(report["instrument_resolution"][0]["market_metadata_status"],
+                         "UNSUPPORTED_OR_AMBIGUOUS_EXCHANGE")
+        self.assertEqual(client.quote_calls,[])
+
+    def test_missing_instrument_metadata_blocks_quotes(self):
+        class MissingMetadataClient(FakeAuditClient):
+            def get_instrument_display_data(self, instrument_ids):
+                return EtoroResponse({"instrumentDisplayDatas":[]},200,{})
+        client=MissingMetadataClient()
+        report=run_audit(client,self.assets,"USD",self.now)
+        self.assertFalse(report["overall_pass"])
+        self.assertFalse(report["market_metadata_validated"])
+        self.assertEqual(client.quote_calls,[])
 
     def test_unresolved_asset_fails_without_guessing_an_id(self):
         client = FakeAuditClient(missing_symbols={"TSLA", "Tesla"})
