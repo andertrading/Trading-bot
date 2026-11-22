@@ -309,6 +309,52 @@ def can_add_sized_trade(
     effective_capital = (
         INITIAL_CAPITAL_USD if capital_usd is None else capital_usd
     )
+    if not positions_confirmed or not isinstance(open_positions, (list, tuple)):
+        return {
+            "allowed": False,
+            "reason": "Las posiciones abiertas no están confirmadas; no se puede verificar el efectivo disponible.",
+            "currency": "USD",
+        }
+
+    open_notional_usd = 0.0
+    for index, position in enumerate(open_positions):
+        if not isinstance(position, dict):
+            return {
+                "allowed": False,
+                "reason": f"La posición abierta {index + 1} no tiene un formato válido para comprobar efectivo.",
+                "currency": "USD",
+            }
+        position_notional = position.get("notional_usd")
+        if not _is_finite_number(position_notional) or float(position_notional) < 0:
+            return {
+                "allowed": False,
+                "reason": f"El nominal de la posición abierta {index + 1} no está confirmado.",
+                "currency": "USD",
+            }
+        open_notional_usd += float(position_notional)
+        if not _is_finite_number(open_notional_usd):
+            return {
+                "allowed": False,
+                "reason": "La suma del nominal abierto no es válida.",
+                "currency": "USD",
+            }
+
+    remaining_cash_from_positions_usd = (
+        float(effective_capital) - open_notional_usd
+        if _is_finite_number(effective_capital)
+        else None
+    )
+    if (
+        remaining_cash_from_positions_usd is None
+        or remaining_cash_from_positions_usd < -1e-8
+        or available_capital_usd > remaining_cash_from_positions_usd + 1e-8
+    ):
+        return {
+            "allowed": False,
+            "reason": "El efectivo declarado supera el capital libre tras descontar los nominales abiertos.",
+            "currency": "USD",
+        }
+
     if (
         not _is_finite_number(effective_capital)
         or float(effective_capital) <= 0
@@ -412,6 +458,8 @@ def can_add_sized_trade(
         "proposed_position_notional_usd": position_notional_usd,
         "proposed_cash_required_usd": cash_required_usd,
         "available_capital_usd": available_capital_usd,
+        "open_notional_usd": open_notional_usd,
+        "remaining_cash_from_positions_usd": remaining_cash_from_positions_usd,
         "admission_scope": "SIMULACION_NO_VALIDADA",
         "live_execution_authorized": False,
     }
