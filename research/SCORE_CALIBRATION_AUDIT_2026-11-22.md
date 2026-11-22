@@ -36,6 +36,25 @@ Los niveles reproducen la función actual de `risk_manager.py`: C = puntuación 
 - El mejor resultado de B no demuestra que el umbral 80 sea óptimo; elegirlo a partir de esta misma muestra sería sobreajuste.
 - No se han deducido probabilidades de éxito a partir de estas tasas de acierto.
 
+### Resultado diario por activo
+
+La muestra diaria también está muy concentrada y es pequeña por activo (entre 2 y 12 operaciones). Los resultados brutos observados fueron:
+
+| Activo | Operaciones | Acierto | Media R | Resultado R | PF |
+|---|---:|---:|---:|---:|---:|
+| AAPL | 9 | 55,6% | +0,796 | +7,162 | 2,200 |
+| XRP | 7 | 57,1% | +0,715 | +5,002 | 2,668 |
+| BTC | 5 | 40,0% | +0,200 | +1,002 | 1,334 |
+| ETH | 9 | 33,3% | +0,001 | +0,009 | 1,001 |
+| SOL | 5 | 20,0% | -0,400 | -2,000 | 0,500 |
+| MSFT | 2 | 0,0% | -1,000 | -2,000 | 0,000 |
+| XLM | 3 | 0,0% | -1,000 | -3,000 | 0,000 |
+| NVDA | 12 | 16,7% | -0,413 | -4,950 | 0,505 |
+| TSLA | 5 | 0,0% | -1,000 | -5,000 | 0,000 |
+| TTWO | 5 | 0,0% | -1,000 | -5,000 | 0,000 |
+
+Esto no permite concluir que AAPL/XRP deban mantenerse ni que TSLA/TTWO deban eliminarse: las muestras por activo son demasiado pequeñas, los datos proceden del motor anterior y no incluyen costes. Sí demuestra que agregar todos los activos puede ocultar diferencias importantes y que la validación debe informar resultados por activo sin seleccionar ganadores en la misma muestra.
+
 ## Distribución de puntuaciones individuales
 
 La segmentación exacta por puntuación confirma que tampoco hay una progresión estable. En M15, por ejemplo:
