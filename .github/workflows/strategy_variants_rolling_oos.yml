@@ -15,6 +15,7 @@ on:
       - research/daily-swing-ema-reclaim-20261122
       - research/daily-swing-donchian-breakout-20261122
       - research/extended-daily-history-5y-20261122
+      - research/volume-confirmed-breakout-20261122
 
 permissions:
   contents: read
