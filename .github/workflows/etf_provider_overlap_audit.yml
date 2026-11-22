@@ -6,6 +6,7 @@ on:
       - main
     paths:
       - "research/etf_provider_overlap_audit.py"
+      - "research/etf_yfinance_repair_smoke.py"
       - ".github/workflows/etf_provider_overlap_audit.yml"
   workflow_dispatch:
 
