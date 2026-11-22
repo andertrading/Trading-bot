@@ -39,10 +39,12 @@ def _send_signal_report(scan_result: dict, candidate: dict, signal: dict) -> boo
     The global strategy switch is not an override for per-candidate validation.
     M15 remains a research/lab timeframe and cannot emit operational alerts.
     """
+    if not isinstance(candidate, dict):
+        logger.warning("OPERATIONAL ALERT BLOCKED | invalid candidate payload")
+        return False
     economic = candidate.get("economic_eligibility")
     if (
-        not isinstance(candidate, dict)
-        or candidate.get("action") != "BUY CANDIDATE"
+        candidate.get("action") != "BUY CANDIDATE"
         or candidate.get("timeframe") != "1d"
         or candidate.get("direction", "LONG") != "LONG"
         or candidate.get("validation_status") != "APPROVED"
@@ -68,8 +70,8 @@ def _send_signal_report(scan_result: dict, candidate: dict, signal: dict) -> boo
     report_scan = dict(scan_result)
     report_scan.update({
         "technical_candidates_found": 1,
-        "candidates_blocked": 1,
-        "validated_candidates": 0,
+        "candidates_blocked": 0,
+        "validated_candidates": 1,
         "no_trade_count": 0,
         "results": [report_candidate],
     })
