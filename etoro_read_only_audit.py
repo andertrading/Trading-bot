@@ -246,17 +246,18 @@ def _fee_class(instrument_type: Any) -> str | None:
 
 
 def _market_calendar_from_exchange(exchange_description: str | None, price_source: str, asset_type: str) -> str | None:
-    """Map confirmed eToro venue metadata to supported session calendars.
+    """Map only the confirmed eToro exchange venue to a supported calendar.
 
-    XNYS is the shared US-equity session calendar used for NYSE and Nasdaq
-    sessions; this does not claim that a Nasdaq-listed asset is listed on NYSE.
+    priceSource describes the price feed, not the listing venue, so it must
+    never be used to infer an exchange when exchangeDescription is unknown.
+    XNYS is used as the common US-equity session calendar for NYSE/Nasdaq.
     """
-    if asset_type=="CRYPTO":
+    if asset_type == "CRYPTO":
         return "24/7"
-    combined=f"{exchange_description or ''} {price_source}".casefold()
-    london=any(token in combined for token in ("london","lse","london stock exchange"))
-    us=any(token in combined for token in ("nasdaq","nyse","new york stock exchange"))
-    if london==us:
+    venue = exchange_description.casefold().strip() if isinstance(exchange_description, str) else ""
+    london = any(token in venue for token in ("london", "lse"))
+    us = any(token in venue for token in ("nasdaq", "nyse", "new york stock exchange"))
+    if london == us:
         return None
     return "XLON" if london else "XNYS"
 
