@@ -98,7 +98,7 @@ A portfolio net metric is valid only when every accepted and closed trade has co
 
 The current registry state (0/12 eligible) means this gate must remain closed.
 
-### 7. Stop-gap risk is not a hard maximum
+### 6. Stop-gap risk is not a hard maximum
 
 Even a correct all-in loss calculation at the stop price does not guarantee a hard 1% maximum loss. The backtest explicitly models a gap through the stop by exiting at the next candle's open, which can be materially worse than the stop. Daily swing positions are exposed to overnight/weekend gaps, halts, and liquidity shocks.
 
@@ -109,7 +109,7 @@ Therefore:
 - Add gap-stress scenarios and report the frequency/severity of losses beyond the planned budget.
 - If a guaranteed maximum loss is a non-negotiable requirement, the strategy/instrument must support a genuinely guaranteed stop mechanism with its own verified availability and fee model. Ordinary stop orders do not provide that guarantee.
 
-### 6. Risk-limit semantics
+### 7. Risk-limit semantics
 
 The hard 1% per-trade and 3% aggregate limits must apply to modeled all-in stop loss, not only price movement to the stop. Add tests for simultaneous entries, fixed commissions, variable spread/FX costs, and costs that make a candidate infeasible under the risk budget.
 
