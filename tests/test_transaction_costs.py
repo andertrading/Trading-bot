@@ -59,6 +59,62 @@ class TestEtoroTransactionCosts(unittest.TestCase):
         self.assertAlmostEqual(result["market_spread_cost"], 0.21)
         self.assertAlmostEqual(result["known_costs_total"], 1.43)
 
+    def test_verified_unit_costs_separate_fixed_and_variable_costs(self):
+        result = costs.estimate_verified_registry_unit_costs(
+            "CSPX", 100.0, 110.0, registry=self._complete_registry()
+        )
+        self.assertTrue(result["valid"])
+        self.assertTrue(result["complete"])
+        self.assertAlmostEqual(result["fixed_costs_quote"], 1.0)
+        self.assertAlmostEqual(result["costs_per_unit_quote"], 0.215)
+        self.assertAlmostEqual(result["quote_to_usd"], 1.0)
+        self.assertAlmostEqual(result["minimum_order_notional_usd"], 1.0)
+        self.assertTrue(result["fractional_allowed"])
+
+    def test_verified_unit_costs_convert_fx_and_minimum_order_to_usd(self):
+        registry = self._complete_registry()
+        configured = dict(costs.ASSETS["CSPX"])
+        configured["currency"] = "EUR"
+        with patch.dict(costs.ASSETS, {"CSPX": configured}):
+            item = registry["assets"]["CSPX"]
+            item["instrument"]["currency"] = "EUR"
+            item["fx"].update({
+                "required": True,
+                "conversion_fee_pct": 0.2,
+                "conversion_fee_unit": "PERCENT",
+                "quote_to_account_rate": 1.1,
+                "confirmed": True,
+                "source": "verified FX schedule",
+                "observed_at": "2026-11-22T00:00:00Z",
+            })
+            result = costs.estimate_verified_registry_unit_costs(
+                "CSPX", 100.0, 110.0, registry=registry
+            )
+        self.assertTrue(result["complete"])
+        self.assertAlmostEqual(result["fixed_costs_quote"], 1.0 / 1.1)
+        self.assertAlmostEqual(result["costs_per_unit_quote"], 1.27)
+        self.assertAlmostEqual(result["quote_to_usd"], 1.1)
+        self.assertAlmostEqual(result["minimum_order_notional_usd"], 1.1)
+
+    def test_verified_unit_costs_fail_closed_when_registry_is_incomplete(self):
+        result = costs.estimate_verified_registry_unit_costs(
+            "CSPX", 100.0, 110.0
+        )
+        self.assertFalse(result["complete"])
+        self.assertIsNone(result["costs_per_unit_quote"])
+        self.assertIsNone(result["minimum_order_notional_usd"])
+
+    def test_verified_unit_costs_require_usd_account_currency(self):
+        with patch.object(costs, "ACCOUNT_CURRENCY", "EUR"):
+            result = costs.estimate_verified_registry_unit_costs(
+                "CSPX", 100.0, 110.0, registry=self._complete_registry()
+            )
+        self.assertFalse(result["complete"])
+        self.assertIn(
+            "position_sizing_requires_USD_account_currency",
+            result["unpriced_costs"],
+        )
+
     def test_embedded_execution_spread_is_not_charged_twice(self):
         registry = self._complete_registry()
         registry["assets"]["CSPX"]["spread"]["treatment"] = "EMBEDDED_IN_EXECUTION_PRICES"
