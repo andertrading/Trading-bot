@@ -16,6 +16,7 @@ import numpy as np
 import pandas as pd
 import requests
 import yfinance as yf
+import exchange_calendars
 
 from config import ASSETS
 from eodhd_provider import download_eodhd_daily
@@ -53,7 +54,10 @@ YAHOO_INTERVAL_MAP = {
 COLUMNS = ["Open", "High", "Low", "Close", "Volume"]
 
 CRYPTO_ASSETS = {"BTC", "ETH", "SOL", "XLM", "XRP"}
-LONDON_ASSETS = {"CSPX", "CNDX"}
+LONDON_ASSETS = {
+    asset for asset, settings in ASSETS.items()
+    if settings.get("market_calendar") == "XLON"
+}
 
 CRYPTO_SYMBOLS = {
     "BTC": "BTC/USD",
@@ -213,11 +217,32 @@ def _uk_holidays(year):
     return holidays
 
 
-def _market_for_asset(asset):
-    if asset in LONDON_ASSETS:
-        return MARKET_CONFIG["LONDON"]
+def _market_calendar_name(asset):
+    settings = ASSETS.get(asset)
+    if not isinstance(settings, dict):
+        return None
+    calendar_name = settings.get("market_calendar")
+    if calendar_name == "24/7":
+        return "24/7"
+    if calendar_name not in {"XLON", "XNYS"}:
+        return None
+    return calendar_name
 
-    return MARKET_CONFIG["US"]
+
+def _exchange_calendar_for_asset(asset):
+    calendar_name = _market_calendar_name(asset)
+    if calendar_name in {None, "24/7"}:
+        return None
+    return exchange_calendars.get_calendar(calendar_name)
+
+
+def _market_for_asset(asset):
+    calendar_name = _market_calendar_name(asset)
+    market_key = {"XLON": "LONDON", "XNYS": "US"}.get(calendar_name)
+    # Legacy backtest helpers sometimes evaluate synthetic assets such as
+    # "UNKNOWN" without a live config entry. Keep their historical US-session
+    # fallback; live scans separately reject unknown calendars below.
+    return MARKET_CONFIG[market_key or "US"]
 
 
 def _session_for_asset(asset):
@@ -231,23 +256,29 @@ def _session_for_asset(asset):
 
 
 def _is_market_holiday(day, asset):
-    if asset in CRYPTO_ASSETS:
+    if _market_calendar_name(asset) == "24/7":
         return False
-
-    if asset in LONDON_ASSETS:
-        return day in _uk_holidays(day.year)
-
-    return day in _us_holidays(day.year)
+    calendar = _exchange_calendar_for_asset(asset)
+    if calendar is None:
+        return True
+    try:
+        return not calendar.is_session(pd.Timestamp(day))
+    except Exception:
+        logger.exception("MARKET CALENDAR ERROR | %s | %s", asset, day)
+        return True
 
 
 def _is_trading_day(day, asset):
-    if asset in CRYPTO_ASSETS:
+    if _market_calendar_name(asset) == "24/7":
         return True
-
-    return (
-        day.weekday() < 5
-        and not _is_market_holiday(day, asset)
-    )
+    calendar = _exchange_calendar_for_asset(asset)
+    if calendar is None:
+        return False
+    try:
+        return bool(calendar.is_session(pd.Timestamp(day)))
+    except Exception:
+        logger.exception("MARKET SESSION ERROR | %s | %s", asset, day)
+        return False
 
 
 def _previous_trading_day(day, asset):
@@ -298,27 +329,26 @@ def _us_early_close_dates(year):
 
 
 def _market_close_time(asset, session_date):
-    """
-    Devuelve la hora de cierre aplicable a una sesión concreta.
+    """Return the exchange-calendar close in the market's local timezone."""
+    if _market_calendar_name(asset) == "24/7":
+        return datetime_time(23, 59, 59)
 
-    Para Estados Unidos contempla cierres anticipados habituales:
-    viernes posterior a Thanksgiving, 3 de julio y Nochebuena.
-    """
+    calendar = _exchange_calendar_for_asset(asset)
+    if calendar is None:
+        raise ValueError(f"Calendario bursátil no disponible para {asset}")
 
-    _, _, regular_close = _session_for_asset(asset)
+    session = pd.Timestamp(session_date)
+    if not calendar.is_session(session):
+        raise ValueError(f"{session_date} no es sesión bursátil para {asset}")
 
-    if asset in CRYPTO_ASSETS:
-        return regular_close
-
-    if asset in LONDON_ASSETS:
-        # LSE on-exchange trading closes early on Christmas Eve and New Year's
-        # Eve (12:30 London time), when those dates are trading days.
-        if (session_date.month, session_date.day) in {(12, 24), (12, 31)}:
-            return datetime_time(12, 30)
-    elif session_date in _us_early_close_dates(session_date.year):
-        return datetime_time(13, 0)
-
-    return regular_close
+    close_utc = calendar.session_close(session)
+    market_tz, _, _ = _session_for_asset(asset)
+    return (
+        close_utc.to_pydatetime()
+        .astimezone(market_tz)
+        .time()
+        .replace(tzinfo=None)
+    )
 
 
 def _filter_out_of_session_intraday(df, asset):
@@ -732,8 +762,12 @@ def is_intraday_market_open(asset, now=None):
     """
     if _asset_config(asset) is None:
         return False
-    if asset in CRYPTO_ASSETS:
+    calendar_name = _market_calendar_name(asset)
+    if calendar_name == "24/7":
         return True
+    if calendar_name not in {"XLON", "XNYS"}:
+        logger.error("INTRADAY SCAN BLOCKED | %s | unknown market calendar", asset)
+        return False
 
     if now is None:
         now_utc = datetime.now(timezone.utc)

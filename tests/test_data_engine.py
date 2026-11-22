@@ -1,7 +1,7 @@
 
 import os
 import unittest
-from datetime import datetime, timezone, date, timedelta
+from datetime import datetime, timezone, date, timedelta, time as datetime_time
 from unittest.mock import patch
 
 import numpy as np
@@ -2089,6 +2089,34 @@ class TestDataTimestamp(unittest.TestCase):
 
 
 class TestAutomatedScanSchedulingHelpers(unittest.TestCase):
+
+    def test_market_sessions_use_configured_exchange_calendar_holidays(self):
+        self.assertFalse(engine._is_trading_day(date(2026, 11, 26), "AAPL"))
+        self.assertFalse(engine._is_trading_day(date(2026, 12, 25), "CSPX"))
+
+    def test_us_early_close_comes_from_exchange_calendar(self):
+        self.assertEqual(
+            engine._market_close_time("AAPL", date(2026, 11, 27)),
+            datetime_time(13, 0),
+        )
+
+    def test_london_early_close_comes_from_exchange_calendar(self):
+        self.assertEqual(
+            engine._market_close_time("CSPX", date(2026, 12, 24)),
+            datetime_time(12, 30),
+        )
+
+    def test_unknown_market_calendar_fails_closed(self):
+        with patch.dict(
+            engine.ASSETS,
+            {"UNKNOWN_CALENDAR": {"enabled": True, "market_calendar": "UNKNOWN"}},
+        ):
+            self.assertFalse(
+                engine.is_intraday_market_open(
+                    "UNKNOWN_CALENDAR",
+                    now=datetime(2026, 11, 19, 15, 0, tzinfo=timezone.utc),
+                )
+            )
 
     def test_intraday_scan_skips_before_us_open(self):
         with patch.object(engine, "datetime", FrozenDateTimeBeforeOpen):
