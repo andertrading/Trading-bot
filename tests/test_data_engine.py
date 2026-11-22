@@ -1055,10 +1055,9 @@ class TestIntradayGaps(unittest.TestCase):
 
 class TestTwelveDataInstrumentMetadata(unittest.TestCase):
 
-    def test_accepts_complete_crypto_identity_metadata(self):
+    def test_accepts_crypto_identity_without_mic_code(self):
         meta = {
             "exchange": "Test Crypto Exchange",
-            "mic_code": "TESTX",
             "type": "Digital Currency",
         }
         self.assertTrue(
@@ -1067,10 +1066,35 @@ class TestTwelveDataInstrumentMetadata(unittest.TestCase):
             )
         )
 
-    def test_rejects_missing_mic_code(self):
+    def test_accepts_equity_identity_with_expected_timezone_and_mic(self):
+        meta = {
+            "exchange": "NASDAQ",
+            "mic_code": "XNAS",
+            "type": "Common Stock",
+            "exchange_timezone": "America/New_York",
+        }
+        self.assertTrue(
+            engine._validate_twelvedata_instrument_metadata(
+                "TSLA", engine.ASSETS["TSLA"], meta
+            )
+        )
+
+    def test_rejects_missing_security_mic_code(self):
+        meta = {
+            "exchange": "NASDAQ",
+            "type": "Common Stock",
+            "exchange_timezone": "America/New_York",
+        }
+        self.assertFalse(
+            engine._validate_twelvedata_instrument_metadata(
+                "TSLA", engine.ASSETS["TSLA"], meta
+            )
+        )
+
+    def test_rejects_wrong_asset_type(self):
         meta = {
             "exchange": "Test Crypto Exchange",
-            "type": "Digital Currency",
+            "type": "Common Stock",
         }
         self.assertFalse(
             engine._validate_twelvedata_instrument_metadata(
@@ -1078,15 +1102,16 @@ class TestTwelveDataInstrumentMetadata(unittest.TestCase):
             )
         )
 
-    def test_rejects_wrong_asset_type(self):
+    def test_rejects_wrong_equity_timezone(self):
         meta = {
-            "exchange": "Test Crypto Exchange",
-            "mic_code": "TESTX",
+            "exchange": "NASDAQ",
+            "mic_code": "XNAS",
             "type": "Common Stock",
+            "exchange_timezone": "Europe/London",
         }
         self.assertFalse(
             engine._validate_twelvedata_instrument_metadata(
-                "BTC", engine.ASSETS["BTC"], meta
+                "TSLA", engine.ASSETS["TSLA"], meta
             )
         )
 
@@ -1135,7 +1160,6 @@ class TestTwelveDataAdjustmentMode(unittest.TestCase):
                         "symbol": "BTC/USD",
                         "currency_quote": "USD",
                         "exchange": "Test Crypto Exchange",
-                        "mic_code": "TESTX",
                         "type": "Digital Currency",
                     },
                     "values": values,
