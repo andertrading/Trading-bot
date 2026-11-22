@@ -1095,11 +1095,27 @@ def build_scan_portfolio_status(paper_portfolio_state=None):
     never reads or infers the user's real broker positions.
     """
     if paper_portfolio_state is None:
-        return get_portfolio_status(
-            open_positions=None,
-            positions_confirmed=False,
-            capital_usd=INITIAL_CAPITAL_USD,
-        )
+        try:
+            return get_portfolio_status(
+                open_positions=None,
+                positions_confirmed=False,
+                capital_usd=INITIAL_CAPITAL_USD,
+            )
+        except Exception:
+            logger.exception("PORTFOLIO STATUS ERROR")
+            return {
+                "status": "UNKNOWN",
+                "current_portfolio_risk_usd": None,
+                "max_portfolio_risk_usd": (
+                    INITIAL_CAPITAL_USD * min(MAX_PORTFOLIO_RISK, 0.03)
+                ),
+                "remaining_risk_usd": None,
+                "capital_usd": INITIAL_CAPITAL_USD,
+                "open_positions": None,
+                "positions_confirmed": False,
+                "currency": "USD",
+                "error": "No se pudo confirmar el estado de la cartera",
+            }
 
     try:
         snapshot = paper_portfolio_snapshot(
