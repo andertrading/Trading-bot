@@ -19,8 +19,8 @@ The successful Actions status means the diagnostic completed and produced its ar
 
 | Asset | Yahoo LSE vs EODHD | Independent SIX cross-check | Decision |
 |---|---|---|---|
-| CSPX | Open and close practically identical (median absolute error below 0.000003%); high is materially inconsistent: median 0.091%, p95 6.002%, max 16.384%; 65 matched sessions have high error above 1%. On the exact yfinance backtest path, 2 of 1,260 CSPX bars are structurally invalid (2024-05-02 and 2026-03-02). The Yahoo chart endpoint shows two additional invalid rows that yfinance omits. | CSSPX.SW high/low values are generally much closer to EODHD than the Yahoo LSE high series; SIX is a cross-check, not an interchangeable primary feed. | **Yahoo LSE CSPX OHLC rejected for extended backtests pending repair.** |
-| CNDX | Open/close practically identical; high p95 error below 0.000004%, max 0.319%; low max error 0.342%. On the exact yfinance backtest path, 9 of 1,255 CNDX bars are structurally invalid (seven dates in 2022/2023 and 2026-03-02). The Yahoo chart endpoint reports additional invalid rows that yfinance omits. | CSNDX.SW has materially wider high/low differences, so it should not be used as a blind substitute for the LSE feed. | **Yahoo LSE CNDX is a candidate after explicit repair/rejection of the invalid 2026-03-02 bar and a wider-period audit. Not approved yet.** |
+| CSPX | Open and close practically identical (median absolute error below 0.000003%); high is materially inconsistent: median 0.091%, p95 6.002%, max 16.384%; 65 matched sessions have high error above 1%. On the exact yfinance backtest path, 2 of 1,260 CSPX bars are structurally invalid (2024-05-02 and 2026-03-02). The Yahoo chart endpoint shows two additional invalid rows that yfinance omits. | CSSPX.SW high/low values are generally much closer to EODHD than the Yahoo LSE high series; SIX is a cross-check, not an interchangeable primary feed. | **Reject Yahoo LSE CSPX High/Low for extended backtests. Investigate SIX as the historical source; do not patch individual highs automatically.** |
+| CNDX | Open/close practically identical; high p95 error below 0.000004%, max 0.319%; low max error 0.342%. On the exact yfinance backtest path, 9 of 1,255 CNDX bars are structurally invalid (seven dates in 2022/2023 and 2026-03-02). The Yahoo chart endpoint reports additional invalid rows that yfinance omits. | CSNDX.SW has materially wider high/low differences, so it should not be used as a blind substitute for the LSE feed. | **CNDX LSE is a candidate only after the real repair smoke test passes and an independent multi-year source is found. Not approved yet.** |
 
 ### Automated research-quality gate
 
@@ -70,9 +70,10 @@ Within the recent EODHD overlap, the Yahoo LSE 2026-03-02 bar is internally inco
 
 1. Add provider-quality checks that test OHLC coherence **and** cross-provider range anomalies on the overlapping window.
 2. Reject the CSPX Yahoo LSE extended history for any research that depends on High/Low until the source or repair method is validated.
-3. Run the real extended-history helper with network calls enabled in a controlled research job and verify that all detected invalid bars are actually replaced and the final normalized frame passes integrity checks.
-5. Obtain an independent five-year OHLC source before certifying older Yahoo history; EODHD returned only one year in this run.
-6. For CNDX, validate the longer history and confirm every bad bar is repaired or causes a fail-closed stop.
+3. Complete the controlled live-network run of the real extended-history helper; verify all repairs and final OHLC integrity.
+4. Obtain an independent five-year OHLC source before certifying older Yahoo history; EODHD returned only one year in this run.
+5. For CNDX, confirm the repair smoke test and validate the longer history against an independent source.
+6. Investigate SIX as a CSPX historical source, but do not substitute or patch highs until its older history is independently validated.
 7. Keep EODHD as the current live daily source; do not switch production routing based on this diagnostic.
 8. Do not run new strategy optimization until the historical/live OHLC basis is consistent enough for the chosen research window.
 
