@@ -125,7 +125,7 @@ def classify_asset(
             "asset": asset,
             "name": config.get("name", asset),
             "asset_type": config.get("type"),
-            "configured_execution_type": registry_result.get("execution_type"),
+            "configured_execution_type": registry_result.get("execution_type") or ETORO_EXECUTION_TYPES.get(asset),
             "execution_type_confirmed": (
                 "execution_type_evidence_missing" not in registry_result["blockers"]
             ),
