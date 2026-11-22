@@ -1,14 +1,11 @@
 name: Trading Bot 3.0 - ETF Provider Overlap Audit
 
 on:
-  pull_request:
-    branches:
-      - main
-    paths:
-      - "research/etf_provider_overlap_audit.py"
-      - "research/etf_yfinance_repair_smoke.py"
-      - ".github/workflows/etf_provider_overlap_audit.yml"
   workflow_dispatch:
+
+concurrency:
+  group: etf-provider-overlap-audit
+  cancel-in-progress: false
 
 permissions:
   contents: read
