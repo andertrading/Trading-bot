@@ -56,6 +56,7 @@ class AssetEconomicRegistryTests(unittest.TestCase):
         self.assertTrue(valid_fee_side(item["fees"]["exit"]))
         self.assertTrue(valid_fee_side({"model":"PERCENT_NOTIONAL","value":0.01,"unit":"PERCENT"}))
         self.assertFalse(valid_fee_side({"model":"FIXED","value":-1,"unit":"USD"}))
+        self.assertFalse(valid_fee_side({"model":"ZERO","value":False,"unit":"USD"}))
 
     def test_registry_rejects_missing_or_extra_assets(self):
         altered = copy.deepcopy(self.registry)
