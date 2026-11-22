@@ -102,7 +102,7 @@ class PaperForwardTests(unittest.TestCase):
     def test_aggregate_open_risk_cap_blocks_additional_paper_trade(self):
         first = signal("first")
         second = signal("second")
-        fill_bar = bar("2026-11-22T10:15:00+00:00", 99, 101, 98, 100)
+        fill_bar = bar("2026-11-22T10:15:00+00:00", 99.5, 101, 99.5, 100)
         process_signal_bar(
             self.state, first, fill_bar, max_portfolio_risk=0.003
         )
