@@ -240,7 +240,7 @@ class PaperForwardTests(unittest.TestCase):
         )
         process_signal_bar(
             self.state, signal(),
-            bar("2026-11-22T10:30:00+00:00", 94, 94, 93, 94),
+            bar("2026-11-22T10:30:00+00:00", 95, 95, 94, 94.5),
         )
         snapshot = paper_portfolio_snapshot(self.state)
         self.assertAlmostEqual(snapshot["capital_usd"], 997.5)
