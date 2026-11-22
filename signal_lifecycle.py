@@ -556,6 +556,17 @@ class UpstashSignalStateStore:
                 payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True
             ))
 
+    def update_paper_state(self, paper_state: dict) -> None:
+        """Persist the isolated virtual portfolio alongside signal lifecycle state."""
+        if not isinstance(paper_state, dict) or paper_state.get("execution_mode") != "PAPER_ONLY":
+            raise ValueError("paper_state must be an isolated PAPER_ONLY state")
+        with self._lock:
+            payload = self.load()
+            payload["paper_forward"] = dict(paper_state)
+            self._set_raw(json.dumps(
+                payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True
+            ))
+
     def prune(self, now=None, retention_days: int = 90,
               max_terminal_records: int = 10000) -> int:
         """Bound state growth while preserving pending signals and undelivered events."""
