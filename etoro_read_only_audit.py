@@ -15,6 +15,8 @@ from config import ACCOUNT_CURRENCY, ASSETS
 from etoro_read_only import (
     EtoroConfigurationError,
     EtoroReadOnlyClient,
+    normalize_instrument_display_data,
+    normalize_supported_exchanges,
     resolve_unique_instrument_by_symbol,
 )
 from etoro_position_risk import calculate_account_stop_risk_from_client
@@ -243,6 +245,22 @@ def _fee_class(instrument_type: Any) -> str | None:
     return None
 
 
+def _market_calendar_from_exchange(exchange_description: str | None, price_source: str, asset_type: str) -> str | None:
+    """Map confirmed eToro venue metadata to supported session calendars.
+
+    XNYS is the shared US-equity session calendar used for NYSE and Nasdaq
+    sessions; this does not claim that a Nasdaq-listed asset is listed on NYSE.
+    """
+    if asset_type=="CRYPTO":
+        return "24/7"
+    combined=f"{exchange_description or ''} {price_source}".casefold()
+    london=any(token in combined for token in ("london","lse","london stock exchange"))
+    us=any(token in combined for token in ("nasdaq","nyse","new york stock exchange"))
+    if london==us:
+        return None
+    return "XLON" if london else "XNYS"
+
+
 def run_audit(
     client: EtoroReadOnlyClient,
     assets: Mapping[str, Mapping[str, Any]],
@@ -273,15 +291,63 @@ def run_audit(
     eligibility_valid = False
     eligibility_status = "NOT_IN_SCOPE"
 
+    market_metadata_valid = False
+    market_metadata_status = "NOT_CHECKED"
+    exchange_metadata_valid = False
+    exchange_metadata_status = "NOT_CHECKED"
+    metadata_by_id: dict[int, Mapping[str, Any]] = {}
+    exchange_names: dict[int, str] = {}
+    calendars_by_symbol: dict[str, str] = {}
+    metadata_errors: dict[str, str] = {}
+
+    if resolved and len(resolved) == len(enabled_assets):
+        instrument_ids = [item["instrumentId"] for item in resolved.values()]
+        try:
+            metadata_by_id = normalize_instrument_display_data(
+                client.get_instrument_display_data(instrument_ids), instrument_ids
+            )
+            market_metadata_valid = True
+            market_metadata_status = "VALIDATED"
+            exchange_ids = sorted({
+                data["exchange_id"] for data in metadata_by_id.values()
+                if data["exchange_id"] > 0
+            })
+            exchange_names = normalize_supported_exchanges(
+                client.get_supported_exchanges(exchange_ids), exchange_ids
+            )
+            exchange_metadata_valid = True
+            exchange_metadata_status = "VALIDATED"
+            for symbol, item in resolved.items():
+                metadata = metadata_by_id[item["instrumentId"]]
+                exchange_id = metadata["exchange_id"]
+                calendar_name = _market_calendar_from_exchange(
+                    exchange_names.get(exchange_id),
+                    metadata["price_source"],
+                    _fee_class(item.get("instrumentType")) or "",
+                )
+                configured_calendar = enabled_assets[symbol].get("market_calendar")
+                if calendar_name is None:
+                    metadata_errors[symbol] = "UNSUPPORTED_OR_AMBIGUOUS_EXCHANGE"
+                elif configured_calendar != calendar_name:
+                    metadata_errors[symbol] = "CONFIGURED_MARKET_CALENDAR_MISMATCH"
+                else:
+                    calendars_by_symbol[symbol] = calendar_name
+        except Exception as exc:
+            market_metadata_status = _resolution_error_status(exc)
+            exchange_metadata_status = market_metadata_status
+            metadata_errors = {symbol: market_metadata_status for symbol in resolved}
+
     quotes_valid = False
     realtime_quotes_valid = False
     quotes_status = "NOT_CHECKED"
     quote_diagnostics: list[dict[str, Any]] = []
-    if resolved and len(resolved) == len(enabled_assets):
+    if (resolved and len(resolved)==len(enabled_assets)
+        and market_metadata_valid and exchange_metadata_valid
+        and len(calendars_by_symbol)==len(enabled_assets)):
         instrument_ids = [item["instrumentId"] for item in resolved.values()]
         try:
             calendars_by_id = {
-                item["instrumentId"]: enabled_assets[symbol].get("market_calendar")
+                item["instrumentId"]: calendars_by_symbol[symbol]
                 for symbol, item in resolved.items()
             }
             quotes = client.get_realtime_quotes(
@@ -335,17 +401,44 @@ def run_audit(
             "display_name": (
                 resolved[symbol]["displayname"] if symbol in resolved else None
             ),
+            "exchange_id": (
+                metadata_by_id[resolved[symbol]["instrumentId"]]["exchange_id"]
+                if symbol in resolved and resolved[symbol]["instrumentId"] in metadata_by_id else None
+            ),
+            "exchange_description": (
+                exchange_names.get(metadata_by_id[resolved[symbol]["instrumentId"]]["exchange_id"])
+                if symbol in resolved and resolved[symbol]["instrumentId"] in metadata_by_id else None
+            ),
+            "symbol_full": (
+                metadata_by_id[resolved[symbol]["instrumentId"]]["symbol_full"]
+                if symbol in resolved and resolved[symbol]["instrumentId"] in metadata_by_id else None
+            ),
+            "price_source": (
+                metadata_by_id[resolved[symbol]["instrumentId"]]["price_source"]
+                if symbol in resolved and resolved[symbol]["instrumentId"] in metadata_by_id else None
+            ),
+            "market_calendar": calendars_by_symbol.get(symbol),
+            "market_metadata_status": metadata_errors.get(
+                symbol, "VALIDATED" if symbol in calendars_by_symbol else "NOT_VALIDATED"
+            ),
         }
         for symbol in enabled_assets
     ]
     overall = (
         len(resolved) == len(enabled_assets)
+        and market_metadata_valid
+        and exchange_metadata_valid
+        and len(calendars_by_symbol) == len(enabled_assets)
         and quotes_valid
     )
     return {
         "audit_scope": "read-only diagnostics; not authorization to trade",
         "account_portfolio_data_accessed": False,
         "instrument_resolution": instrument_report,
+        "market_metadata_validated": market_metadata_valid,
+        "market_metadata_status": market_metadata_status,
+        "exchange_metadata_validated": exchange_metadata_valid,
+        "exchange_metadata_status": exchange_metadata_status,
         "instrument_eligibility_validated": eligibility_valid,
         "instrument_eligibility_status": eligibility_status,
         "market_quotes_validated": quotes_valid,
