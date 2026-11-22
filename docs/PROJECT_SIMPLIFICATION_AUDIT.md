@@ -235,3 +235,20 @@ El gate de candidatas de `Bot.py` consulta además `asset_economic_eligibility` 
 ### Control de cuota de proveedores externos
 
 El audit de mercado queda manual y serializado: cada ejecución puede consumir llamadas de EODHD, splits y Yahoo. En los últimos intentos EODHD respondió HTTP 402 incluso con una ventana de aproximadamente un año. No se ha determinado si se trata de cuota agotada, permiso del plan o una restricción temporal; no se contratará un plan ni se harán reintentos automáticos. La última ejecución disponible con éxito del smoke de EODHD había devuelto 252 sesiones por activo; los intentos posteriores con 402 no certifican el estado actual del proveedor.
+
+
+### Segunda línea de investigación para el hueco LSE: cotización GBX del mismo ISIN
+
+Se ha identificado una segunda línea de cotización en GBX para ambos fondos en la propia LSE: CSP1 para el ISIN IE00B5BMR087 y CNX1 para el ISIN IE00B53SZB19. La LSE confirma los ISIN y el mercado XLON; JustETF lista CSP1/CNX1 en GBX y CSPX/CNDX en USD.
+
+Para 24/10/2025, una referencia pública de GBP/USD de 1.3306 permite comparar las filas de Trading 212 en GBX y USD. Tras convertir GBX a USD (`precio_GBX / 100 * GBPUSD`), las diferencias de Open/High/Low/Close quedan por debajo de 0.2% en ambos activos. Para CSPX, ShareCompare publica además OHLC de CSP1 en GBX ese día y su conversión queda también por debajo de 0.2% frente a la referencia USD de Trading 212. Para CNDX, ambas líneas de esa comparación proceden de Trading 212, por lo que no constituyen una verificación independiente.
+
+Esto convierte `CSP1.L` y `CNX1.L` en candidatos razonables para una auditoría adicional de cinco años, no en fuentes aprobadas. La conversión diaria FX puede introducir diferencias intradía; hay que probar cobertura, ajustes por splits, integridad OHLC y desviación por campo durante todo el periodo. No se han añadido estos tickers al proveedor de producción ni se han rellenado velas.
+
+Referencias:
+- LSE CSP1 / ISIN IE00B5BMR087: https://www.londonstockexchange.com/en/quote/etps/CSP1/ishares-vii-plc
+- LSE CNX1 / ISIN IE00B53SZB19: https://www.londonstockexchange.com/en/quote/etps/CNX1/ishares-vii-plc
+- Listados por moneda e ISIN: https://www.justetf.com/uk/etf-profile.html?isin=IE00B5BMR087 y https://www.justetf.com/uk/etf-profile.html?isin=IE00B53SZB19
+- Histórico CSP1 GBX 24/10/2025: https://www.sharecompare.co.uk/shares/CSP1.L/history/
+- Referencias USD/GBX de Trading 212: https://www.trading212.com/trading-instruments/invest/CSPX.GB, https://www.trading212.com/es/trading-instruments/invest/CNDX.GB y https://www.trading212.com/es/trading-instruments/invest/CNX1.GB
+- GBP/USD 24/10/2025: https://www.exchange-rates.org/exchange-rate-history/gbp-usd-2025-10-24
