@@ -2675,7 +2675,7 @@ def main():
         f"{portfolio_metrics['trades_accepted']} aceptadas / "
         f"{portfolio_metrics['trades_rejected']} rechazadas | "
         f"PnL bruto: {portfolio_metrics['net_pnl_usd']:.2f} USD | "
-        f"DD máximo: {portfolio_metrics['max_drawdown_usd']:.2f} USD"
+        f"DD realizado máximo: {portfolio_metrics['max_drawdown_usd']:.2f} USD"
     )
     print(
         "Límite de riesgo conjunto: "
@@ -2687,7 +2687,8 @@ def main():
     )
     print(
         "Cartera: long-only, capital compartido, entradas simultáneas "
-        "prorrateadas; PnL bruto sin costes ni spreads."
+        "prorrateadas; PnL bruto sin costes ni spreads. DD basado en cierres "
+        "realizados; no incluye pérdidas flotantes intratrade."
     )
 
     # -----------------------------------------------------
