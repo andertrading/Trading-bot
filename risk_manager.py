@@ -130,6 +130,10 @@ def calculate_position_size(
         de cotización. Es obligatorio facilitarlo explícitamente,
         incluso cuando el valor confirmado sea 0.
 
+    available_capital_usd:
+        Efectivo disponible en la cartera virtual tras reservar
+        posiciones abiertas. Es obligatorio y limita el nominal.
+
     El cálculo permanece bloqueado mientras
     ALLOW_POSITION_SIZING sea False.
     """
