@@ -115,6 +115,12 @@ class AssetEconomicRegistryTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 validate_registry(altered)
 
+    def test_fx_conversion_fee_unit_must_be_percentage_points(self):
+        altered = copy.deepcopy(self.registry)
+        altered["assets"]["CSPX"]["fx"]["conversion_fee_unit"] = "DECIMAL"
+        with self.assertRaises(ValueError):
+            validate_registry(altered)
+
     def test_registry_rejects_currency_or_asset_type_drift(self):
         altered = copy.deepcopy(self.registry)
         altered["assets"]["CSPX"]["instrument"]["currency"] = "EUR"
