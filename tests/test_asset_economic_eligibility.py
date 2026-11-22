@@ -32,6 +32,20 @@ class TestAssetEconomicEligibility(unittest.TestCase):
         self.assertEqual(result["status"], "INELIGIBLE")
         self.assertIn("asset_disabled_in_configuration", result["blockers"])
 
+    def test_disabled_configured_asset_is_ineligible_before_registry_lookup(self):
+        with patch.dict(
+            eligibility.ASSETS,
+            {"DISABLED": {
+                "name": "Disabled asset",
+                "type": "STOCK",
+                "currency": "USD",
+                "enabled": False,
+            }},
+        ):
+            result = eligibility.classify_asset("DISABLED")
+        self.assertEqual(result["status"], "INELIGIBLE")
+        self.assertIn("asset_disabled_in_configuration", result["blockers"])
+
     def test_confirmed_cfd_is_excluded_from_real_only_mvp(self):
         result = eligibility.classify_asset(
             "TEST",
