@@ -58,6 +58,8 @@ ASSETS = {
         "market_calendar": "XNYS",
         "currency": "USD",
         "enabled": True,
+        "twelvedata_exchange": "NASDAQ",
+        "twelvedata_mic_code": "XNAS",
     },
     "NVDA": {
         "name": "Nvidia",
@@ -66,6 +68,8 @@ ASSETS = {
         "market_calendar": "XNYS",
         "currency": "USD",
         "enabled": True,
+        "twelvedata_exchange": "NASDAQ",
+        "twelvedata_mic_code": "XNAS",
     },
     "AAPL": {
         "name": "Apple",
@@ -74,6 +78,8 @@ ASSETS = {
         "market_calendar": "XNYS",
         "currency": "USD",
         "enabled": True,
+        "twelvedata_exchange": "NASDAQ",
+        "twelvedata_mic_code": "XNAS",
     },
     "MSFT": {
         "name": "Microsoft",
@@ -82,6 +88,8 @@ ASSETS = {
         "market_calendar": "XNYS",
         "currency": "USD",
         "enabled": True,
+        "twelvedata_exchange": "NASDAQ",
+        "twelvedata_mic_code": "XNAS",
     },
     "TTWO": {
         "name": "Take-Two Interactive",
@@ -90,6 +98,8 @@ ASSETS = {
         "market_calendar": "XNYS",
         "currency": "USD",
         "enabled": True,
+        "twelvedata_exchange": "NASDAQ",
+        "twelvedata_mic_code": "XNAS",
     },
     "BTC": {
         "name": "Bitcoin",
