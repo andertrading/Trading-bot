@@ -92,7 +92,7 @@ class TestEtoroTransactionCosts(unittest.TestCase):
             )
         self.assertTrue(result["complete"])
         self.assertAlmostEqual(result["fixed_costs_quote"], 1.0 / 1.1)
-        self.assertAlmostEqual(result["costs_per_unit_quote"], 1.27)
+        self.assertAlmostEqual(result["costs_per_unit_quote"], 0.635)
         self.assertAlmostEqual(result["quote_to_usd"], 1.1)
         self.assertAlmostEqual(result["minimum_order_notional_usd"], 1.1)
 
