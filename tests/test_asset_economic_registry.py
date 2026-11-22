@@ -1,6 +1,8 @@
 import copy
 import unittest
+from unittest.mock import patch
 
+import asset_economic_registry as registry_module
 from asset_economic_registry import (
     build_registry_report,
     classify_registry_asset,
@@ -98,6 +100,20 @@ class AssetEconomicRegistryTests(unittest.TestCase):
         altered["assets"]["FAKE"] = altered["assets"]["CSPX"]
         with self.assertRaises(ValueError):
             validate_registry(altered)
+
+    def test_fx_requirement_must_match_quote_and_account_currency(self):
+        altered = copy.deepcopy(self.registry)
+        altered["assets"]["CSPX"]["fx"]["required"] = True
+        with self.assertRaises(ValueError):
+            validate_registry(altered)
+
+        altered = copy.deepcopy(self.registry)
+        altered["assets"]["CSPX"]["instrument"]["currency"] = "EUR"
+        modified_config = dict(registry_module.ASSETS["CSPX"])
+        modified_config["currency"] = "EUR"
+        with patch.dict(registry_module.ASSETS, {"CSPX": modified_config}):
+            with self.assertRaises(ValueError):
+                validate_registry(altered)
 
     def test_registry_rejects_currency_or_asset_type_drift(self):
         altered = copy.deepcopy(self.registry)
