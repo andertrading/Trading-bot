@@ -58,7 +58,7 @@ class MarketEvidenceTests(unittest.TestCase):
         report = collect_market_evidence(client, symbols={
             "AAPL": {"market_calendar": "XNYS"}, "BTC": {"market_calendar": "24/7"}
         }, now_utc=now)
-        self.assertEqual(report["summary"]["status"], "COMPLETE")
+        self.assertEqual(report["summary"]["status"], "COMPLETE", report)
         self.assertEqual(report["assets"]["AAPL"]["quote"]["spread_absolute"], "2")
         self.assertTrue(report["assets"]["AAPL"]["eligibility"]["supports_real_unleveraged_long"])
         self.assertEqual(report["assets"]["AAPL"]["hypothetical_open_cost"]["scope"], "HYPOTHETICAL_OPEN_ONLY")
