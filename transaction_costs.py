@@ -47,7 +47,7 @@ def estimate_etoro_trade_costs(
     market_spread_bps=None,
     quote_to_account=None,
     fx_conversion_fee_pct=None,
-    overnight_charge_units=None,
+    overnight_charge_units=0.0,
     leverage=1.0,
     side="BUY",
     country_code="ES",
@@ -57,8 +57,7 @@ def estimate_etoro_trade_costs(
     market_spread_bps is the full bid/ask spread in basis points. The model
     charges half the spread on entry and half on exit.
     overnight_charge_units must reflect the broker's billable fee units
-    (including any 3x weekend charge where applicable). It defaults to None
-    so omitted CFD financing data is reported as unpriced, never as zero cost.
+    (including any 3x weekend charge where applicable).
     """
     result = {
         "valid": False,
@@ -126,7 +125,7 @@ def estimate_etoro_trade_costs(
                 2.0 * float(ETORO_STOCK_REAL_COMMISSION_USD_PER_SIDE)
             )
             result["assumptions"].append(
-                "Acción real: máximo publicado de 2 USD por lado"
+                "Acción real: comisión pública de 1-2 USD por lado según residencia y bolsa; se usa el límite superior de 2 USD hasta verificar el ticket exacto"
             )
         elif asset_type == "ETF":
             result["commission_cost"] = 0.0
