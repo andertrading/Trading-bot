@@ -2504,6 +2504,35 @@ def _download_yahoo(asset, config, interval):
 # DESCARGA PRINCIPAL
 # ---------------------------------------------------------------------
 
+def _has_independent_twelvedata_split_adjustment_evidence(config):
+    """Require a sourced, timestamped audit record before trusting daily split adjustment."""
+    if not isinstance(config, dict):
+        return False
+    evidence = config.get("twelvedata_daily_adjustment_verification")
+    if not isinstance(evidence, dict):
+        return False
+    if evidence.get("status") != "INDEPENDENTLY_VERIFIED":
+        return False
+    source = evidence.get("source")
+    if not isinstance(source, str) or not source.strip().startswith("https://"):
+        return False
+    verified_at = evidence.get("verified_at")
+    try:
+        timestamp = pd.Timestamp(verified_at)
+    except (TypeError, ValueError):
+        return False
+    if pd.isna(timestamp) or timestamp.tzinfo is None:
+        return False
+    return timestamp <= pd.Timestamp.now(tz="UTC")
+
+
+def is_twelvedata_daily_adjustment_verified(asset):
+    """Public readiness check used by the production scanner."""
+    return _has_independent_twelvedata_split_adjustment_evidence(
+        _asset_config(asset)
+    )
+
+
 def _attach_market_data_metadata(dataframe, asset, interval):
     """Attach adjustment-policy metadata without overstating empirical verification."""
     extended_daily_backtest = (
@@ -2533,11 +2562,7 @@ def _attach_market_data_metadata(dataframe, asset, interval):
     if provider == "twelvedata" and interval == "1d":
         # This flag may only be enabled for an asset after independent
         # corporate-action reconciliation has been completed and recorded.
-        independently_verified = (
-            (_asset_config(asset) or {}).get(
-                "twelvedata_daily_adjustment_independently_verified"
-            ) is True
-        )
+        independently_verified = is_twelvedata_daily_adjustment_verified(asset)
         dataframe.attrs["price_adjustment_verified"] = independently_verified
         dataframe.attrs["price_adjustment_verification_status"] = (
             "INDEPENDENTLY_VERIFIED"

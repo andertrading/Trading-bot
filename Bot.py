@@ -47,6 +47,7 @@ from data_engine import (
     get_data_timestamp,
     is_data_fresh,
     is_intraday_market_open,
+    is_twelvedata_daily_adjustment_verified,
 )
 
 from strategies import evaluate_signal
@@ -1312,9 +1313,7 @@ def analyze_asset(asset, timeframe, include_paper_bars=False):
         if (
             timeframe == "1d"
             and PROVIDER_MAP.get(asset) == "twelvedata"
-            and ASSETS.get(asset, {}).get(
-                "twelvedata_daily_adjustment_independently_verified"
-            ) is not True
+            and not is_twelvedata_daily_adjustment_verified(asset)
         ):
             return no_trade(
                 asset,

@@ -1073,7 +1073,11 @@ class TestPriceAdjustmentMetadata(unittest.TestCase):
         )
         config = {
             **engine.ASSETS["TSLA"],
-            "twelvedata_daily_adjustment_independently_verified": True,
+            "twelvedata_daily_adjustment_verification": {
+                "status": "INDEPENDENTLY_VERIFIED",
+                "source": "https://example.org/split-adjustment-audit.json",
+                "verified_at": "2026-11-22T00:00:00Z",
+            },
         }
         with patch.dict(engine.ASSETS, {"TSLA": config}):
             result = engine._attach_market_data_metadata(frame, "TSLA", "1d")
@@ -1081,6 +1085,22 @@ class TestPriceAdjustmentMetadata(unittest.TestCase):
         self.assertEqual(
             result.attrs["price_adjustment_verification_status"],
             "INDEPENDENTLY_VERIFIED",
+        )
+
+    def test_boolean_without_sourced_evidence_does_not_unlock_daily_data(self):
+        frame = make_ohlcv(
+            pd.date_range("2026-01-01T00:00:00Z", periods=5, freq="D")
+        )
+        config = {
+            **engine.ASSETS["TSLA"],
+            "twelvedata_daily_adjustment_independently_verified": True,
+        }
+        with patch.dict(engine.ASSETS, {"TSLA": config}):
+            result = engine._attach_market_data_metadata(frame, "TSLA", "1d")
+        self.assertFalse(result.attrs["price_adjustment_verified"])
+        self.assertEqual(
+            result.attrs["price_adjustment_verification_status"],
+            "REQUESTED_NOT_INDEPENDENTLY_VERIFIED",
         )
 
     def test_twelvedata_intraday_raw_mode_remains_documented(self):
