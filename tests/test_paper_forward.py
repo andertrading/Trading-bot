@@ -117,7 +117,7 @@ class PaperForwardTests(unittest.TestCase):
         self.assertAlmostEqual(self.state["open_risk_usd"], 2.5)
 
     def test_aggregate_cash_reservation_prevents_implicit_leverage(self):
-        fill_bar = bar("2026-11-22T10:15:00+00:00", 99, 101, 98, 100)
+        fill_bar = bar("2026-11-22T10:15:00+00:00", 99.5, 101, 99.5, 100)
         for index in range(5):
             item = signal(f"cash-{index}")
             item["stop"] = 99.0
