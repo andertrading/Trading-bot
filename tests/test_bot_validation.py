@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from unittest.mock import patch
 
 import Bot
+from paper_forward import new_paper_state, process_signal_bar
 
 
 class TestBotValidation(unittest.TestCase):
@@ -774,6 +775,65 @@ class TestTwelveDataDailyRequestSuppression(unittest.TestCase):
 
         self.assertEqual(result, "held:global_validation_gate")
         send.assert_not_called()
+
+
+    def test_scan_portfolio_status_uses_isolated_paper_ledger(self):
+        paper_state = new_paper_state()
+        status = Bot.build_scan_portfolio_status(paper_state)
+
+        self.assertEqual(status["status"], "OK")
+        self.assertEqual(status["portfolio_source"], "PAPER_FORWARD_ONLY")
+        self.assertEqual(status["portfolio_basis"], "PAPER_GROSS_CONSERVATIVE_CAPITAL")
+        self.assertTrue(status["positions_confirmed"])
+        self.assertEqual(status["open_positions"], [])
+        self.assertAlmostEqual(status["capital_usd"], 1000.0)
+        self.assertAlmostEqual(status["available_capital_usd"], 1000.0)
+
+    def test_scan_portfolio_status_reserves_open_paper_position_cash_and_risk(self):
+        paper_state = new_paper_state()
+        signal = {
+            "signal_id": "paper-open",
+            "asset": "AAPL",
+            "timeframe": "1d",
+            "status": "PENDING",
+            "direction": "LONG",
+            "data_timestamp": "2026-11-22T10:00:00+00:00",
+            "generated_at": "2026-11-22T10:00:00+00:00",
+            "expires_at": "2026-11-23T10:00:00+00:00",
+            "entry_reference": 100.0,
+            "stop": 95.0,
+            "target": 110.0,
+        }
+        bar = {
+            "timestamp": "2026-11-22T10:15:00+00:00",
+            "open": 99.0,
+            "high": 101.0,
+            "low": 98.0,
+            "close": 100.0,
+        }
+        process_signal_bar(paper_state, signal, bar)
+
+        status = Bot.build_scan_portfolio_status(paper_state)
+        self.assertEqual(status["status"], "OK")
+        self.assertEqual(len(status["open_positions"]), 1)
+        self.assertAlmostEqual(status["current_portfolio_risk_usd"], 2.5)
+        self.assertAlmostEqual(status["invested_notional_usd"], 50.0)
+        self.assertAlmostEqual(status["available_capital_usd"], 950.0)
+
+    def test_scan_portfolio_status_does_not_fall_back_to_real_or_unknown_positions(self):
+        status = Bot.build_scan_portfolio_status()
+        self.assertEqual(status["status"], "UNKNOWN")
+        self.assertFalse(status["positions_confirmed"])
+        self.assertEqual(status["open_positions"], None)
+
+    def test_invalid_paper_ledger_blocks_scan_portfolio_status(self):
+        invalid_state = new_paper_state()
+        invalid_state["execution_mode"] = "REAL"
+        status = Bot.build_scan_portfolio_status(invalid_state)
+
+        self.assertEqual(status["status"], "BLOCKED")
+        self.assertFalse(status["positions_confirmed"])
+        self.assertEqual(status["portfolio_source"], "PAPER_FORWARD_ONLY")
 
 
 if __name__ == "__main__":
