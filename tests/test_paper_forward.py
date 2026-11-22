@@ -246,6 +246,35 @@ class PaperForwardTests(unittest.TestCase):
         self.assertAlmostEqual(snapshot["capital_usd"], 997.5)
         self.assertAlmostEqual(snapshot["available_capital_usd"], 997.5)
 
+    def test_gross_profit_does_not_increase_paper_risk_or_cash_limit(self):
+        first = signal("profit-first")
+        process_signal_bar(
+            self.state, first,
+            bar("2026-11-22T10:15:00+00:00", 99, 101, 98, 100),
+        )
+        process_signal_bar(
+            self.state, first,
+            bar("2026-11-22T10:30:00+00:00", 110, 111, 109, 110),
+        )
+        self.assertAlmostEqual(self.state["equity_usd"], 1005.0)
+
+        second = signal("cash-cap-after-gross-profit")
+        second.update({
+            "data_timestamp": "2026-11-22T10:30:00+00:00",
+            "generated_at": "2026-11-22T10:30:00+00:00",
+            "expires_at": "2026-11-22T11:30:00+00:00",
+            "stop": 99.75,
+        })
+        process_signal_bar(
+            self.state, second,
+            bar("2026-11-22T10:45:00+00:00", 100, 100.5, 99.9, 100.2),
+        )
+        trade = self.state["trades"]["cash-cap-after-gross-profit"]
+        self.assertEqual(trade["status"], "OPEN")
+        self.assertAlmostEqual(trade["risk_budget_usd"], 2.5)
+        self.assertAlmostEqual(trade["risk_capital_base_usd"], 1000.0)
+        self.assertAlmostEqual(trade["notional_usd"], 1000.0)
+
     def test_invalid_paper_state_or_missing_open_notional_is_rejected(self):
         process_signal_bar(
             self.state, signal(),
