@@ -78,6 +78,11 @@ def classify_asset(
         return result
 
 
+    if not config.get("enabled", True):
+        result["status"] = "INELIGIBLE"
+        result["blockers"] = ["asset_disabled_in_configuration"]
+        return result
+
     registry_mode = (
         asset_config is None
         and execution_type is None
@@ -134,11 +139,6 @@ def classify_asset(
             "policy": "DAILY_LONG_ONLY_UNLEVERAGED_REAL",
             "registry_source_of_truth": True,
         }
-
-    if not config.get("enabled", True):
-        result["status"] = "INELIGIBLE"
-        result["blockers"] = ["asset_disabled_in_configuration"]
-        return result
 
     configured_execution = (
         execution_type if execution_type is not None
