@@ -281,6 +281,58 @@ def can_add_sized_trade(
             "currency": "USD",
         }
 
+    cash_fields = {
+        "position_size": sizing_result.get("position_size"),
+        "entry_price_quote": sizing_result.get("entry_price_quote"),
+        "quote_to_usd": sizing_result.get("quote_to_usd"),
+        "position_notional_usd": sizing_result.get("position_notional_usd"),
+        "available_capital_usd": sizing_result.get("available_capital_usd"),
+    }
+    if any(not _is_finite_number(value) for value in cash_fields.values()):
+        return {
+            "allowed": False,
+            "reason": "Faltan datos verificables para comprobar el nominal frente al efectivo disponible.",
+            "currency": "USD",
+        }
+
+    position_size = float(cash_fields["position_size"])
+    entry_price_quote = float(cash_fields["entry_price_quote"])
+    quote_to_usd = float(cash_fields["quote_to_usd"])
+    position_notional_usd = float(cash_fields["position_notional_usd"])
+    available_capital_usd = float(cash_fields["available_capital_usd"])
+    effective_capital = (
+        INITIAL_CAPITAL_USD if capital_usd is None else capital_usd
+    )
+    if (
+        not _is_finite_number(effective_capital)
+        or float(effective_capital) <= 0
+        or position_size <= 0
+        or entry_price_quote <= 0
+        or quote_to_usd <= 0
+        or position_notional_usd <= 0
+        or available_capital_usd <= 0
+        or available_capital_usd > float(effective_capital) + 1e-8
+    ):
+        return {
+            "allowed": False,
+            "reason": "El efectivo disponible o los datos de nominal no son válidos.",
+            "currency": "USD",
+        }
+
+    recomputed_notional_usd = (
+        position_size * entry_price_quote * quote_to_usd
+    )
+    tolerance = max(1e-8, abs(position_notional_usd) * 1e-8)
+    if (
+        abs(recomputed_notional_usd - position_notional_usd) > tolerance
+        or position_notional_usd > available_capital_usd + tolerance
+    ):
+        return {
+            "allowed": False,
+            "reason": "El nominal de la posición no cuadra con la cantidad/precio o supera el efectivo disponible.",
+            "currency": "USD",
+        }
+
     total_reserved_risk_usd = sizing_result.get("total_reserved_risk_usd")
     if not _is_finite_number(total_reserved_risk_usd):
         return {
@@ -335,6 +387,8 @@ def can_add_sized_trade(
     return {
         **admission,
         "proposed_total_reserved_risk_usd": total_reserved_risk_usd,
+        "proposed_position_notional_usd": position_notional_usd,
+        "available_capital_usd": available_capital_usd,
         "admission_scope": "SIMULACION_NO_VALIDADA",
         "live_execution_authorized": False,
     }
