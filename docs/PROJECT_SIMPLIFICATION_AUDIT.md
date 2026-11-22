@@ -376,3 +376,20 @@ Fuentes de identidad de los ETF:
 El evaluador `baseline` del run #110 llama directamente a `strategies.evaluate_signal_at`, es decir, al mismo evaluador que utiliza el bot de producción. En la investigación se fija la puntuación en 85 para igualar el tramo de riesgo entre hipótesis; por tanto, la señal es la misma, pero el dimensionamiento no reproduce la puntuación variable de producción.
 
 El baseline diario produjo 224 operaciones y +27.25 R brutos en la muestra completa. En el portfolio OOS core (10 activos) produjo 127 operaciones y +8.10% bruto, pero -14.97% neto bajo el escenario eToro modelado, incluso con spread adicional cero. Esto hace que el resultado sea directamente relevante para la estrategia actual, aunque sigue siendo evidencia exploratoria y no validación de ejecución real.
+
+
+### Sensibilidad híbrida eToro + Bitvavo (sin recomendar un segundo broker)
+
+El artefacto #110 también comparó mantener acciones en eToro y ejecutar cripto en Bitvavo, con supuestos de comisión por lado de 0.05% para BTC/ETH/SOL/XRP en pares USDC y 0.15% maker / 0.25% taker para XLM/EUR. La documentación pública de Bitvavo confirma que los pares USDC tienen comisiones reducidas de hasta 0.05% y que las tarifas dependen del tipo de orden y del volumen de 30 días; no se ha confirmado el nivel real de un usuario.
+
+Incluso bajo ese escenario híbrido y con spread adicional igual a cero, el portfolio OOS core continuó negativo:
+- Baseline: -9.94% neto, frente a -14.97% con el escenario eToro cripto 1%.
+- Donchian: -8.84%, frente a -13.39%.
+- EMA reclaim: -5.46%, frente a -8.68%.
+- Trend pullback: -1.18%, frente a -2.07%.
+
+La mejora de costes es visible, pero no compensa la falta de ventaja neta. Añadir un segundo broker aumentaría la complejidad operativa y de divisa sin resolver el problema de rentabilidad; se descarta como cambio del MVP por ahora. Las tasas del escenario son hipótesis, no costes verificados.
+
+Fuentes públicas Bitvavo:
+- Comisiones por tipo de orden y volumen: https://support.bitvavo.com/hc/es/articles/4405175148689--Cu%C3%A1l-es-la-comisi%C3%B3n-de-trading-cuando-compro-o-vendo-criptomonedas
+- Pares USDC con comisiones de 0.05% o inferiores: https://bitvavo.com/en/news/usdc-pairs
