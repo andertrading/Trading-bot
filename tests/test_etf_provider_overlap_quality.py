@@ -5,6 +5,7 @@ import pandas as pd
 
 from research.etf_provider_overlap_audit import (
     _price_error_metrics,
+    eodhd_window_start,
     assess_alternate_repairs,
     load_twelvedata_daily,
     ohlc_integrity,
@@ -14,6 +15,14 @@ from research.etf_provider_overlap_audit import (
 class TestEtfProviderOverlapQuality(unittest.TestCase):
     def setUp(self):
         self.index = pd.Index([pd.Timestamp("2026-03-02").date()], name="date")
+
+    def test_eodhd_audit_window_is_capped_at_one_year(self):
+        requested_start = pd.Timestamp("2021-01-01").date()
+        end = pd.Timestamp("2026-11-21").date()
+        self.assertEqual(
+            eodhd_window_start(requested_start, end),
+            end - pd.Timedelta(days=365),
+        )
 
     def test_ohlc_integrity_accepts_coherent_bar(self):
         frame = pd.DataFrame(
