@@ -26,8 +26,9 @@ The first successful capture seeds the currently available validated history (ab
 
 - Dates must be unique and ordered.
 - OHLC values must be finite, positive and internally coherent; volume must be finite and non-negative.
+- The persisted source, XLON calendar and exact LSE symbol for each ETF are pinned and validated on every load.
 - Previously captured bars are immutable. If EODHD changes any stored OHLCV value, the capture fails closed and does not overwrite the stored state.
-- Such a revision requires explicit review. A corporate-action rebase, provider correction or symbol/listing change must never be silently mixed into a prospective paper record.
+- Such a revision requires explicit review. A corporate-action rebase, provider correction or symbol/listing change must never be silently mixed into a prospective paper record. If a future split causes the provider's rolling history to be rebased, capture intentionally stops until the historical basis is reconciled.
 - The adapter excludes bars dated outside XLON trading sessions and rejects incomplete/gapped daily history before storage.
 
 ## Safety boundaries
