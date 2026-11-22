@@ -54,6 +54,31 @@ class TestEtoroTransactionCosts(unittest.TestCase):
         self.assertAlmostEqual(result["market_spread_cost"], 0.21)
         self.assertAlmostEqual(result["known_costs_total"], 1.43)
 
+    def test_registry_costs_convert_percentage_fees_spread_and_fx_to_account_currency(self):
+        configured = dict(costs.ASSETS["CSPX"])
+        configured["currency"] = "EUR"
+        with patch.dict(costs.ASSETS, {"CSPX": configured}):
+            registry = self._complete_registry()
+            item = registry["assets"]["CSPX"]
+            item["instrument"]["currency"] = "EUR"
+            item["fx"].update({
+                "required": True,
+                "conversion_fee_pct": 0.2,
+                "quote_to_account_rate": 1.1,
+                "confirmed": True,
+                "source": "verified FX schedule",
+                "observed_at": "2026-11-22T00:00:00Z",
+            })
+            result = costs.estimate_verified_registry_trade_costs(
+                "CSPX", 100.0, 110.0, 2.0, registry=registry
+            )
+        self.assertTrue(result["complete"])
+        self.assertAlmostEqual(result["entry_commission_cost"], 1.0)
+        self.assertAlmostEqual(result["exit_commission_cost"], 0.242)
+        self.assertAlmostEqual(result["market_spread_cost"], 0.231)
+        self.assertAlmostEqual(result["fx_conversion_cost"], 0.924)
+        self.assertAlmostEqual(result["known_costs_total"], 2.397)
+
     def test_registry_costs_fail_closed_for_unverified_asset(self):
         result = costs.estimate_verified_registry_trade_costs(
             "CSPX", 100.0, 110.0, 1.0
