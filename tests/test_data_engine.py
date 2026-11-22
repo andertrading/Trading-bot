@@ -1153,6 +1153,69 @@ class TestTwelveDataInstrumentMetadata(unittest.TestCase):
 
 class TestTwelveDataAdjustmentMode(unittest.TestCase):
 
+    def test_stock_request_pins_verified_exchange_and_mic(self):
+        class Response:
+            def __init__(self, payload):
+                self.payload = payload
+
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return self.payload
+
+        index = pd.date_range(
+            "2026-01-01T00:00:00Z",
+            periods=220,
+            freq="D",
+        )
+        values = [
+            {
+                "datetime": timestamp.strftime("%Y-%m-%d %H:%M:%S"),
+                "open": "100",
+                "high": "102",
+                "low": "99",
+                "close": "101",
+                "volume": "1000",
+            }
+            for timestamp in index
+        ]
+        payload = {
+            "meta": {
+                "symbol": "TSLA",
+                "currency": "USD",
+                "exchange": "NASDAQ",
+                "mic_code": "XNAS",
+                "type": "Common Stock",
+                "exchange_timezone": "America/New_York",
+            },
+            "values": values,
+        }
+
+        with (
+            patch.dict("os.environ", {"TWELVE_DATA_API_KEY": "test"}),
+            patch.object(
+                engine,
+                "_twelvedata_request",
+                return_value=Response(payload),
+            ) as request,
+            patch.object(
+                engine,
+                "_remove_incomplete_candle",
+                side_effect=lambda frame, timeframe, asset: frame,
+            ),
+            patch.object(engine, "_has_daily_gaps", return_value=False),
+        ):
+            result = engine._download_twelvedata(
+                "TSLA",
+                engine.ASSETS["TSLA"],
+                "1d",
+            )
+
+        self.assertIsNotNone(result)
+        self.assertEqual(request.call_args.args[0]["exchange"], "NASDAQ")
+        self.assertEqual(request.call_args.args[0]["mic_code"], "XNAS")
+
     def test_daily_requests_explicit_split_adjustment_and_intraday_raw(self):
         class Response:
             def __init__(self, payload):
