@@ -132,3 +132,20 @@ Fuente principal: https://www.etoro.com/es/trading/fees/ (consultada 22-11-2026)
 ## Resultado esperado
 
 Menos combinaciones, menos llamadas redundantes, menos estrategias no viables y una sola ruta de aceptación. El objetivo no es producir señales a toda costa: es que cada señal candidata tenga una expectativa positiva demostrable después de costes completos, y que si no hay oportunidad el sistema diga NO TRADE.
+
+
+## Auditoría reproducible de solapamiento Yahoo/EODHD (añadida en PR #114)
+
+El archivo `research/etf_provider_overlap_audit.py` compara las cotizaciones diarias de Yahoo LSE (`CSPX.L`, `CNDX.L`) y EODHD LSE (`CSPX.LSE`, `CNDX.LSE`) durante la ventana de solapamiento disponible (aprox. 370 días). La comparación:
+
+- exige datos de ambos proveedores y moneda USD;
+- alinea sesiones por fecha de mercado;
+- compara OHLC después de aplicar a EODHD los eventos de split, sin ajuste por dividendos;
+- informa diferencias de sesiones y errores absolutos porcentuales por OHLC;
+- informa por separado la relación de volúmenes, sin asumir que ambos proveedores los reportan de forma idéntica;
+- genera CSV por activo y un resumen JSON como artefacto de GitHub Actions;
+- no accede a eToro, cartera, órdenes ni señales, y no cambia el proveedor activo.
+
+El workflow `.github/workflows/etf_provider_overlap_audit.yml` ejecuta la auditoría al cambiar estos archivos en una PR y también permite ejecución manual. Requiere el secreto existente `EODHD_API_KEY`; nunca imprime ni guarda la clave.
+
+**Estado:** herramienta añadida; comparación real pendiente de ejecución y revisión del artefacto. Hasta entonces, Yahoo y EODHD no se consideran equivalentes y no se cambia el enrutamiento de datos.
