@@ -356,8 +356,14 @@ def calculate_position_size(
     risk_based_position_size = (
         available_risk_for_units_usd / total_risk_per_unit_usd
     )
+    cash_cost_per_unit_usd = (
+        (entry + costs_per_unit_quote) * quote_to_usd
+    )
+    cash_after_fixed_costs_usd = available_capital_usd - fixed_costs_usd
     max_cash_position_size = (
-        available_capital_usd / (entry * quote_to_usd)
+        cash_after_fixed_costs_usd / cash_cost_per_unit_usd
+        if cash_cost_per_unit_usd > 0
+        else 0.0
     )
     if (
         not _is_finite_number(risk_based_position_size)
@@ -376,13 +382,18 @@ def calculate_position_size(
         max_cash_position_size,
     )
     position_notional_usd = position_size * entry * quote_to_usd
+    cash_required_usd = (
+        position_size * cash_cost_per_unit_usd + fixed_costs_usd
+    )
     if (
         not _is_finite_number(position_notional_usd)
         or position_notional_usd <= 0
-        or position_notional_usd > available_capital_usd + 1e-8
+        or not _is_finite_number(cash_required_usd)
+        or cash_required_usd <= 0
+        or cash_required_usd > available_capital_usd + 1e-8
     ):
         return _blocked_status(
-            "El nominal calculado supera el efectivo disponible."
+            "El nominal y los costes estimados superan el efectivo disponible."
         )
 
     position_risk_usd = position_size * total_risk_per_unit_usd
@@ -422,6 +433,8 @@ def calculate_position_size(
         "entry_price_quote": entry,
         "quote_to_usd": quote_to_usd,
         "position_notional_usd": position_notional_usd,
+        "cash_required_usd": cash_required_usd,
+        "costs_per_unit_quote": costs_per_unit_quote,
         "available_capital_usd": available_capital_usd,
         "cash_limited": position_size < risk_based_position_size,
         "capital_usd": capital_usd,
