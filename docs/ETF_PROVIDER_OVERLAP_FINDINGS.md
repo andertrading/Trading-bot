@@ -46,6 +46,15 @@ The controlled GitHub Actions run executed `data_engine._download_yahoo(..., "1d
 
 This is a useful fail-closed result: the repair routine itself works on real downloaded data, but the full history is still not usable because a missing session remains. The smoke test did not produce an accepted backtest dataframe for either ETF. Do not bypass the gap validator or silently forward-fill the missing candle.
 
+### Missing-session source audit and alternative-provider access
+
+The missing-session audit shows:
+- **CSPX:** 2026-03-06 is present in EODHD and can be sourced from the current live provider; SIX also matches EODHD closely on that date. The other unresolved date is 2025-10-24.
+- **CNDX:** EODHD has valid bars for the recent missing sessions 2025-12-22, 2025-12-29/30/31, 2026-01-02, 2026-03-06, 2026-05-04 and 2026-08-31. SIX is absent on several of those dates or diverges materially on High, so EODHD is the safer fill source for those recent dates.
+- **2025-10-24 remains unresolved for both ETFs:** Yahoo chart has no usable Close; EODHD does not return that date under the current one-year history window; SIX has no CNDX bar, and its CSPX bar cannot be cross-validated against a valid LSE close.
+
+The existing Twelve Data credential was tested without exposing its value. Symbol search resolves both instruments as USD ETFs on XLON, but its response marks access as **Grow** (business: Venture); the current key's time-series request returns HTTP 404. This is not a usable Basic-tier alternative. Twelve Data's official pricing lists Basic at 8 credits/minute and Grow as the tier that includes EOD global equities/ETFs; no upgrade has been made. References: https://twelvedata.com/pricing and https://twelvedata.com/etf.
+
 ### Five-year comparison between the two Yahoo listings
 
 The same-share-class LSE and SIX yfinance histories overlap for 1,236 CSPX sessions and 1,233 CNDX sessions:
@@ -76,9 +85,9 @@ Within the recent EODHD overlap, the Yahoo LSE 2026-03-02 bar is internally inco
 
 1. Add provider-quality checks that test OHLC coherence **and** cross-provider range anomalies on the overlapping window.
 2. Reject the CSPX Yahoo LSE extended history for any research that depends on High/Low until the source or repair method is validated.
-3. Resolve the missing 2025-10-24 LSE session using an independently validated same-date source (EODHD/SIX); only fill it if OHLC and close-deviation checks pass, otherwise keep rejecting the history.
-4. Obtain an independent five-year OHLC source before certifying older Yahoo history; EODHD returned only one year in this run.
-5. Re-run the production smoke test after the missing-session handling is fixed, and verify final OHLC integrity and complete exchange-calendar coverage.
+3. Resolve the 2025-10-24 LSE session using an independently validated source; current Yahoo/EODHD/SIX data do not provide a valid cross-check, so keep rejecting the history until one is available.
+4. Do not upgrade Twelve Data or EODHD solely for this project yet; first establish whether a viable strategy exists using currently available data and costs.
+5. Re-run the production smoke test only after the missing-session source is validated, and require complete exchange-calendar coverage.
 6. Investigate SIX as a CSPX historical source, but do not substitute or patch highs until its older history is independently validated.
 7. Keep EODHD as the current live daily source; do not switch production routing based on this diagnostic.
 8. Do not run new strategy optimization until the historical/live OHLC basis is consistent enough for the chosen research window.
