@@ -461,3 +461,6 @@ La escala por operación explica el problema: en el baseline M15, el edge bruto 
 
 
 Nota operativa: como este workflow está dentro de la PR #117 y la PR sigue sin fusionar, GitHub no lo ofrece todavía para ejecución manual desde la rama principal. El script y sus tests offline sí están en la rama y pasan CI; el workflow solo podrá lanzarse desde GitHub cuando exista en la rama por defecto. No se ha fusionado la PR para habilitarlo.
+
+
+La única excepción aparente en M15 fue AAPL dentro de esa estrategia MTF: 27 operaciones, +14,15R bruto y solo +1,67R tras costes conocidos. La distribución por folds fue inestable: fold 1 = -0,90R (4 trades), fold 2 = +4,30R (15 trades), fold 3 = -1,73R (8 trades). Además, siguen faltando spread y otros costes. No alcanza el tamaño muestral ni la estabilidad necesarios para convertirlo en una excepción operativa.
