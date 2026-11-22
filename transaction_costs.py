@@ -497,6 +497,9 @@ def estimate_verified_registry_unit_costs(
     result["unpriced_costs"].extend(round_trip.get("unpriced_costs", []))
     if not round_trip.get("complete"):
         return result
+    if round_trip.get("currency") != "USD":
+        result["unpriced_costs"].append("position_sizing_requires_USD_account_currency")
+        return result
 
     item = registry["assets"][asset]
     fx = item["fx"]
