@@ -437,11 +437,6 @@ def _load_snapshot(asset, ticker, interval):
         "asset": asset,
         "ticker": ticker,
         "timeframe": interval,
-        "period_requested": (
-            _daily_period_label()
-            if interval == "1d"
-            else "provider_maximum_available"
-        ),
         "auto_adjust": None,
         "adjustment_policy": (
             "raw_unadjusted_intraday"
