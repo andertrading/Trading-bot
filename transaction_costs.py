@@ -125,7 +125,7 @@ def estimate_etoro_trade_costs(
                 2.0 * float(ETORO_STOCK_REAL_COMMISSION_USD_PER_SIDE)
             )
             result["assumptions"].append(
-                "Acción real: tarifa publicada de 1 USD por lado para cuenta ES y acciones del universo en EE. UU."
+                "Acción real: comisión pública de 1-2 USD por lado según residencia y bolsa; se usa el límite superior de 2 USD hasta verificar el ticket exacto"
             )
         elif asset_type == "ETF":
             result["commission_cost"] = 0.0
