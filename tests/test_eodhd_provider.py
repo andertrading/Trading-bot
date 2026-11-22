@@ -116,10 +116,7 @@ class TestEODHDProvider(unittest.TestCase):
 
     def test_split_adjustment_rebases_ohlc_to_current_share_units(self):
         payload = valid_payload()
-        dates = pd.bdate_range(
-            end=pd.Timestamp.now(tz="UTC").date() - pd.Timedelta(days=1),
-            periods=len(payload),
-        )
+        dates = pd.to_datetime([row["date"] for row in payload])
         split_date = dates[100].strftime("%Y-%m-%d")
         result, _ = self.download(
             payload=payload,
