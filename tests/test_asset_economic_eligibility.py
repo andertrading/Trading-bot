@@ -141,6 +141,12 @@ class TestAssetEconomicEligibility(unittest.TestCase):
         self.assertFalse(report["orders_or_alerts_enabled"])
         self.assertFalse(report["sizing_enabled"])
 
+    def test_configured_asset_uses_per_instrument_registry_as_source_of_truth(self):
+        result = eligibility.classify_asset("CSPX")
+        self.assertTrue(result["registry_source_of_truth"])
+        self.assertEqual(result["status"], "COSTS_UNVERIFIED")
+        self.assertIn("instrument_identity_not_confirmed_in_instrument_ticket", result["blockers"])
+
     def test_default_configuration_does_not_claim_execution_is_confirmed(self):
         result = eligibility.classify_asset("CSPX")
         self.assertEqual(result["status"], "COSTS_UNVERIFIED")
