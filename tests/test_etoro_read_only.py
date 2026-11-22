@@ -852,6 +852,32 @@ class InstrumentEligibilityTests(unittest.TestCase):
         self.assertTrue(result[101].allow_open_position)
         self.assertFalse(result[101].leverage_configs[0]["allowStopLossTakeProfit"])
 
+    def test_zero_minimum_stop_and_take_profit_percentages_are_valid(self):
+        config = dict(self.item["leverageConfigs"][0])
+        config["minStopLossPercentage"] = 0
+        config["minTakeProfitPercentage"] = 0
+        item = dict(self.item, leverageConfigs=[config])
+        response = EtoroResponse(
+            dict(self.response.data, eligibilities=[item]), 200, {}
+        )
+        result = normalize_instrument_eligibility(response, [101])
+        normalized = result[101].leverage_configs[0]
+        self.assertEqual(normalized["minStopLossPercentage"], 0)
+        self.assertEqual(normalized["minTakeProfitPercentage"], 0)
+        self.assertTrue(normalized["allowStopLossTakeProfit"])
+
+    def test_negative_minimum_percentage_is_rejected(self):
+        for field in ("minStopLossPercentage", "minTakeProfitPercentage"):
+            with self.subTest(field=field):
+                config = dict(self.item["leverageConfigs"][0])
+                config[field] = -1
+                item = dict(self.item, leverageConfigs=[config])
+                response = EtoroResponse(
+                    dict(self.response.data, eligibilities=[item]), 200, {}
+                )
+                with self.assertRaisesRegex(EtoroAPIError, "no negativo"):
+                    normalize_instrument_eligibility(response, [101])
+
     def test_zero_percentage_rejected_when_stop_take_profit_is_enabled(self):
         config = dict(self.item["leverageConfigs"][0], minStopLossPercentage=0)
         item = dict(self.item, leverageConfigs=[config])
