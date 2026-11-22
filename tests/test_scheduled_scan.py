@@ -26,6 +26,9 @@ class MemoryStore:
     def update(self, signal):
         self.state["signals"][signal["signal_id"]] = copy.deepcopy(signal)
 
+    def update_paper_state(self, paper_state):
+        self.state["paper_forward"] = copy.deepcopy(paper_state)
+
     def prune(self, **kwargs):
         return 0
 
@@ -47,6 +50,7 @@ def make_candidate(now):
         "data_timestamp": (now - timedelta(minutes=15)).isoformat(),
         "data_age_minutes": 3.0,
         "data_valid": True,
+        "last_open": 99.5,
         "last_price": 100.0,
         "last_high": 100.5,
         "last_low": 99.5,
@@ -83,6 +87,54 @@ class ScheduledScanTests(unittest.TestCase):
         self.assertEqual(signal["status"], "PENDING")
         self.assertFalse(signal["alert_sent"])
         send_message.assert_not_called()
+
+
+    def test_existing_signal_fills_on_a_later_completed_bar_and_persists_paper_ledger(self):
+        store = MemoryStore("url", "token")
+        old = {
+            "schema_version": 1,
+            "signal_id": "paper-fill-1",
+            "asset": "BTC",
+            "timeframe": "15m",
+            "status": "PENDING",
+            "monitor_status": "ACTIVE",
+            "generated_at": (self.now - timedelta(minutes=30)).isoformat(),
+            "data_timestamp": (self.now - timedelta(minutes=30)).isoformat(),
+            "expires_at": (self.now + timedelta(hours=1)).isoformat(),
+            "direction": "LONG",
+            "entry_reference": 100.0,
+            "stop": 99.0,
+            "target": 102.0,
+            "provisional_risk_pct": 0.0025,
+            "alert_sent": False,
+            "position_status": "UNKNOWN",
+        }
+        store.upsert(old)
+        current = make_candidate(self.now)
+        current["action"] = "NO TRADE"
+        current["data_timestamp"] = (self.now - timedelta(minutes=15)).isoformat()
+        scan = {
+            "timeframes": ["15m"],
+            "analyses_completed": 1,
+            "technical_candidates_found": 0,
+            "candidates_blocked": 0,
+            "validated_candidates": 0,
+            "no_trade_count": 1,
+            "results": [current],
+        }
+        with patch.object(
+            scheduled_scan, "UpstashSignalStateStore", return_value=store
+        ), patch.object(
+            scheduled_scan.Bot, "run_scan", return_value=scan
+        ), patch.object(scheduled_scan, "SIGNAL_ALERTS_ENABLED", False):
+            result = scheduled_scan.run_scheduled_scan("15m")
+
+        paper = store.state["paper_forward"]
+        self.assertEqual(paper["execution_mode"], "PAPER_ONLY")
+        self.assertEqual(paper["trades"]["paper-fill-1"]["status"], "OPEN")
+        self.assertEqual(result["paper_bars_processed"], 1)
+        self.assertEqual(result["paper_forward"]["open_trades"], 1)
+        self.assertFalse(result["paper_forward"]["costs_included")
 
     def test_same_candle_does_not_create_duplicate_signal(self):
         store = MemoryStore("url", "token")
