@@ -359,25 +359,23 @@ class TestBotValidation(unittest.TestCase):
         }
         with patch.object(
             Bot,
-            "estimate_etoro_trade_costs",
+            "estimate_verified_registry_trade_costs",
             return_value={
                 "valid": True,
                 "complete": False,
                 "unpriced_costs": [
-                    "execution_type_not_confirmed_in_etoro_ticket",
-                    "live_market_bid_ask_spread_missing",
+                    "execution_type_evidence_missing",
+                    "observed_bid_ask_spread_evidence_missing",
                 ],
             },
         ) as estimate:
             lines = Bot._format_cost_readiness(candidate)
 
-        estimate.assert_called_once_with(
-            "AAPL", 100.0, 110.0, 1.0, side="BUY"
-        )
+        estimate.assert_called_once_with("AAPL", 100.0, 110.0, 1.0)
         report = "\n".join(lines)
         self.assertIn("INCOMPLETO", report)
-        self.assertIn("Tipo REAL/CFD pendiente", report)
-        self.assertIn("Spread bid/ask real no disponible", report)
+        self.assertIn("Tipo de ejecución REAL/CFD pendiente", report)
+        self.assertIn("Spread bid/ask observado y fechado no disponible", report)
         self.assertIn("rentabilidad neta no calculable", report)
 
     def test_cost_readiness_does_not_estimate_without_valid_levels(self):
@@ -386,7 +384,7 @@ class TestBotValidation(unittest.TestCase):
             "entry": 0,
             "target": 110.0,
         }
-        with patch.object(Bot, "estimate_etoro_trade_costs") as estimate:
+        with patch.object(Bot, "estimate_verified_registry_trade_costs") as estimate:
             lines = Bot._format_cost_readiness(candidate)
 
         estimate.assert_not_called()
@@ -401,10 +399,11 @@ class TestBotValidation(unittest.TestCase):
         }
         with patch.object(
             Bot,
-            "estimate_etoro_trade_costs",
+            "estimate_verified_registry_trade_costs",
             return_value={
                 "valid": True,
                 "complete": True,
+                "registry_status": "ELIGIBLE",
                 "unpriced_costs": [],
             },
         ):
@@ -440,7 +439,8 @@ class TestBotValidation(unittest.TestCase):
              patch.object(Bot, "ETORO_FEE_SCHEDULE_CONFIRMED", True), \
              patch.object(Bot, "ETORO_ACCOUNT_CURRENCY_CONFIRMED", True), \
              patch.object(Bot, "ETORO_EXECUTION_PRICE_BASIS_CONFIRMED", True), \
-             patch.object(Bot, "STRATEGY_VALIDATED", True):
+             patch.object(Bot, "STRATEGY_VALIDATED", True), \
+             patch.object(Bot, "classify_asset_economic", return_value={"status": "ELIGIBLE", "blockers": []}):
             result = Bot.apply_validation_gate(candidate, portfolio)
 
         self.assertEqual(result["validation_status"], "APPROVED")
@@ -448,6 +448,46 @@ class TestBotValidation(unittest.TestCase):
         self.assertTrue(result["tradable"])
         self.assertTrue(result["portfolio_admission"]["allowed"])
         self.assertFalse(result["portfolio_admission"]["live_execution_authorized"])
+
+    def test_global_flags_cannot_bypass_unverified_instrument_registry(self):
+        sizing_result = {
+            "status": "SIMULACION_NO_VALIDADA",
+            "validated": False,
+            "risk_amount_usd": 5.0,
+            "position_risk_usd": 4.0,
+            "fixed_costs_usd": 1.0,
+            "total_reserved_risk_usd": 5.0,
+        }
+        portfolio = {
+            "status": "OK",
+            "open_positions": [],
+            "positions_confirmed": True,
+        }
+        candidate = {**self.candidate, "sizing_result": sizing_result}
+        with patch.object(Bot, "ALLOW_POSITION_SIZING", True), \
+             patch.object(Bot, "CLOSE_FEES_CONFIRMED", True), \
+             patch.object(Bot, "SPREADS_CONFIRMED", True), \
+             patch.object(Bot, "FX_CONVERSION_CONFIRMED", True), \
+             patch.object(Bot, "ETORO_EXECUTION_TYPES_CONFIRMED", True), \
+             patch.object(Bot, "ETORO_FEE_SCHEDULE_CONFIRMED", True), \
+             patch.object(Bot, "ETORO_ACCOUNT_CURRENCY_CONFIRMED", True), \
+             patch.object(Bot, "ETORO_EXECUTION_PRICE_BASIS_CONFIRMED", True), \
+             patch.object(Bot, "STRATEGY_VALIDATED", True), \
+             patch.object(Bot, "classify_asset_economic", return_value={
+                 "status": "COSTS_UNVERIFIED",
+                 "blockers": ["round_trip_fee_evidence_missing"],
+             }):
+            result = Bot.apply_validation_gate(candidate, portfolio)
+        self.assertEqual(result["validation_status"], "BLOCKED")
+        self.assertFalse(result["tradable"])
+        self.assertIn(
+            "Elegibilidad económica del instrumento: COSTS_UNVERIFIED.",
+            result["validation_reasons"],
+        )
+        self.assertTrue(any(
+            "round_trip_fee_evidence_missing" in reason
+            for reason in result["validation_reasons"]
+        ))
 
     def test_sized_admission_gate_blocks_unconfirmed_open_positions(self):
         sizing_result = {
@@ -515,7 +555,7 @@ class TestBotValidation(unittest.TestCase):
         }
         with patch.object(
             Bot,
-            "estimate_etoro_trade_costs",
+            "estimate_verified_registry_trade_costs",
             return_value={
                 "valid": True,
                 "complete": False,
