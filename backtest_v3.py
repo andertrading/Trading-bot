@@ -835,7 +835,9 @@ def get_timeframes():
         if item.strip()
     ]
     if not requested:
-        return tuple(PERIODS)
+        # El backtest principal valida únicamente el MVP swing diario.
+        # M15 se ejecuta de forma explícita como laboratorio independiente.
+        return ("1d",)
 
     unknown = set(requested).difference(PERIODS)
     if unknown:
