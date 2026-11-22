@@ -1,8 +1,8 @@
 # ETF provider overlap findings — CSPX / CNDX
 
-**Run:** GitHub Actions `44980445218`  
-**Artifact:** `etf-provider-overlap-audit`  
-**Commit:** `52576455814f734c214aed44ebcc8513938431fa`  
+**Run:** GitHub Actions `44980789543`  
+**Artifact ID:** `14738020763` (`etf-provider-overlap-audit`)  
+**Audited code commit:** `4416a79330ceb2b789d07390d3d4d941fd21a3a3`  
 **Window requested:** 2025-11-16 to 2026-11-21  
 **Actual overlap:** CSPX 251 sessions; CNDX 246 sessions  
 **Scope:** public market OHLCV only. No eToro account, portfolio, positions, orders, or signals accessed.
@@ -17,8 +17,12 @@ The successful Actions status means the diagnostic completed and produced its ar
 
 | Asset | Yahoo LSE vs EODHD | Independent SIX cross-check | Decision |
 |---|---|---|---|
-| CSPX | Open and close practically identical (median absolute error below 0.000003%); high is materially inconsistent: median 0.091%, p95 6.385%, max 19.594%; 65 sessions have high error above 1%. One Yahoo LSE bar (2026-03-02) is structurally invalid. | CSSPX.SW high/low values are generally much closer to EODHD than the Yahoo LSE high series; SIX is a cross-check, not an interchangeable primary feed. | **Yahoo LSE CSPX OHLC rejected for extended backtests pending repair.** |
-| CNDX | Open/close practically identical; high p95 error below 0.000004%, max 0.319%; low max error 0.342%. One Yahoo LSE bar (2026-03-02) is structurally invalid. | CSNDX.SW has materially wider high/low differences, so it should not be used as a blind substitute for the LSE feed. | **Yahoo LSE CNDX is a candidate after explicit repair/rejection of the invalid 2026-03-02 bar and a wider-period audit. Not approved yet.** |
+| CSPX | Open and close practically identical (median absolute error below 0.000003%); high is materially inconsistent: median 0.091%, p95 6.002%, max 16.384%; 65 matched sessions have high error above 1%. One matched Yahoo LSE bar (2026-03-02) is structurally invalid; across the full Yahoo response, 2 of 257 bars are structurally invalid. | CSSPX.SW high/low values are generally much closer to EODHD than the Yahoo LSE high series; SIX is a cross-check, not an interchangeable primary feed. | **Yahoo LSE CSPX OHLC rejected for extended backtests pending repair.** |
+| CNDX | Open/close practically identical; high p95 error below 0.000004%, max 0.319%; low max error 0.342%. One matched Yahoo LSE bar (2026-03-02) is structurally invalid; across the full Yahoo response, 7 of 257 bars are structurally invalid. | CSNDX.SW has materially wider high/low differences, so it should not be used as a blind substitute for the LSE feed. | **Yahoo LSE CNDX is a candidate after explicit repair/rejection of the invalid 2026-03-02 bar and a wider-period audit. Not approved yet.** |
+
+### Automated research-quality gate
+
+The audit now applies a conservative gate: zero structurally invalid Yahoo OHLC rows, p95 absolute OHLC discrepancy no greater than 0.5%, and maximum absolute OHLC discrepancy no greater than 1.0% versus EODHD. Both assets fail, so `provider_research_approved` is `false`. The full Yahoo responses contain 2/257 structurally invalid CSPX rows and 7/257 CNDX rows; within the EODHD overlap, each has one invalid row on 2026-03-02. This distinguishes a completed diagnostic run from approval of the underlying data.
 
 ### Session coverage
 
