@@ -301,3 +301,12 @@ En cripto, la página oficial publica un 1% por posición para los niveles Bronz
 Fuentes oficiales:
 - eToro Fees: https://www.etoro.com/trading/fees/
 - eToro Cost & Charges examples (January 2026 update): https://www.etoro.com/wp-content/uploads/2025/07/Cost-and-Charges-examples-table-Crypto-Fees-in-May-2025.pdf
+
+
+### Impacto de la comisión sobre el presupuesto de riesgo de 1.000 USD
+
+En el artefacto recuperado, las operaciones diarias de acciones usan un presupuesto hipotético de riesgo de 5 USD por operación. Con la tarifa pública española de 1 USD al abrir y 1 USD al cerrar, la comisión fija de ida y vuelta es 2 USD: **0.40 R por operación**, antes del spread. Es decir, consume el 40% del riesgo presupuestado de 5 USD.
+
+Para cripto, el mismo artefacto estima que la comisión del 1% por lado representa una mediana aproximada de 0.28–0.43 R por operación según el activo (BTC, ETH, SOL, XLM y XRP), también antes de añadir spread. Son estimaciones derivadas de los tamaños hipotéticos de las operaciones, no un cálculo de costes verificado por ticket.
+
+Esto demuestra que subir el capital reduce el peso relativo de la comisión fija de acciones, pero no elimina el coste porcentual de cripto ni crea por sí solo una ventaja estadística. No se debe aumentar el riesgo por operación para compensar comisiones: el límite absoluto del 1% permanece intacto.
