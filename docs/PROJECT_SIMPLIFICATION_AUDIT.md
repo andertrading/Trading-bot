@@ -220,3 +220,6 @@ El cálculo anterior `estimate_etoro_trade_costs` se conserva como escenario de 
 
 
 La ruta verificada expresa todos los componentes en moneda de cuenta: las comisiones porcentuales y el spread se convierten desde la moneda de cotización mediante el tipo FX registrado; las comisiones fijas en USD ya están en moneda de cuenta. La comisión de conversión se calcula por separado sobre el nominal de entrada y salida. Si falta cualquiera de esos datos, no devuelve un total numérico.
+
+
+La comisión de conversión FX del registro se expresa también en puntos porcentuales mediante `conversion_fee_unit="PERCENT"`; por ejemplo, `0.2` significa `0.2%`, no `20%` ni una fracción decimal de `0.2`.
