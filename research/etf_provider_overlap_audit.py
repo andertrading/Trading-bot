@@ -306,32 +306,47 @@ def compare(asset, eod, yahoo, exchange, alternate, yahoo_yf, alternate_yf):
     chart_only_vs_yfinance = list(yahoo.index.difference(yahoo_yf.index))
     eodhd_only_vs_yfinance = list(eod.index.difference(yahoo_yf.index))
     missing_session_crosscheck = []
-    for day in eodhd_only_vs_yfinance:
-        if day not in alternate_yf.index:
-            missing_session_crosscheck.append({
-                "date": str(day),
-                "six_available": False,
-                "eodhd_close": float(eod.at[day, "Close"]),
-            })
-            continue
-        six_row = alternate_yf.loc[day]
-        eod_row = eod.loc[day]
-        close_deviation = abs(float(six_row["Close"]) / float(eod_row["Close"]) - 1.0) * 100.0
-        ohlc_deviations = {
-            col: abs(float(six_row[col]) / float(eod_row[col]) - 1.0) * 100.0
-            for col in ("Open", "High", "Low", "Close")
-        }
-        missing_session_crosscheck.append({
+    missing_days = sorted(set(chart_only_vs_yfinance) | set(eodhd_only_vs_yfinance))
+    for day in missing_days:
+        item = {
             "date": str(day),
-            "six_available": True,
-            "six_ohlc_valid": bool(ohlc_integrity(alternate_yf.loc[[day]])["invalid_rows"] == 0),
-            "six_close_deviation_vs_eodhd_pct": round(close_deviation, 6),
-            "six_ohlc_deviation_vs_eodhd_pct": {
-                key: round(value, 6) for key, value in ohlc_deviations.items()
-            },
-            "eodhd_close": float(eod_row["Close"]),
-            "six_close": float(six_row["Close"]),
-        })
+            "yahoo_chart_available": day in yahoo.index,
+            "eodhd_available": day in eod.index,
+            "six_available": day in alternate_yf.index,
+        }
+        if day in yahoo.index:
+            chart_close = pd.to_numeric(
+                pd.Series([yahoo.at[day, "Close"]]), errors="coerce"
+            ).iloc[0]
+            item["yahoo_chart_close"] = (
+                float(chart_close) if np.isfinite(chart_close) and chart_close > 0 else None
+            )
+        if day in alternate_yf.index:
+            six_row = alternate_yf.loc[day]
+            item["six_ohlc_valid"] = bool(
+                ohlc_integrity(alternate_yf.loc[[day]])["invalid_rows"] == 0
+            )
+            if day in yahoo.index:
+                chart_close = item.get("yahoo_chart_close")
+                six_close = float(six_row["Close"])
+                item["six_close"] = six_close
+                item["six_close_deviation_vs_yahoo_chart_pct"] = (
+                    round(abs(chart_close / six_close - 1.0) * 100.0, 6)
+                    if chart_close is not None else None
+                )
+        if day in eod.index:
+            eod_row = eod.loc[day]
+            item["eodhd_ohlc_valid"] = bool(ohlc_integrity(eod.loc[[day]])["invalid_rows"] == 0)
+            item["eodhd_ohlc"] = {
+                col: float(eod_row[col]) for col in ("Open", "High", "Low", "Close")
+            }
+            if day in alternate_yf.index:
+                six_row = alternate_yf.loc[day]
+                item["six_ohlc_deviation_vs_eodhd_pct"] = {
+                    col: round(abs(float(six_row[col]) / float(eod_row[col]) - 1.0) * 100.0, 6)
+                    for col in ("Open", "High", "Low", "Close")
+                }
+        missing_session_crosscheck.append(item)
     eodhd_integrity = ohlc_integrity(eod)
     six_integrity = ohlc_integrity(alternate)
     six_yfinance_integrity = ohlc_integrity(alternate_yf)
