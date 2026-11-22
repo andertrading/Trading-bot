@@ -352,3 +352,10 @@ En la muestra diaria completa del mismo artefacto, la ventaja bruta media por op
 - Cripto: el coste porcentual modelado equivale a una media de 0.371–0.385 R/trade. Expectativa bruta observada: baseline -0.008 R/trade, Donchian +0.162 R/trade y EMA reclaim +0.085 R/trade.
 
 La comparación es previa a spread y usa hipótesis públicas de eToro, no tickets verificados. Indica que las estrategias actuales no generan suficiente ventaja bruta para absorber los costes; no basta con cambiar el capital ni con ampliar el número de operaciones. La siguiente investigación debe buscar una mejora de expectancy neta con validación fuera de muestra, no aumentar frecuencia ni relajar los filtros.
+
+
+## Simplificación operativa: MVP diario y M15 manual de laboratorio
+
+El escaneo por defecto de `Bot.run_scan()` analiza ahora solo `1d`. El workflow programado elimina el cron M15 de cada 15 minutos y conserva únicamente el escaneo diario. M15 sigue disponible mediante una ejecución manual explícita del workflow para investigación/paper; no se elimina su código ni su soporte de pruebas.
+
+Esto reduce a la mitad los análisis del escaneo por defecto y elimina las llamadas recurrentes M15, sin alterar estrategias, reglas de riesgo ni el modo PAPER_ONLY. CI #635 pasó en el head final de esta modificación, incluyendo tests completos y arranque del bot.
