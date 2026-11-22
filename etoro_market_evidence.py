@@ -40,7 +40,7 @@ def _instrument_type_matches(configured_type: Any, etoro_type: Any) -> bool:
     )
     accepted = {
         "STOCK": {"stock", "stocks"},
-        "ETF": {"etf", "exchangetradedfund"},
+        "ETF": {"etf", "etfs", "exchangetradedfund"},
         "CRYPTO": {"crypto", "cryptocurrency"},
     }
     return actual in accepted.get(configured, set())
