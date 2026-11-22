@@ -3,7 +3,7 @@ import unittest
 from unittest.mock import patch
 
 from Bot import app, run_scan
-from config import ASSETS
+from config import ASSETS, SWING_INTERVAL
 
 
 class TestTradingBotApp(unittest.TestCase):
@@ -75,7 +75,7 @@ class TestTradingBotApp(unittest.TestCase):
         self.assertFalse(data["real_trading_authorized"])
 
     @patch("Bot.analyze_asset")
-    def test_scan_analyzes_all_enabled_assets_and_timeframes(
+    def test_default_scan_runs_daily_swing_only(
         self,
         mock_analyze,
     ):
@@ -84,34 +84,22 @@ class TestTradingBotApp(unittest.TestCase):
             "mode": "PAPER_ONLY",
         }
 
-        # The test verifies full scan coverage during active market sessions.
-        with patch("Bot.is_intraday_market_open", return_value=True):
+        with patch("Bot.is_intraday_market_open") as market_open:
             result = run_scan()
 
         expected_assets = [
             asset for asset, settings in ASSETS.items()
             if settings.get("enabled", False)
         ]
+        expected_count = len(expected_assets)
 
-        expected_count = len(expected_assets) * 2
-
-        self.assertEqual(
-            result["analyses_completed"],
-            expected_count,
-        )
-
-        self.assertEqual(
-            mock_analyze.call_count,
-            expected_count,
-        )
-
-        self.assertEqual(
-            result["no_trade_count"],
-            expected_count,
-        )
-
+        self.assertEqual(result["timeframes"], [SWING_INTERVAL])
+        self.assertEqual(result["analyses_completed"], expected_count)
+        self.assertEqual(mock_analyze.call_count, expected_count)
+        self.assertEqual(result["no_trade_count"], expected_count)
         self.assertEqual(result["candidates_found"], 0)
         self.assertFalse(result["automatic_execution"])
+        market_open.assert_not_called()
 
 
 if __name__ == "__main__":
