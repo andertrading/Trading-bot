@@ -31,6 +31,7 @@ ASSETS = {
 FX_TICKER = "GBPUSD=X"
 MAX_P95_DEVIATION_PCT = 0.5
 MAX_FIELD_DEVIATION_PCT = 1.0
+MIN_COMMON_SESSIONS = 900
 OUTPUT = Path("etf_gbp_listing_audit")
 
 
@@ -171,7 +172,7 @@ def assess_target_dates(usd_frame, gbp_usd_frame, target_dates):
             item["status"] = "NO_GBX_CANDIDATE"
         elif day not in usd.index:
             item["status"] = "CANDIDATE_ONLY_NO_PRIMARY_CROSSCHECK"
-            item["gbx_candidate_ohlc_usd":] = {
+            item["gbx_candidate_ohlc_usd": = {
                 column: round(float(alternate.at[day, column]), 6)
                 for column in OHLC
             }
@@ -241,6 +242,7 @@ def main():
                 if (
                     comparison["max_field_p95_abs_pct"] <= MAX_P95_DEVIATION_PCT
                     and comparison["max_field_deviation_pct"] <= MAX_FIELD_DEVIATION_PCT
+                    and comparison["common_sessions"] >= MIN_COMMON_SESSIONS
                     and usd_integrity["invalid_rows"] == 0
                     and gbp_integrity["invalid_rows"] == 0
                     and not missing_fx
@@ -283,7 +285,6 @@ def main():
                 target.get("status") == "REPAIR_CANDIDATE_WITHIN_TOLERANCE"
                 for item in results
                 for target in item.get("target_dates", [])
-                if target.get("usd_listing_available")
             )
         ),
         "interpretation": (
@@ -295,7 +296,7 @@ def main():
         json.dumps(report, indent=2), encoding="utf-8"
     )
     print(json.dumps(report, indent=2))
-    if errors:
+    if errors or not report["provider_repair_approved"]:
         raise SystemExit(1)
 
 
