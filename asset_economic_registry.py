@@ -74,7 +74,7 @@ def valid_fee_side(side: dict) -> bool:
     if model not in {"FIXED", "PERCENT_NOTIONAL", "ZERO"}:
         return False
     if model == "ZERO":
-        return value == 0 and unit in {"USD", "PERCENT"}
+        return not isinstance(value, bool) and value == 0 and unit in {"USD", "PERCENT"}
     expected_unit = "USD" if model == "FIXED" else "PERCENT"
     return unit == expected_unit and _valid_number(value)
 
