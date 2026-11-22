@@ -205,10 +205,13 @@ class ScheduledScanTests(unittest.TestCase):
         ) as run_scan, patch.object(scheduled_scan, "SIGNAL_ALERTS_ENABLED", False):
             result = scheduled_scan.run_scheduled_scan("15m")
 
-        run_scan.assert_called_once_with(
-            timeframes=["15m"],
-            include_paper_bars=True,
-            paper_assets=["BTC"],
+        run_scan.assert_called_once()
+        self.assertEqual(run_scan.call_args.kwargs["timeframes"], ["15m"])
+        self.assertTrue(run_scan.call_args.kwargs["include_paper_bars"])
+        self.assertEqual(run_scan.call_args.kwargs["paper_assets"], ["BTC"])
+        self.assertEqual(
+            run_scan.call_args.kwargs["paper_portfolio_state"]["execution_mode"],
+            "PAPER_ONLY",
         )
         trade = store.state["paper_forward"]["trades"]["paper-replay-1"]
         self.assertEqual(trade["status"], "CLOSED")
