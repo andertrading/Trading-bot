@@ -23,7 +23,6 @@ from paper_market_data import (
 )
 
 OUTPUT_DIR = Path("etf_paper_capture")
-OUTPUT_DIR.mkdir(exist_ok=True)
 
 
 def _upstash_request(method, url, *, headers, timeout, data=None):
@@ -140,6 +139,7 @@ def main():
         asset: len(state["assets"][asset]["bars"])
         for asset in PAPER_MARKET_ASSETS
     }
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     output = OUTPUT_DIR / "capture_report.json"
     output.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
     print(json.dumps(report, indent=2, sort_keys=True))
