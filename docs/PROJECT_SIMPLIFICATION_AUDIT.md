@@ -210,3 +210,10 @@ Los bloqueos del registro se traducen al vocabulario histórico del informe para
 ### Precio histórico frente a precio ejecutable
 
 La ficha ahora exige tres elementos explícitos antes de confirmar la base de precios: tratamiento del histórico (ajustes por splits/dividendos), base del precio ejecutable del broker (bid/ask o precio aplicable) y regla que conecta la señal histórica con la entrada realista. No basta con adjuntar una fuente o marcar una casilla de confirmación. Los 12 activos quedan sin esos campos hasta disponer de evidencia específica.
+
+
+### Coste de operación verificado desde el registro
+
+Se añade `estimate_verified_registry_trade_costs` como ruta de cálculo para el MVP REAL. Solo calcula y declara completo el coste cuando la clasificación del registro es `ELIGIBLE`; utiliza comisión de entrada y salida por separado (fija, porcentual en puntos porcentuales o cero confirmado), spread bid-ask y FX cuando corresponda. Una ficha incompleta devuelve sus bloqueos y no transforma valores desconocidos en cero.
+
+El cálculo anterior `estimate_etoro_trade_costs` se conserva como escenario de tarifas públicas estimadas y no puede certificar la elegibilidad del instrumento. Ambos resultados quedan separados para evitar confundir una simulación conservadora con costes confirmados del ticket.
