@@ -385,7 +385,8 @@ class TestBacktestV3(unittest.TestCase):
         self.assertAlmostEqual(fields["hypothetical_risk_budget_usd"], 2.5)
         self.assertAlmostEqual(fields["result_R_after_known_fees"], 0.4)
         self.assertFalse(fields["costs_complete"])
-        self.assertIn("live_market_bid_ask_spread_missing", fields["unpriced_costs"])
+        self.assertIn("live_market_bid_ask_spread_missing", fields["scenario_unpriced_costs"])
+        self.assertIn("round_trip_fee_evidence_missing", fields["unpriced_costs"])
 
     def test_registry_incomplete_overrides_legacy_complete_cost_flag(self):
         with (
@@ -465,6 +466,8 @@ class TestBacktestV3(unittest.TestCase):
                 },
             )
         self.assertTrue(fields["costs_complete"])
+        self.assertEqual(fields["unpriced_costs"], "")
+        self.assertIn("live_market_bid_ask_spread_missing", fields["scenario_unpriced_costs"])
         self.assertEqual(fields["registry_costs_status"], "ELIGIBLE")
         self.assertAlmostEqual(fields["verified_costs_total_usd"], 1.0)
         self.assertAlmostEqual(fields["verified_net_pnl_usd"], 4.0)
