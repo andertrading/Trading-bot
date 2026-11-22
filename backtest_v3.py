@@ -265,6 +265,11 @@ def _snapshot_metadata(
         "ticker": ticker,
         "timeframe": interval,
         "provider": data.attrs.get("provider", provider),
+        "period_requested": (
+            _daily_period_label()
+            if interval == "1d"
+            else "provider_maximum_available"
+        ),
         "interval_requested": interval,
         "auto_adjust": None,
         "adjustment_policy": data.attrs.get(
