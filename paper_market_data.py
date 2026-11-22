@@ -140,11 +140,19 @@ def validate_market_data_state(state):
         raise ValueError("unsupported paper market-data schema")
     if state.get("mode") != "PUBLIC_MARKET_DATA_PAPER_ONLY":
         raise ValueError("market-data state mode is invalid")
+    if state.get("source") != "EODHD" or state.get("calendar") != "XLON":
+        raise ValueError("market-data source or exchange calendar is invalid")
     assets = state.get("assets")
     if not isinstance(assets, dict) or set(assets) != set(PAPER_MARKET_ASSETS):
         raise ValueError("market-data asset universe is invalid")
     for asset in PAPER_MARKET_ASSETS:
-        bars = assets[asset].get("bars")
+        asset_state = assets[asset]
+        if (
+            not isinstance(asset_state, dict)
+            or asset_state.get("symbol") != f"{asset}.LSE"
+        ):
+            raise ValueError(f"{asset} listing metadata is invalid")
+        bars = asset_state.get("bars")
         if not isinstance(bars, list):
             raise ValueError(f"{asset} bars are invalid")
         dates = [validate_bar(bar)["date"] for bar in bars]
