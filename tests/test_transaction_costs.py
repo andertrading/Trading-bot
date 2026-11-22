@@ -61,6 +61,7 @@ class TestEtoroTransactionCosts(unittest.TestCase):
         self.assertTrue(result["valid"])
         self.assertFalse(result["complete"])
         self.assertEqual(result["registry_status"], "COSTS_UNVERIFIED")
+        self.assertIsNone(result["known_costs_total"])
         self.assertIn("round_trip_fee_evidence_missing", result["unpriced_costs"])
 
     def test_registry_costs_reject_confirmed_cfd_for_real_only_mvp(self):
