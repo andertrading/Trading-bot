@@ -340,7 +340,7 @@ def _last_completed_exchange_session(calendar_name: str, now_utc: datetime) -> t
             session = calendar.previous_session(session)
             session_open = calendar.session_open(session).to_pydatetime()
             session_close = calendar.session_close(session).to_pydatetime()
-        is_open = bool(calendar.is_open_on_minute(pd.Timestamp(now_utc)))
+        is_open = bool(calendar.is_open_on_minute(pd.Timestamp(now_utc).floor("min")))
         return is_open, session_open, session_close
     except Exception as exc:
         raise EtoroAPIError(
