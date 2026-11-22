@@ -1359,6 +1359,47 @@ def apply_validation_gate(result, portfolio_status):
         )
 
     sizing_result = result.get("sizing_result")
+    if sizing_result is None and not blockers:
+        # The sizing path is reachable only after every global, instrument,
+        # market-data, strategy and paper-portfolio gate has passed.
+        try:
+            entry_price = result.get("entry_reference", result.get("entry"))
+            target_price = result.get("target")
+            unit_costs = estimate_verified_registry_unit_costs(
+                result.get("asset"),
+                entry_price,
+                target_price,
+            )
+            result["sizing_cost_evidence"] = unit_costs
+            if not unit_costs.get("complete"):
+                blockers.append(
+                    "No se pueden calcular costes unitarios completos con evidencia verificada"
+                )
+                blockers.extend(
+                    f"Bloqueo de coste unitario: {reason}"
+                    for reason in unit_costs.get("unpriced_costs", [])
+                )
+            else:
+                sizing_result = calculate_position_size(
+                    entry=entry_price,
+                    stop=result.get("stop"),
+                    score=score,
+                    capital_usd=portfolio_status.get("capital_usd"),
+                    available_capital_usd=portfolio_status.get("available_capital_usd"),
+                    quote_to_usd=unit_costs["quote_to_usd"],
+                    portfolio_risk_usd=portfolio_status.get("current_portfolio_risk_usd"),
+                    costs_per_unit_quote=unit_costs["costs_per_unit_quote"],
+                    fixed_costs_quote=unit_costs["fixed_costs_quote"],
+                    minimum_order_notional_usd=unit_costs["minimum_order_notional_usd"],
+                    fractional_allowed=unit_costs["fractional_allowed"],
+                )
+                result["sizing_result"] = sizing_result
+        except Exception:
+            logger.exception("POSITION SIZING PIPELINE ERROR")
+            blockers.append(
+                "Falló el cálculo de tamaño basado en costes e instrumento verificados"
+            )
+
     if sizing_result is None:
         blockers.append(
             "Validación integral y cálculo de posición pendientes"
