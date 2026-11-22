@@ -113,6 +113,48 @@ class MarketEvidenceTests(unittest.TestCase):
         self.assertEqual(report["assets"]["AAPL"]["hypothetical_open_cost"]["status"], "SKIPPED")
 
 
+    def test_v1_exact_symbol_search_fallback_resolves_etf_without_fuzzy_matching(self):
+        class V1FallbackClient(FakeMarketEvidenceClient):
+            def __init__(self):
+                super().__init__()
+                self.fallback_filters = []
+
+            def search_instrument_by_symbol(self, symbol):
+                raise EtoroAPIError("eToro devolvió HTTP 404")
+
+            def search_instruments(self, filters):
+                self.fallback_filters.append(dict(filters))
+                return EtoroResponse({
+                    "items": [{
+                        "instrumentId": 101,
+                        "internalSymbolFull": "CSPX",
+                        "displayname": "iShares Core S&P 500 UCITS ETF",
+                        "instrumentType": "ETFs",
+                        "isCurrentlyTradable": True,
+                        "isActiveInPlatform": True,
+                        "isBuyEnabled": True,
+                        "isDelisted": False,
+                    }],
+                    "totalItems": 1,
+                }, 200, {})
+
+        client = V1FallbackClient()
+        report = collect_market_evidence(
+            client,
+            symbols={"CSPX": {"market_calendar": "XLON", "type": "ETF"}},
+            now_utc=datetime(2026, 11, 22, 12, 0, tzinfo=timezone.utc),
+        )
+
+        self.assertEqual(client.fallback_filters, [{"internalSymbolFull": "CSPX"}])
+        self.assertEqual(report["summary"]["resolved_instruments"], 1)
+        self.assertEqual(
+            report["assets"]["CSPX"]["instrument"]["symbol"], "CSPX"
+        )
+        self.assertFalse(any(
+            "instrument_resolution" in error
+            for error in report["assets"]["CSPX"]["errors"]
+        ))
+
     def test_instrument_type_mismatch_blocks_quote_and_cost_capture(self):
         class WrongTypeClient(FakeMarketEvidenceClient):
             def search_instrument_by_symbol(self, symbol):
