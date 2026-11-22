@@ -278,11 +278,27 @@ def exchange_calendar_coverage(frame, calendar_name="XLON"):
     observed = {pd.Timestamp(day).date() for day in frame.index}
     missing = sorted(expected - observed)
     extra = sorted(observed - expected)
+    extra_rows = []
+    for day in extra:
+        row = frame.loc[day]
+        previous = frame.loc[[value for value in frame.index if value < day]].tail(1)
+        following = frame.loc[[value for value in frame.index if value > day]].head(1)
+        extra_rows.append({
+            "date": str(day),
+            "open": float(row["Open"]),
+            "high": float(row["High"]),
+            "low": float(row["Low"]),
+            "close": float(row["Close"]),
+            "volume": float(row.get("Volume", 0.0)),
+            "previous_close": float(previous.iloc[-1]["Close"]) if not previous.empty else None,
+            "next_close": float(following.iloc[0]["Close"]) if not following.empty else None,
+        })
     return {
         "expected_sessions": len(expected),
         "observed_sessions": len(observed),
         "missing_sessions": [str(day) for day in missing],
         "extra_sessions": [str(day) for day in extra],
+        "extra_session_rows": extra_rows,
         "coverage_ratio": round(len(expected.intersection(observed)) / len(expected), 6)
             if expected else None,
     }
