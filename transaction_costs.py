@@ -438,6 +438,126 @@ def estimate_verified_registry_trade_costs(
     return result
 
 
+def estimate_verified_registry_unit_costs(
+    asset,
+    entry,
+    exit_price,
+    *,
+    registry=None,
+):
+    """Return admission-grade round-trip costs per unit in quote currency.
+
+    Fixed commissions remain separate from variable per-unit costs so the
+    risk manager can reserve both without double counting. Minimum order and
+    fractional-quantity rules come from the same verified instrument record.
+    """
+    result = {
+        "valid": False,
+        "complete": False,
+        "source": "asset_economic_registry",
+        "costs_per_unit_quote": None,
+        "fixed_costs_quote": None,
+        "quote_to_usd": None,
+        "minimum_order_notional_usd": None,
+        "minimum_order_notional_quote": None,
+        "fractional_allowed": None,
+        "unpriced_costs": [],
+    }
+    if not _finite(entry) or not _finite(exit_price):
+        result["unpriced_costs"].append("invalid_trade_values")
+        return result
+    if float(entry) <= 0 or float(exit_price) <= 0:
+        result["unpriced_costs"].append("non_positive_trade_values")
+        return result
+
+    try:
+        if registry is None:
+            registry = _load_default_economic_registry()
+        classification = classify_registry_asset(asset, registry)
+    except (OSError, ValueError, TypeError) as error:
+        result["unpriced_costs"].append("economic_registry_invalid")
+        result["registry_error_type"] = type(error).__name__
+        return result
+
+    if classification.get("status") != "ELIGIBLE":
+        result["valid"] = True
+        result["registry_status"] = classification.get("status")
+        result["unpriced_costs"].extend(classification.get("blockers", []))
+        return result
+
+    round_trip = estimate_verified_registry_trade_costs(
+        asset,
+        float(entry),
+        float(exit_price),
+        1.0,
+        registry=registry,
+    )
+    result["valid"] = bool(round_trip.get("valid"))
+    result["registry_status"] = round_trip.get("registry_status")
+    result["unpriced_costs"].extend(round_trip.get("unpriced_costs", []))
+    if not round_trip.get("complete"):
+        return result
+
+    item = registry["assets"][asset]
+    fx = item["fx"]
+    quote_to_usd = (
+        float(fx["quote_to_account_rate"]) if fx.get("required") else 1.0
+    )
+    if not _finite(quote_to_usd) or quote_to_usd <= 0:
+        result["unpriced_costs"].append("quote_to_usd_rate_invalid")
+        return result
+
+    fixed_commission_account = 0.0
+    for side_name, cost_name in (
+        ("entry", "entry_commission_cost"),
+        ("exit", "exit_commission_cost"),
+    ):
+        if item["fees"][side_name]["model"] == "FIXED":
+            fixed_commission_account += float(round_trip[cost_name])
+
+    fixed_costs_quote = fixed_commission_account / quote_to_usd
+    variable_costs_account = (
+        float(round_trip["known_costs_total"]) - fixed_commission_account
+    )
+    costs_per_unit_quote = variable_costs_account / quote_to_usd
+
+    minimum = item["minimum_order"]
+    minimum_order_notional_quote = float(minimum["minimum_notional"])
+    minimum_order_notional_usd = (
+        minimum_order_notional_quote * quote_to_usd
+    )
+    fractional_allowed = minimum["fractional_allowed"]
+
+    numeric_values = (
+        fixed_costs_quote,
+        costs_per_unit_quote,
+        minimum_order_notional_quote,
+        minimum_order_notional_usd,
+    )
+    if (
+        any(not _finite(value) for value in numeric_values)
+        or any(value < 0 for value in numeric_values[:2])
+        or minimum_order_notional_quote <= 0
+        or not isinstance(fractional_allowed, bool)
+    ):
+        result["unpriced_costs"].append("verified_unit_cost_or_order_rule_invalid")
+        return result
+
+    result.update({
+        "complete": True,
+        "costs_per_unit_quote": costs_per_unit_quote,
+        "fixed_costs_quote": fixed_costs_quote,
+        "quote_to_usd": quote_to_usd,
+        "minimum_order_notional_usd": minimum_order_notional_usd,
+        "minimum_order_notional_quote": minimum_order_notional_quote,
+        "fractional_allowed": fractional_allowed,
+        "fixed_commission_account_currency": fixed_commission_account,
+        "variable_costs_per_unit_account_currency": variable_costs_account,
+        "currency": round_trip.get("currency"),
+    })
+    return result
+
+
 def estimate_funding_conversion_cost(
     amount,
     source_currency,
