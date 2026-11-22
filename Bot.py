@@ -982,14 +982,11 @@ def send_telegram_notifications(scan_result):
             logger.info("TELEGRAM NOTIFICATIONS HELD | no admitted daily candidates")
             return "held:no_eligible_candidates"
 
+        # Filter only the candidate reports. Preserve the original scan
+        # counters so the summary does not relabel excluded candidates as
+        # validated or silently erase blocked/no-trade counts.
         report_scan = dict(scan_result)
-        report_scan.update({
-            "technical_candidates_found": len(candidates),
-            "candidates_blocked": 0,
-            "validated_candidates": len(candidates),
-            "no_trade_count": 0,
-            "results": candidates,
-        })
+        report_scan["results"] = candidates
         messages = build_telegram_messages(report_scan)
 
         sent = 0
