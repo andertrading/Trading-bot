@@ -77,7 +77,7 @@ class TestPortfolioBacktest(unittest.TestCase):
             entry_time="2026-01-01T10:00:00Z",
             exit_time="2026-01-01T11:00:00Z",
             entry=100.0,
-            stop=100.0 - (2.5 / 900.0 * 100.0),
+            stop=100.0 - (7.5 / 900.0 * 100.0),
             score=90,
         )
         second = self.make_trade(
@@ -158,11 +158,11 @@ class TestPortfolioBacktest(unittest.TestCase):
 
         self.assertAlmostEqual(
             result["summary"]["max_drawdown_usd"],
-            2.5125,
+            7.6125,
         )
         self.assertAlmostEqual(
             result["summary"]["max_drawdown_pct"],
-            0.25,
+            0.75,
         )
 
     def test_open_risk_percentage_tracks_realized_loss_and_blocks_new_risk(self):
