@@ -103,6 +103,7 @@ Historical research has not established a robust positive net edge after realist
 ## Official and technical references
 
 - eToro API authentication: https://api-portal.etoro.com/core/getting-started/authentication
-- eToro instrument search: https://api-portal.etoro.com/api-reference/market-data/search-instruments
-- eToro instrument metadata and market rates: https://api-portal.etoro.com/api-reference/market-data
+- eToro API documentation portal: https://api-portal.etoro.com/
+- eToro authentication guide: https://api-portal.etoro.com/core/getting-started/authentication
+- eToro market-order guide (includes the documented instrument-search example and market-rate guidance): https://api-portal.etoro.com/guides/market-orders
 - `exchange_calendars` calendar aliases: https://github.com/gerrymanoim/exchange_calendars/blob/master/exchange_calendars/calendar_utils.py
