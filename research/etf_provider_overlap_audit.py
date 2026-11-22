@@ -154,23 +154,50 @@ def load_twelvedata_daily(session, asset, start, end, token):
             f"{asset}: Twelve Data devolvió {len(exact)} símbolos exactos XLON/USD/ETF"
         )
     candidate = exact[0]
-    params = {
+    base_params = {
         "symbol": candidate["symbol"],
-        "mic_code": "XLON",
         "interval": "1day",
         "start_date": start.isoformat(),
         "end_date": end.isoformat(),
         "apikey": token,
     }
-    payload = _get_twelvedata_json(
-        session, "https://api.twelvedata.com/time_series", params, "time_series"
-    )
-    meta = payload.get("meta", {})
-    if (
-        str(meta.get("mic_code", "")).upper() != "XLON"
-        or str(meta.get("currency", "")).upper() != "USD"
-    ):
-        raise RuntimeError(f"{asset}: Twelve Data metadata XLON/USD no confirmada")
+    payload = None
+    meta = {}
+    last_error = None
+    # Some Twelve Data ETF listings resolve by exchange name rather than MIC.
+    variants = [
+        {"mic_code": "XLON"},
+        {"exchange": candidate.get("exchange", "London Stock Exchange")},
+        {},
+    ]
+    for selector in variants:
+        try:
+            payload = _get_twelvedata_json(
+                session,
+                "https://api.twelvedata.com/time_series",
+                {**base_params, **selector},
+                "time_series",
+            )
+            meta = payload.get("meta", {})
+            if (
+                str(meta.get("mic_code", "")).upper() == "XLON"
+                and str(meta.get("currency", "")).upper() == "USD"
+            ):
+                break
+            payload = None
+            last_error = "metadata did not confirm XLON/USD"
+        except RuntimeError as exc:
+            last_error = str(exc)
+            if "HTTP 404" not in last_error and "API code 404" not in last_error:
+                raise
+    if payload is None:
+        candidate_access = candidate.get("access", {})
+        raise RuntimeError(
+            f"{asset}: Twelve Data time_series no resolvió XLON/USD "
+            f"(symbol={candidate.get('symbol')}, exchange={candidate.get('exchange')}, "
+            f"mic={candidate.get('mic_code')}, access={candidate_access}, "
+            f"last_error={last_error})"
+        )
     values = payload.get("values")
     if not isinstance(values, list) or not values:
         raise RuntimeError(f"{asset}: Twelve Data histórico diario vacío")
@@ -190,7 +217,13 @@ def load_twelvedata_daily(session, asset, start, end, token):
         pd.to_numeric(frame["volume"], errors="coerce")
         if "volume" in frame.columns else 0.0
     )
-    return frame[["Open", "High", "Low", "Close", "Volume"]]
+    frame = frame[["Open", "High", "Low", "Close", "Volume"]]
+    frame.attrs["twelvedata_search_candidate"] = {
+        key: candidate.get(key)
+        for key in ("symbol", "instrument_name", "exchange", "mic_code", "currency", "instrument_type", "access")
+    }
+    frame.attrs["twelvedata_time_series_meta"] = meta
+    return frame
 
 
 def load_yfinance_daily(ticker, start, end):
