@@ -90,6 +90,7 @@ class ReadOnlyAuditTests(unittest.TestCase):
                 "name": "Tesla",
                 "yahoo": "TSLA",
                 "type": "STOCK",
+                "market_calendar": "XNYS",
                 "enabled": True,
             }
         }
