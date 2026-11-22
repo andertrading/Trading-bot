@@ -102,6 +102,7 @@ def calculate_position_size(
     stop,
     score,
     capital_usd=None,
+    available_capital_usd=None,
     quote_to_usd=None,
     portfolio_risk_usd=None,
     costs_per_unit_quote=None,
@@ -129,6 +130,10 @@ def calculate_position_size(
         de cotización. Es obligatorio facilitarlo explícitamente,
         incluso cuando el valor confirmado sea 0.
 
+    available_capital_usd:
+        Efectivo disponible en la cartera virtual tras reservar
+        posiciones abiertas. Es obligatorio y limita el nominal.
+
     El cálculo permanece bloqueado mientras
     ALLOW_POSITION_SIZING sea False.
     """
@@ -141,6 +146,11 @@ def calculate_position_size(
 
     if capital_usd is None:
         capital_usd = INITIAL_CAPITAL_USD
+
+    if available_capital_usd is None:
+        return _blocked_status(
+            "Falta confirmar el efectivo disponible en la cartera virtual."
+        )
 
     if portfolio_risk_usd is None:
         return _blocked_status(
@@ -167,6 +177,7 @@ def calculate_position_size(
         "stop": stop,
         "score": score,
         "capital_usd": capital_usd,
+        "available_capital_usd": available_capital_usd,
         "quote_to_usd": quote_to_usd,
         "portfolio_risk_usd": portfolio_risk_usd,
         "costs_per_unit_quote": costs_per_unit_quote,
@@ -185,6 +196,7 @@ def calculate_position_size(
     stop = float(stop)
     score = float(score)
     capital_usd = float(capital_usd)
+    available_capital_usd = float(available_capital_usd)
     quote_to_usd = float(quote_to_usd)
     portfolio_risk_usd = float(portfolio_risk_usd)
     costs_per_unit_quote = float(costs_per_unit_quote)
@@ -212,6 +224,11 @@ def calculate_position_size(
     if capital_usd <= 0:
         return _blocked_status(
             "El capital USD debe ser positivo."
+        )
+
+    if available_capital_usd <= 0 or available_capital_usd > capital_usd + 1e-8:
+        return _blocked_status(
+            "El efectivo disponible debe ser positivo y no superar el capital de la cartera virtual."
         )
 
     if quote_to_usd <= 0:
@@ -340,16 +357,59 @@ def calculate_position_size(
             "El riesgo por unidad convertido a USD no es válido."
         )
 
-    position_size = (
+    risk_based_position_size = (
         available_risk_for_units_usd / total_risk_per_unit_usd
     )
-
+    cash_cost_per_unit_usd = (
+        (entry + costs_per_unit_quote) * quote_to_usd
+    )
+    cash_after_fixed_costs_usd = available_capital_usd - fixed_costs_usd
+    max_cash_position_size = (
+        cash_after_fixed_costs_usd / cash_cost_per_unit_usd
+        if cash_cost_per_unit_usd > 0
+        else 0.0
+    )
     if (
-        not _is_finite_number(position_size)
-        or position_size <= 0
+        not _is_finite_number(risk_based_position_size)
+        or risk_based_position_size <= 0
+        or not _is_finite_number(max_cash_position_size)
+        or max_cash_position_size <= 0
     ):
         return _blocked_status(
-            "No se ha podido calcular un tamaño de posición válido."
+            "No se ha podido calcular un tamaño de posición válido dentro del efectivo disponible."
+        )
+
+    # Long-only, unleveraged: never let the theoretical stop-risk quantity
+    # exceed the cash available in the virtual portfolio.
+    position_size = min(
+        risk_based_position_size,
+        max_cash_position_size,
+    )
+    position_notional_usd = position_size * entry * quote_to_usd
+    cash_required_usd = (
+        position_size * cash_cost_per_unit_usd + fixed_costs_usd
+    )
+    if (
+        not _is_finite_number(position_notional_usd)
+        or position_notional_usd <= 0
+        or not _is_finite_number(cash_required_usd)
+        or cash_required_usd <= 0
+        or cash_required_usd > available_capital_usd + 1e-8
+    ):
+        return _blocked_status(
+            "El nominal y los costes estimados superan el efectivo disponible."
+        )
+
+    position_risk_usd = position_size * total_risk_per_unit_usd
+    total_reserved_risk_usd = fixed_costs_usd + position_risk_usd
+    if (
+        not _is_finite_number(position_risk_usd)
+        or not _is_finite_number(total_reserved_risk_usd)
+        or total_reserved_risk_usd <= 0
+        or total_reserved_risk_usd > risk_amount_usd + 1e-8
+    ):
+        return _blocked_status(
+            "El riesgo reservado no es válido tras aplicar el límite de efectivo."
         )
 
     risk_tier = _risk_tier_for_score(score)
@@ -371,11 +431,16 @@ def calculate_position_size(
         ),
         "risk_per_unit_usd": total_risk_per_unit_usd,
         "fixed_costs_usd": fixed_costs_usd,
-        "position_risk_usd": position_size * total_risk_per_unit_usd,
-        "total_reserved_risk_usd": (
-            fixed_costs_usd + position_size * total_risk_per_unit_usd
-        ),
+        "position_risk_usd": position_risk_usd,
+        "total_reserved_risk_usd": total_reserved_risk_usd,
         "position_size": position_size,
+        "entry_price_quote": entry,
+        "quote_to_usd": quote_to_usd,
+        "position_notional_usd": position_notional_usd,
+        "cash_required_usd": cash_required_usd,
+        "costs_per_unit_quote": costs_per_unit_quote,
+        "available_capital_usd": available_capital_usd,
+        "cash_limited": position_size < risk_based_position_size,
         "capital_usd": capital_usd,
         "currency": "USD",
     }
