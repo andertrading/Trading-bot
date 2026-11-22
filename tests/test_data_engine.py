@@ -2600,6 +2600,43 @@ class TestYahooAlternateDailyOhlcRepair(unittest.TestCase):
         self.assertIsNone(repaired)
         self.assertIsNone(metadata)
 
+    @patch.object(engine, "_download_yahoo_daily_history")
+    @patch.object(engine.requests, "get")
+    def test_alternate_download_validates_six_metadata_then_uses_daily_history(
+        self, request_get, download_history
+    ):
+        alternate = make_ohlcv(self.index)
+        download_history.return_value = alternate
+        payload = {
+            "chart": {
+                "error": None,
+                "result": [{
+                    "meta": {
+                        "currency": "USD",
+                        "fullExchangeName": "Swiss Exchange",
+                        "exchangeTimezoneName": "Europe/Zurich",
+                    },
+                }],
+            },
+        }
+        response = type("Response", (), {
+            "status_code": 200,
+            "raise_for_status": lambda self: None,
+            "json": lambda self: payload,
+        })()
+        request_get.return_value = response
+
+        start = datetime(2025, 1, 1, tzinfo=timezone.utc)
+        end = datetime(2026, 11, 19, tzinfo=timezone.utc)
+        result = engine._download_yahoo_alternate_daily(
+            "CSPX", start, end, "USD"
+        )
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result[1], "CSSPX.SW")
+        self.assertEqual(len(result[0]), len(self.index))
+        download_history.assert_called_once_with("CSSPX.SW", start, end)
+
     @patch.dict(os.environ, {
         "BACKTEST_EXTENDED_DAILY_HISTORY": "true",
         "BACKTEST_DAILY_LOOKBACK_DAYS": "1825",
