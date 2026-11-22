@@ -119,11 +119,10 @@ class PaperForwardTests(unittest.TestCase):
     def test_aggregate_cash_reservation_prevents_implicit_leverage(self):
         fill_bar = bar("2026-11-22T10:15:00+00:00", 99, 101, 98, 100)
         for index in range(5):
-            process_signal_bar(
-                self.state,
-                signal(f"cash-{index}"),
-                fill_bar,
-            )
+            item = signal(f"cash-{index}")
+            item["stop"] = 99.0
+            item["target"] = 102.0
+            process_signal_bar(self.state, item, fill_bar)
         statuses = [
             self.state["trades"][f"cash-{index}"]["status"]
             for index in range(5)
