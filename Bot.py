@@ -1452,7 +1452,9 @@ def run_scan(timeframes=None, include_paper_bars=False, paper_assets=None):
     }
 
     if timeframes is None:
-        selected_timeframes = (INTRADAY_INTERVAL, SWING_INTERVAL)
+        # The production MVP runs daily swing only. M15 remains an explicit,
+        # manually invoked research/paper timeframe.
+        selected_timeframes = (SWING_INTERVAL,)
     else:
         selected_timeframes = tuple(dict.fromkeys(timeframes))
         if not selected_timeframes or any(
