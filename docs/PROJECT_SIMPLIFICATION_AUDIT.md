@@ -327,7 +327,7 @@ La sensibilidad no incluye spread, no simula el efecto de la trayectoria de equi
 
 El gate de metadata exige símbolo y moneda compatibles, tipo de activo correcto, bolsa y tipo presentes, y zona horaria coherente con el calendario configurado para acciones/ETF. El MIC es obligatorio para acciones y ETF, pero no para cripto: Twelve Data documenta MIC para valores negociables y no lo presenta como identificador aplicable a monedas digitales. La validación de tipo usa `Common Stock`, `ETF` y `Digital Currency`.
 
-La bolsa y el MIC recibidos se registran en logs, pero aún no se comparan con un valor esperado independiente por símbolo. No se han inventado códigos ni se ha marcado la identidad exacta del listado como verificada. La identidad completa sigue pendiente hasta disponer de metadatos por instrumento contrastados.
+Para cinco acciones USA y dos ETF LSE, la bolsa y el MIC se comparan con valores esperados independientes por símbolo y se envían también como filtros a Twelve Data. La identidad de esos siete listados está respaldada por las bolsas oficiales; aún falta confirmar una respuesta real del proveedor con esos metadatos. Para cripto se valida el tipo y la presencia de exchange, pero no se fuerza un venue único ni un MIC.
 
 Fuente de esquema de metadata Twelve Data: https://twelvedata.com/docs/ai/ai-data-assistant
 
@@ -342,7 +342,7 @@ Fuentes de listing:
 - TTWO: https://www.nasdaq.com/market-activity/stocks/ttwo/real-time
 - Metadata de ejemplo Twelve Data (AAPL / NASDAQ / XNAS): https://twelvedata.com/docs/ai/ai-data-assistant
 
-No se han fijado valores esperados para CSPX/CNDX hasta confirmar el formato exacto de metadata que devuelve Twelve Data para esos símbolos. Tampoco se fuerza un MIC a las criptomonedas.
+Para CSPX y CNDX se han fijado `twelvedata_exchange="London Stock Exchange"` y `twelvedata_mic_code="XLON"` a partir de las fichas oficiales de LSE, que confirman ticker, moneda USD, ISIN y MIC. La API se consulta con esos filtros y el gate rechaza cualquier discrepancia. No se fuerza un MIC a las criptomonedas.
 
 
 ### Ventaja bruta frente al coste por operación
@@ -362,3 +362,10 @@ Esto reduce a la mitad los análisis del escaneo por defecto y elimina las llama
 
 
 La descarga de Twelve Data también envía ahora `exchange=NASDAQ` y `mic_code=XNAS` para esos cinco activos, además de comprobar que la respuesta coincide. Así se evita depender únicamente de la resolución por ticker. La documentación de `/time_series` admite ambos filtros. La prueba unitaria verifica los parámetros enviados y CI #637 pasó en el head `00ca39fe49b93d7e00c410685d03efbf7f41d85e`.
+
+
+Fuentes de identidad de los ETF:
+- CSPX, ISIN IE00B5BMR087, moneda USD, MIC XLON: https://www.londonstockexchange.com/en/quote/etps/CSPX/ishares-vii-plc
+- CNDX, ISIN IE00B53SZB19, moneda USD, MIC XLON: https://www.londonstockexchange.com/en/quote/etps/CNDX/ishares-vii-plc
+- Twelve Data lista London Stock Exchange con MIC XLON: https://twelvedata.com/exchanges?country=United+Kingdom
+- Para los siete valores con identidad fijada, Twelve Data recibe filtros `exchange` y `mic_code` y la respuesta debe coincidir. Los tests son unitarios con metadata simulada; no se ha gastado cuota en una consulta real de confirmación.
