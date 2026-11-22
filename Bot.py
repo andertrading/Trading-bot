@@ -52,9 +52,12 @@ from data_engine import (
 )
 
 from strategies import evaluate_signal
-from risk_manager import risk_pct_for_score
+from risk_manager import risk_pct_for_score, calculate_position_size
 from portfolio import get_portfolio_status, can_add_sized_trade
-from transaction_costs import estimate_verified_registry_trade_costs
+from transaction_costs import (
+    estimate_verified_registry_trade_costs,
+    estimate_verified_registry_unit_costs,
+)
 from asset_economic_eligibility import classify_asset as classify_asset_economic
 from paper_forward import paper_portfolio_snapshot
 
