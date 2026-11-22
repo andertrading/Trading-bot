@@ -3,6 +3,7 @@ import unittest
 from paper_forward import (
     new_paper_state,
     paper_summary,
+    paper_portfolio_snapshot,
     process_signal_bar,
 )
 
@@ -198,6 +199,96 @@ class PaperForwardTests(unittest.TestCase):
             "2026-11-22T10:15:00+00:00", 99, 101, 98, 100
         ))
         self.assertEqual(self.state["trades"]["s1"]["status"], "NOT_FILLED_EXPIRED_OR_INVALID")
+
+    def test_paper_portfolio_snapshot_reports_virtual_cash_and_open_risk(self):
+        snapshot = paper_portfolio_snapshot(self.state)
+        self.assertEqual(snapshot["portfolio_basis"], "PAPER_GROSS_CONSERVATIVE_CAPITAL")
+        self.assertEqual(snapshot["capital_usd"], 1000.0)
+        self.assertEqual(snapshot["available_capital_usd"], 1000.0)
+        self.assertEqual(snapshot["open_positions"], [])
+        self.assertTrue(snapshot["positions_confirmed"])
+
+        process_signal_bar(
+            self.state, signal(),
+            bar("2026-11-22T10:15:00+00:00", 99, 101, 98, 100),
+        )
+        snapshot = paper_portfolio_snapshot(self.state)
+        self.assertEqual(len(snapshot["open_positions"]), 1)
+        self.assertAlmostEqual(snapshot["open_positions"][0]["risk_usd"], 2.5)
+        self.assertAlmostEqual(snapshot["open_positions"][0]["notional_usd"], 50.0)
+        self.assertAlmostEqual(snapshot["invested_notional_usd"], 50.0)
+        self.assertAlmostEqual(snapshot["available_capital_usd"], 950.0)
+
+    def test_gross_profit_cannot_increase_conservative_paper_capital(self):
+        process_signal_bar(
+            self.state, signal(),
+            bar("2026-11-22T10:15:00+00:00", 99, 101, 98, 100),
+        )
+        process_signal_bar(
+            self.state, signal(),
+            bar("2026-11-22T10:30:00+00:00", 110, 111, 109, 110),
+        )
+        snapshot = paper_portfolio_snapshot(self.state)
+        self.assertAlmostEqual(snapshot["equity_usd"], 1005.0)
+        self.assertAlmostEqual(snapshot["capital_usd"], 1000.0)
+        self.assertAlmostEqual(snapshot["available_capital_usd"], 1000.0)
+
+    def test_realized_gross_loss_reduces_conservative_paper_capital(self):
+        process_signal_bar(
+            self.state, signal(),
+            bar("2026-11-22T10:15:00+00:00", 99, 101, 98, 100),
+        )
+        process_signal_bar(
+            self.state, signal(),
+            bar("2026-11-22T10:30:00+00:00", 95, 95, 94, 94.5),
+        )
+        snapshot = paper_portfolio_snapshot(self.state)
+        self.assertAlmostEqual(snapshot["capital_usd"], 997.5)
+        self.assertAlmostEqual(snapshot["available_capital_usd"], 997.5)
+
+    def test_gross_profit_does_not_increase_paper_risk_or_cash_limit(self):
+        first = signal("profit-first")
+        process_signal_bar(
+            self.state, first,
+            bar("2026-11-22T10:15:00+00:00", 99, 101, 98, 100),
+        )
+        process_signal_bar(
+            self.state, first,
+            bar("2026-11-22T10:30:00+00:00", 110, 111, 109, 110),
+        )
+        self.assertAlmostEqual(self.state["equity_usd"], 1005.0)
+
+        second = signal("cash-cap-after-gross-profit")
+        second.update({
+            "data_timestamp": "2026-11-22T10:30:00+00:00",
+            "generated_at": "2026-11-22T10:30:00+00:00",
+            "expires_at": "2026-11-22T11:30:00+00:00",
+            "stop": 99.75,
+        })
+        process_signal_bar(
+            self.state, second,
+            bar("2026-11-22T10:45:00+00:00", 100, 100.5, 99.9, 100.2),
+        )
+        trade = self.state["trades"]["cash-cap-after-gross-profit"]
+        self.assertEqual(trade["status"], "OPEN")
+        self.assertAlmostEqual(trade["risk_budget_usd"], 2.5)
+        self.assertAlmostEqual(trade["risk_capital_base_usd"], 1000.0)
+        self.assertAlmostEqual(trade["notional_usd"], 1000.0)
+
+    def test_invalid_paper_state_or_missing_open_notional_is_rejected(self):
+        process_signal_bar(
+            self.state, signal(),
+            bar("2026-11-22T10:15:00+00:00", 99, 101, 98, 100),
+        )
+        del self.state["trades"]["s1"]["notional_usd"]
+        with self.assertRaises(ValueError):
+            paper_portfolio_snapshot(self.state)
+
+        with self.assertRaises(ValueError):
+            paper_portfolio_snapshot(
+                new_paper_state(900),
+                expected_initial_capital_usd=1000,
+            )
 
     def test_summary_reports_gross_only_and_never_claims_net_validation(self):
         process_signal_bar(self.state, signal(), bar(

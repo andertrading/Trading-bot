@@ -22,6 +22,7 @@ from signal_lifecycle import (
 from paper_forward import (
     new_paper_state,
     paper_summary,
+    paper_portfolio_snapshot,
     process_signal_bar,
 )
 
@@ -274,10 +275,20 @@ def run_scheduled_scan(timeframe: str) -> dict:
             if trade.get("status") == "OPEN" and trade.get("asset")
         )
     paper_assets.discard("")
+    if paper_state is None:
+        paper_state = new_paper_state()
+    else:
+        # Never silently reset a malformed persisted paper ledger.
+        paper_portfolio_snapshot(
+            paper_state,
+            expected_initial_capital_usd=Bot.INITIAL_CAPITAL_USD,
+        )
+
     scan_result = Bot.run_scan(
         timeframes=[timeframe],
         include_paper_bars=True,
         paper_assets=sorted(paper_assets),
+        paper_portfolio_state=paper_state,
     )
     results = scan_result.get("results", [])
     by_asset = {
@@ -286,8 +297,6 @@ def run_scheduled_scan(timeframe: str) -> dict:
         if isinstance(item, dict) and item.get("timeframe") == timeframe
     }
 
-    if not isinstance(paper_state, dict) or paper_state.get("execution_mode") != "PAPER_ONLY":
-        paper_state = new_paper_state()
     paper_bars_processed = 0
 
     # Process the latest completed OHLC bar for each existing signal before
