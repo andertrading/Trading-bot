@@ -125,6 +125,28 @@ class AssetEconomicRegistryTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 validate_registry(altered)
 
+    def test_fx_evidence_is_not_required_when_quote_matches_account_currency(self):
+        item = self.registry["assets"]["CSPX"]
+        item["fx"]["required"] = False
+        item["fx"]["confirmed"] = False
+
+        result = classify_registry_asset("CSPX", self.registry)
+
+        self.assertNotIn("fx_conversion_evidence_missing", result["blockers"])
+
+    def test_fx_evidence_is_required_when_quote_differs_from_account_currency(self):
+        item = self.registry["assets"]["CSPX"]
+        item["instrument"]["currency"] = "EUR"
+        item["fx"]["required"] = True
+        item["fx"]["confirmed"] = False
+        modified_config = dict(registry_module.ASSETS["CSPX"])
+        modified_config["currency"] = "EUR"
+
+        with patch.dict(registry_module.ASSETS, {"CSPX": modified_config}):
+            result = classify_registry_asset("CSPX", self.registry)
+
+        self.assertIn("fx_conversion_evidence_missing", result["blockers"])
+
     def test_fx_conversion_fee_unit_must_be_percentage_points(self):
         altered = copy.deepcopy(self.registry)
         altered["assets"]["CSPX"]["fx"]["conversion_fee_unit"] = "DECIMAL"
