@@ -57,6 +57,14 @@ class TestBacktestV3(unittest.TestCase):
             with self.assertRaises(ValueError):
                 backtest_v3.get_assets()
 
+    def test_default_timeframe_is_daily_swing_only(self):
+        with patch.dict(
+            backtest_v3.os.environ,
+            {},
+            clear=True,
+        ):
+            self.assertEqual(backtest_v3.get_timeframes(), ("1d",))
+
     def test_timeframe_filter_selects_only_requested_intervals(self):
         with patch.dict(
             backtest_v3.os.environ,
