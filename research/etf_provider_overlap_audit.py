@@ -134,7 +134,8 @@ def load_yfinance_daily(ticker, start, end):
         index = index.tz_localize(None)
     index = index.normalize().tz_localize("UTC")
     frame = frame.copy()
-    frame.index = index
+    # Match the session-date key used by EODHD and Yahoo chart comparisons.
+    frame.index = index.date
     frame.index.name = "date"
     required = ["Open", "High", "Low", "Close"]
     if any(col not in frame.columns for col in required):
