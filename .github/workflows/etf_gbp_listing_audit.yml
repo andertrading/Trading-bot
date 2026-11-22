@@ -1,12 +1,6 @@
 name: ETF GBX Same-ISIN Listing Audit
 
 on:
-  pull_request:
-    branches:
-      - main
-    paths:
-      - "research/etf_gbp_listing_audit.py"
-      - ".github/workflows/etf_gbp_listing_audit.yml"
   workflow_dispatch:
 
 concurrency:
