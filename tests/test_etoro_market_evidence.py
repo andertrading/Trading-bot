@@ -77,6 +77,40 @@ class MarketEvidenceTests(unittest.TestCase):
         self.assertEqual(client.cost_payloads[0]["settlementType"], "real")
         self.assertEqual(client.cost_payloads[0]["leverage"], 1)
 
+    def test_configured_etoro_symbol_is_used_for_exact_instrument_resolution(self):
+        class ExactEtoroSymbolClient(FakeMarketEvidenceClient):
+            def __init__(self):
+                super().__init__()
+                self.searched_symbols = []
+
+            def search_instrument_by_symbol(self, symbol):
+                self.searched_symbols.append(symbol)
+                return EtoroResponse({"results": [{
+                    "instrumentId": 101,
+                    "symbol": "CSPX.L",
+                    "displayName": "iShares Core S&P 500 UCITS ETF",
+                    "type": "ETF",
+                }], "pagination": {"hasNext": False}}, 200, {})
+
+        client = ExactEtoroSymbolClient()
+        report = collect_market_evidence(
+            client,
+            symbols={"CSPX": {
+                "etoro_symbol": "CSPX.L",
+                "market_calendar": "XLON",
+                "type": "ETF",
+            }},
+            now_utc=datetime(2026, 11, 22, 12, 0, tzinfo=timezone.utc),
+        )
+
+        self.assertEqual(client.searched_symbols, ["CSPX.L"])
+        self.assertEqual(report["summary"]["resolved_instruments"], 1)
+        self.assertEqual(report["assets"]["CSPX"]["instrument"]["symbol"], "CSPX.L")
+        self.assertFalse(any(
+            error.startswith("instrument_resolution:")
+            for error in report["assets"]["CSPX"]["errors"]
+        ))
+
     def test_live_capture_uses_fresh_clock_for_each_sequential_request(self):
         class AdvancingDateTime:
             calls = 0
