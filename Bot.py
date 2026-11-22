@@ -56,6 +56,7 @@ from risk_manager import risk_pct_for_score
 from portfolio import get_portfolio_status, can_add_sized_trade
 from transaction_costs import estimate_verified_registry_trade_costs
 from asset_economic_eligibility import classify_asset as classify_asset_economic
+from paper_forward import paper_portfolio_snapshot
 
 
 faulthandler.enable(all_threads=True)
@@ -1087,6 +1088,47 @@ def no_trade(asset, timeframe, reason):
     }
 
 
+def build_scan_portfolio_status(paper_portfolio_state=None):
+    """Build risk/cash status from the isolated virtual ledger only.
+
+    Direct scans without a paper-state snapshot remain UNKNOWN. This function
+    never reads or infers the user's real broker positions.
+    """
+    if paper_portfolio_state is None:
+        return get_portfolio_status(
+            open_positions=None,
+            positions_confirmed=False,
+            capital_usd=INITIAL_CAPITAL_USD,
+        )
+
+    try:
+        snapshot = paper_portfolio_snapshot(
+            paper_portfolio_state,
+            expected_initial_capital_usd=INITIAL_CAPITAL_USD,
+        )
+        status = get_portfolio_status(
+            open_positions=snapshot["open_positions"],
+            positions_confirmed=True,
+            capital_usd=snapshot["capital_usd"],
+        )
+        status.update(snapshot)
+        status["portfolio_source"] = "PAPER_FORWARD_ONLY"
+        return status
+    except Exception as exc:
+        logger.exception("PAPER PORTFOLIO SNAPSHOT ERROR")
+        return {
+            "status": "BLOCKED",
+            "reason": "El estado de la cartera virtual no es válido; no se puede confirmar el riesgo ni el efectivo.",
+            "capital_usd": INITIAL_CAPITAL_USD,
+            "open_positions": None,
+            "positions_confirmed": False,
+            "available_capital_usd": None,
+            "currency": "USD",
+            "portfolio_source": "PAPER_FORWARD_ONLY",
+            "error": str(exc),
+        }
+
+
 def get_validation_blockers(portfolio_status, asset=None):
     blockers = []
 
@@ -1303,7 +1345,11 @@ def apply_validation_gate(result, portfolio_status):
                     isinstance(portfolio_status, dict)
                     and portfolio_status.get("positions_confirmed") is True
                 ),
-                capital_usd=INITIAL_CAPITAL_USD,
+                capital_usd=(
+                    portfolio_status.get("capital_usd", INITIAL_CAPITAL_USD)
+                    if isinstance(portfolio_status, dict)
+                    else INITIAL_CAPITAL_USD
+                ),
             )
         except Exception:
             logger.exception("SIZED PORTFOLIO ADMISSION ERROR")
@@ -1528,7 +1574,12 @@ def analyze_asset(asset, timeframe, include_paper_bars=False):
         )
 
 
-def run_scan(timeframes=None, include_paper_bars=False, paper_assets=None):
+def run_scan(
+    timeframes=None,
+    include_paper_bars=False,
+    paper_assets=None,
+    paper_portfolio_state=None,
+):
     """Analyze selected timeframes without requiring broker/account access."""
     results = []
     paper_assets = {
@@ -1552,34 +1603,9 @@ def run_scan(timeframes=None, include_paper_bars=False, paper_assets=None):
         selected_timeframes,
     )
 
-    # No existe conexión ni confirmación automática
-    # de las posiciones abiertas en eToro.
-    try:
-        portfolio_status = get_portfolio_status(
-            open_positions=None,
-            positions_confirmed=False,
-            capital_usd=INITIAL_CAPITAL_USD,
-        )
-
-        if not isinstance(portfolio_status, dict):
-            raise ValueError(
-                "El gestor de cartera devolvió un resultado no válido"
-            )
-
-    except Exception:
-        logger.exception("PORTFOLIO STATUS ERROR")
-
-        portfolio_status = {
-            "status": "UNKNOWN",
-            "current_portfolio_risk_usd": None,
-            "max_portfolio_risk_usd": (
-                INITIAL_CAPITAL_USD
-                * min(MAX_PORTFOLIO_RISK, 0.03)
-            ),
-            "remaining_risk_usd": None,
-            "currency": "USD",
-            "error": "No se pudo confirmar el estado de la cartera",
-        }
+    # Only a supplied PAPER_ONLY ledger can confirm the virtual portfolio.
+    # Never substitute real eToro holdings or inferred account positions.
+    portfolio_status = build_scan_portfolio_status(paper_portfolio_state)
 
     logger.info(
         "PORTFOLIO STATUS | %s",
