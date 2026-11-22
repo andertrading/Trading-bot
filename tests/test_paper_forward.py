@@ -156,7 +156,7 @@ class PaperForwardTests(unittest.TestCase):
         item = signal()
         process_signal_bar(
             self.state, item,
-            bar("2026-11-22T10:15:00+00:00", 99.5, 99.8, 98.8, 99.2),
+            bar("2026-11-22T10:15:00+00:00", 99.5, 99.8, 94.8, 95.2),
         )
         self.assertEqual(
             self.state["trades"]["s1"]["status"],
@@ -164,7 +164,7 @@ class PaperForwardTests(unittest.TestCase):
         )
         process_signal_bar(
             self.state, item,
-            bar("2026-11-22T10:30:00+00:00", 99.8, 100.5, 99.5, 100.2),
+            bar("2026-11-22T10:30:00+00:00", 99.8, 100.5, 95.5, 100.2),
         )
         self.assertEqual(
             self.state["trades"]["s1"]["status"],
