@@ -20,7 +20,6 @@ from signal_lifecycle import (
     build_signal_record,
 )
 from paper_forward import (
-    DEFAULT_RISK_PER_TRADE,
     new_paper_state,
     paper_summary,
     process_signal_bar,
@@ -244,7 +243,26 @@ def run_scheduled_scan(timeframe: str) -> dict:
 
     now = datetime.now(timezone.utc)
     store.prune(now=now, retention_days=180, max_terminal_records=10000)
-    scan_result = Bot.run_scan(timeframes=[timeframe])
+    state = store.load()
+    paper_state = state.get("paper_forward")
+    paper_assets = {
+        str(signal.get("asset", "")).upper()
+        for signal in state.get("signals", {}).values()
+        if signal.get("timeframe") == timeframe
+        and signal.get("monitor_status", "ACTIVE") == "ACTIVE"
+    }
+    if isinstance(paper_state, dict):
+        paper_assets.update(
+            str(trade.get("asset", "")).upper()
+            for trade in paper_state.get("trades", {}).values()
+            if trade.get("status") == "OPEN" and trade.get("asset")
+        )
+    paper_assets.discard("")
+    scan_result = Bot.run_scan(
+        timeframes=[timeframe],
+        include_paper_bars=True,
+        paper_assets=sorted(paper_assets),
+    )
     results = scan_result.get("results", [])
     by_asset = {
         item.get("asset"): item
@@ -252,8 +270,6 @@ def run_scheduled_scan(timeframe: str) -> dict:
         if isinstance(item, dict) and item.get("timeframe") == timeframe
     }
 
-    state = store.load()
-    paper_state = state.get("paper_forward")
     if not isinstance(paper_state, dict) or paper_state.get("execution_mode") != "PAPER_ONLY":
         paper_state = new_paper_state()
     paper_bars_processed = 0
@@ -272,30 +288,37 @@ def run_scheduled_scan(timeframe: str) -> dict:
         )
         if not all(current.get(field) is not None for field in required_bar_fields):
             continue
-        previous_bar = paper_state.get("processed_bars", {}).get(
-            stored_signal.get("signal_id")
-        )
         paper_risk = stored_signal.get("provisional_risk_pct")
         try:
-            paper_risk = float(paper_risk) if paper_risk is not None else DEFAULT_RISK_PER_TRADE
+            paper_risk = float(paper_risk) if paper_risk is not None else 0.0
         except (TypeError, ValueError, OverflowError):
-            paper_risk = DEFAULT_RISK_PER_TRADE
-        process_signal_bar(
-            paper_state,
-            stored_signal,
-            {
+            paper_risk = 0.0
+
+        bars = current.get("paper_bars")
+        if not isinstance(bars, list) or not bars:
+            # Compatibility for older scan adapters and unit-test fixtures.
+            bars = [{
                 "timestamp": current["data_timestamp"],
                 "open": current["last_open"],
                 "high": current["last_high"],
                 "low": current["last_low"],
                 "close": current["last_price"],
-            },
-            risk_fraction=paper_risk,
-        )
-        if paper_state.get("processed_bars", {}).get(
-            stored_signal.get("signal_id")
-        ) != previous_bar:
-            paper_bars_processed += 1
+            }]
+
+        for completed_bar in bars:
+            previous_bar = paper_state.get("processed_bars", {}).get(
+                stored_signal.get("signal_id")
+            )
+            process_signal_bar(
+                paper_state,
+                stored_signal,
+                completed_bar,
+                risk_fraction=paper_risk,
+            )
+            if paper_state.get("processed_bars", {}).get(
+                stored_signal.get("signal_id")
+            ) != previous_bar:
+                paper_bars_processed += 1
 
     store.update_paper_state(paper_state)
     transitions = 0

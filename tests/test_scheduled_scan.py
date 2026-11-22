@@ -136,6 +136,116 @@ class ScheduledScanTests(unittest.TestCase):
         self.assertEqual(result["paper_forward"]["open_trades"], 1)
         self.assertFalse(result["paper_forward"]["costs_included"])
 
+    def test_replays_all_intermediate_completed_bars_for_open_and_exit(self):
+        store = MemoryStore("url", "token")
+        signal = {
+            "schema_version": 1,
+            "signal_id": "paper-replay-1",
+            "asset": "BTC",
+            "timeframe": "15m",
+            "status": "PENDING",
+            "monitor_status": "ACTIVE",
+            "generated_at": (self.now - timedelta(minutes=45)).isoformat(),
+            "data_timestamp": (self.now - timedelta(minutes=45)).isoformat(),
+            "expires_at": (self.now + timedelta(hours=1)).isoformat(),
+            "monitoring_expires_at": (self.now + timedelta(hours=4)).isoformat(),
+            "direction": "LONG",
+            "entry_reference": 100.0,
+            "stop": 99.0,
+            "target": 102.0,
+            "provisional_risk_pct": 0.0025,
+            "alert_sent": False,
+            "position_status": "UNKNOWN",
+        }
+        store.upsert(signal)
+        current = {
+            "action": "NO TRADE",
+            "asset": "BTC",
+            "timeframe": "15m",
+            "data_valid": True,
+            "data_timestamp": (self.now - timedelta(minutes=15)).isoformat(),
+            "last_open": 100.0,
+            "last_high": 102.2,
+            "last_low": 100.2,
+            "last_price": 102.0,
+            "paper_bars": [
+                {
+                    "timestamp": (self.now - timedelta(minutes=30)).isoformat(),
+                    "open": 99.5, "high": 100.5, "low": 99.2, "close": 100.2,
+                },
+                {
+                    "timestamp": (self.now - timedelta(minutes=15)).isoformat(),
+                    "open": 100.2, "high": 102.2, "low": 100.1, "close": 102.0,
+                },
+            ],
+        }
+        scan = {
+            "timeframes": ["15m"], "analyses_completed": 1,
+            "technical_candidates_found": 0, "candidates_blocked": 0,
+            "validated_candidates": 0, "no_trade_count": 1,
+            "results": [current],
+        }
+        with patch.object(
+            scheduled_scan, "UpstashSignalStateStore", return_value=store
+        ), patch.object(
+            scheduled_scan.Bot, "run_scan", return_value=scan
+        ) as run_scan, patch.object(scheduled_scan, "SIGNAL_ALERTS_ENABLED", False):
+            result = scheduled_scan.run_scheduled_scan("15m")
+
+        run_scan.assert_called_once_with(
+            timeframes=["15m"],
+            include_paper_bars=True,
+            paper_assets=["BTC"],
+        )
+        trade = store.state["paper_forward"]["trades"]["paper-replay-1"]
+        self.assertEqual(trade["status"], "CLOSED")
+        self.assertEqual(trade["exit_reason"], "TARGET")
+        self.assertEqual(result["paper_bars_processed"], 2)
+
+    def test_missing_signal_risk_is_not_replaced_with_default_paper_risk(self):
+        store = MemoryStore("url", "token")
+        signal = {
+            "schema_version": 1,
+            "signal_id": "paper-no-risk",
+            "asset": "BTC",
+            "timeframe": "15m",
+            "status": "PENDING",
+            "monitor_status": "ACTIVE",
+            "generated_at": (self.now - timedelta(minutes=30)).isoformat(),
+            "data_timestamp": (self.now - timedelta(minutes=30)).isoformat(),
+            "expires_at": (self.now + timedelta(hours=1)).isoformat(),
+            "direction": "LONG",
+            "entry_reference": 100.0,
+            "stop": 99.0,
+            "target": 102.0,
+            "provisional_risk_pct": None,
+            "alert_sent": False,
+            "position_status": "UNKNOWN",
+        }
+        store.upsert(signal)
+        current = make_candidate(self.now)
+        current["action"] = "NO TRADE"
+        current["paper_bars"] = [{
+            "timestamp": (self.now - timedelta(minutes=15)).isoformat(),
+            "open": 99.5, "high": 100.5, "low": 99.2, "close": 100.0,
+        }]
+        scan = {
+            "timeframes": ["15m"], "analyses_completed": 1,
+            "technical_candidates_found": 0, "candidates_blocked": 0,
+            "validated_candidates": 0, "no_trade_count": 1,
+            "results": [current],
+        }
+        with patch.object(
+            scheduled_scan, "UpstashSignalStateStore", return_value=store
+        ), patch.object(
+            scheduled_scan.Bot, "run_scan", return_value=scan
+        ), patch.object(scheduled_scan, "SIGNAL_ALERTS_ENABLED", False):
+            scheduled_scan.run_scheduled_scan("15m")
+
+        trade = store.state["paper_forward"]["trades"]["paper-no-risk"]
+        self.assertEqual(trade["status"], "REJECTED_INVALID_RISK_POLICY")
+        self.assertEqual(store.state["paper_forward"]["open_risk_usd"], 0.0)
+
     def test_same_candle_does_not_create_duplicate_signal(self):
         store = MemoryStore("url", "token")
         with patch.object(
