@@ -148,6 +148,8 @@ class TestAssetEconomicEligibility(unittest.TestCase):
             "execution_type_not_confirmed_in_instrument_ticket",
             result["blockers"],
         )
+        self.assertEqual(result["configured_execution_type"], "REAL")
+        self.assertFalse(result["execution_type_confirmed"])
 
 
 if __name__ == "__main__":
