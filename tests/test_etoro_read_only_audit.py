@@ -56,9 +56,21 @@ class FakeAuditClient:
             for instrument_id in instrument_ids
         }
 
-    def get_realtime_quotes(self, instrument_ids, now_utc, max_age_seconds):
-        self.quote_calls.append((list(instrument_ids), now_utc, max_age_seconds))
-        return {instrument_id: object() for instrument_id in instrument_ids}
+    def get_realtime_quotes(
+        self, instrument_ids, now_utc, max_age_seconds,
+        asset_calendars=None, max_closed_age_seconds=604800,
+    ):
+        self.quote_calls.append((
+            list(instrument_ids), now_utc, max_age_seconds,
+            asset_calendars, max_closed_age_seconds,
+        ))
+        return {
+            instrument_id: SimpleNamespace(
+                quote_type="realtime",
+                timestamp=now_utc,
+            )
+            for instrument_id in instrument_ids
+        }
 
 
 class ReadOnlyAuditTests(unittest.TestCase):

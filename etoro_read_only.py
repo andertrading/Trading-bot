@@ -16,6 +16,8 @@ from typing import Any, Mapping
 from uuid import uuid4
 
 import requests
+import exchange_calendars as exchange_calendars
+import pandas as pd
 
 
 API_BASE_URL = "https://public-api.etoro.com"
@@ -327,13 +329,34 @@ class EtoroQuote:
     quote_type: str
 
 
+def _last_completed_exchange_session(calendar_name: str, now_utc: datetime) -> tuple[bool, datetime, datetime]:
+    """Return whether a market is open and the last completed session bounds."""
+    try:
+        calendar = exchange_calendars.get_calendar(calendar_name)
+        session = calendar.date_to_session(pd.Timestamp(now_utc.date()), direction="previous")
+        session_open = calendar.session_open(session).to_pydatetime()
+        session_close = calendar.session_close(session).to_pydatetime()
+        if now_utc < session_open:
+            session = calendar.previous_session(session)
+            session_open = calendar.session_open(session).to_pydatetime()
+            session_close = calendar.session_close(session).to_pydatetime()
+        is_open = bool(calendar.is_open_on_minute(pd.Timestamp(now_utc).floor("min")))
+        return is_open, session_open, session_close
+    except Exception as exc:
+        raise EtoroAPIError(
+            f"Calendario bursátil no disponible o inválido ({type(exc).__name__})"
+        ) from None
+
+
 def normalize_realtime_quotes(
     response: EtoroResponse,
     expected_instrument_ids: list[int],
     now_utc: datetime,
     max_age_seconds: int = 30,
+    asset_calendars: Mapping[int, str] | None = None,
+    max_closed_age_seconds: int = 604800,
 ) -> dict[int, EtoroQuote]:
-    """Return only a complete, fresh, uncrossed set of realtime quotes."""
+    """Validate complete quotes using each instrument's independent market calendar."""
     if response.status_code != 200:
         raise EtoroAPIError("Las cotizaciones no son una respuesta HTTP 200 completa")
     if (
@@ -355,6 +378,17 @@ def normalize_realtime_quotes(
         raise EtoroAPIError("now_utc debe incluir zona horaria UTC")
     if isinstance(max_age_seconds, bool) or not isinstance(max_age_seconds, int) or max_age_seconds <= 0:
         raise EtoroAPIError("max_age_seconds debe ser un entero positivo")
+    if isinstance(max_closed_age_seconds, bool) or not isinstance(max_closed_age_seconds, int) or max_closed_age_seconds < max_age_seconds:
+        raise EtoroAPIError("max_closed_age_seconds debe ser mayor o igual al límite de cotización reciente")
+    if asset_calendars is not None and (
+        not isinstance(asset_calendars, Mapping)
+        or any(
+            isinstance(key, bool) or not isinstance(key, int) or key <= 0
+            or not isinstance(value, str) or not value.strip()
+            for key, value in asset_calendars.items()
+        )
+    ):
+        raise EtoroAPIError("asset_calendars contiene una configuración inválida")
 
     if not isinstance(response.data, Mapping):
         raise EtoroAPIError("La respuesta de cotizaciones no es un objeto JSON")
@@ -405,15 +439,36 @@ def normalize_realtime_quotes(
         quote_time = quote_time.astimezone(timezone.utc)
 
         age_seconds = (now_utc - quote_time).total_seconds()
-        if age_seconds < -5 or age_seconds > max_age_seconds:
-            raise EtoroAPIError(f"Cotización obsoleta o futura para instrumento {instrument_id}")
+        quote_type = "realtime"
+        if age_seconds < -5:
+            raise EtoroAPIError(f"Cotización futura para instrumento {instrument_id}")
+        if age_seconds > max_age_seconds:
+            calendar_name = (asset_calendars or {}).get(instrument_id)
+            if not calendar_name or calendar_name == "24/7":
+                raise EtoroAPIError(f"Cotización obsoleta para instrumento {instrument_id}")
+            market_is_open, last_session_open, last_session_close = (
+                _last_completed_exchange_session(calendar_name, now_utc)
+            )
+            if market_is_open:
+                raise EtoroAPIError(
+                    f"Cotización obsoleta con mercado abierto para instrumento {instrument_id}"
+                )
+            if (
+                quote_time < last_session_open
+                or quote_time > last_session_close + timedelta(seconds=5)
+                or age_seconds > max_closed_age_seconds
+            ):
+                raise EtoroAPIError(
+                    f"Cotización fuera de la última sesión para instrumento {instrument_id}"
+                )
+            quote_type = "last_session"
 
         quotes[instrument_id] = EtoroQuote(
             instrument_id=instrument_id,
             bid=bid,
             ask=ask,
             timestamp=quote_time,
-            quote_type="realtime",
+            quote_type=quote_type,
         )
 
     if set(quotes) != expected:
@@ -1202,6 +1257,8 @@ class EtoroReadOnlyClient:
         instrument_ids: list[int],
         now_utc: datetime,
         max_age_seconds: int = 30,
+        asset_calendars: Mapping[int, str] | None = None,
+        max_closed_age_seconds: int = 604800,
     ) -> dict[int, EtoroQuote]:
         response = self.get_rates(instrument_ids)
         return normalize_realtime_quotes(
@@ -1209,6 +1266,8 @@ class EtoroReadOnlyClient:
             instrument_ids,
             now_utc,
             max_age_seconds=max_age_seconds,
+            asset_calendars=asset_calendars,
+            max_closed_age_seconds=max_closed_age_seconds,
         )
 
     def get_rates(self, instrument_ids: list[int]) -> EtoroResponse:

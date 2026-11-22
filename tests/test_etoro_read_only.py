@@ -543,6 +543,57 @@ class RealtimeQuoteValidationTests(unittest.TestCase):
         with self.assertRaises(EtoroAPIError):
             normalize_realtime_quotes(EtoroResponse(future, 200, {}), [101], self.now)
 
+    def test_closed_exchange_accepts_only_quote_from_last_completed_session(self):
+        response = EtoroResponse({
+            "rates": [{
+                "instrumentID": 101,
+                "bid": "99.9",
+                "ask": "100.1",
+                "date": "2026-11-20T20:59:00Z",
+            }]
+        }, 200, {})
+        quotes = normalize_realtime_quotes(
+            response,
+            [101],
+            datetime(2026, 11, 21, 12, 0, 0, tzinfo=timezone.utc),
+            asset_calendars={101: "XNYS"},
+        )
+        self.assertEqual(quotes[101].quote_type, "last_session")
+
+    def test_crypto_quotes_remain_freshness_checked_24_7(self):
+        response = EtoroResponse({
+            "rates": [{
+                "instrumentID": 100000,
+                "bid": "99.9",
+                "ask": "100.1",
+                "date": "2026-11-21T11:00:00Z",
+            }]
+        }, 200, {})
+        with self.assertRaisesRegex(EtoroAPIError, "obsoleta"):
+            normalize_realtime_quotes(
+                response,
+                [100000],
+                datetime(2026, 11, 21, 12, 0, 0, tzinfo=timezone.utc),
+                asset_calendars={100000: "24/7"},
+            )
+
+    def test_open_exchange_does_not_accept_stale_quote(self):
+        response = EtoroResponse({
+            "rates": [{
+                "instrumentID": 101,
+                "bid": "99.9",
+                "ask": "100.1",
+                "date": "2026-11-23T14:00:00Z",
+            }]
+        }, 200, {})
+        with self.assertRaisesRegex(EtoroAPIError, "mercado abierto"):
+            normalize_realtime_quotes(
+                response,
+                [101],
+                datetime(2026, 11, 23, 15, 0, 37, tzinfo=timezone.utc),
+                asset_calendars={101: "XNYS"},
+            )
+
     def test_invalid_or_crossed_prices_are_rejected(self):
         crossed = {"results": [dict(
             self.response.data["results"][0],

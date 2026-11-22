@@ -76,6 +76,11 @@ def _resolution_error_status(exc: Exception) -> str:
         ("Falta la lista de resultados de cotizaciones", "QUOTES_RESULTS_MISSING"),
         ("cotización retrasada", "QUOTES_NOT_REALTIME"),
         ("Faltan cotizaciones para instrumentos", "QUOTES_INSTRUMENTS_INCOMPLETE"),
+        ("Cotización futura", "QUOTES_TIMESTAMP_FUTURE"),
+        ("Cotización obsoleta con mercado abierto", "QUOTES_STALE_MARKET_OPEN"),
+        ("Cotización obsoleta para instrumento", "QUOTES_STALE_24_7_OR_UNKNOWN"),
+        ("Cotización fuera de la última sesión", "QUOTES_OUTSIDE_LAST_SESSION"),
+        ("Calendario bursátil no disponible", "MARKET_CALENDAR_UNAVAILABLE"),
         ("Cotización obsoleta o futura", "QUOTES_STALE_OR_FUTURE"),
         ("Bid/ask inválido o cruzado", "QUOTES_BID_ASK_INVALID"),
         ("Cotización duplicada", "QUOTES_DUPLICATED"),
@@ -269,20 +274,51 @@ def run_audit(
     eligibility_status = "NOT_IN_SCOPE"
 
     quotes_valid = False
+    realtime_quotes_valid = False
     quotes_status = "NOT_CHECKED"
+    quote_diagnostics: list[dict[str, Any]] = []
     if resolved and len(resolved) == len(enabled_assets):
         instrument_ids = [item["instrumentId"] for item in resolved.values()]
         try:
-            client.get_realtime_quotes(
+            calendars_by_id = {
+                item["instrumentId"]: enabled_assets[symbol].get("market_calendar")
+                for symbol, item in resolved.items()
+            }
+            quotes = client.get_realtime_quotes(
                 instrument_ids,
                 now_utc,
                 max_age_seconds=30,
+                asset_calendars=calendars_by_id,
+                max_closed_age_seconds=604800,
             )
             quotes_valid = True
-            quotes_status = "VALIDATED"
+            realtime_quotes_valid = all(
+                quote.quote_type == "realtime" for quote in quotes.values()
+            )
+            quotes_status = (
+                "VALIDATED_WITH_CLOSED_MARKETS"
+                if not realtime_quotes_valid
+                else "VALIDATED"
+            )
+            quote_diagnostics = [
+                {
+                    "symbol": symbol,
+                    "market_calendar": calendars_by_id[item["instrumentId"]],
+                    "quote_status": (
+                        "CLOSED_LAST_SESSION"
+                        if quotes[item["instrumentId"]].quote_type == "last_session"
+                        else "FRESH"
+                    ),
+                    "age_seconds": round(
+                        (now_utc - quotes[item["instrumentId"]].timestamp).total_seconds()
+                    ),
+                }
+                for symbol, item in resolved.items()
+            ]
         except Exception as exc:
             quotes_valid = False
             quotes_status = _resolution_error_status(exc)
+            quote_diagnostics = [{"quote_status": quotes_status}]
 
     instrument_report = [
         {
@@ -312,8 +348,10 @@ def run_audit(
         "instrument_resolution": instrument_report,
         "instrument_eligibility_validated": eligibility_valid,
         "instrument_eligibility_status": eligibility_status,
-        "complete_realtime_quotes_validated": quotes_valid,
+        "market_quotes_validated": quotes_valid,
+        "complete_realtime_quotes_validated": realtime_quotes_valid,
         "realtime_quotes_status": quotes_status,
+        "quote_diagnostics": quote_diagnostics,
         "portfolio_risk_admission_ready": False,
         "overall_pass": overall,
     }
