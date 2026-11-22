@@ -112,6 +112,65 @@ def load_yahoo(session, asset, spec, start, end, symbol_key="yahoo", expected_ma
     return frame, exchange
 
 
+def load_twelvedata_daily(session, asset, start, end, token):
+    """Try Twelve Data's existing Basic credential for an independent LSE ETF history."""
+    search = get_json(session, "https://api.twelvedata.com/symbol_search", {
+        "symbol": asset,
+        "outputsize": 50,
+        "show_plan": "true",
+        "apikey": token,
+    })
+    candidates = [
+        item for item in search.get("data", [])
+        if str(item.get("mic_code", "")).upper() == "XLON"
+        and str(item.get("currency", "")).upper() == "USD"
+        and str(item.get("instrument_type", "")).upper() == "ETF"
+    ]
+    if not candidates:
+        raise RuntimeError(f"{asset}: Twelve Data no ofrece coincidencia ETF USD en XLON")
+    exact = [item for item in candidates if str(item.get("symbol", "")).upper() == asset]
+    if len(exact) != 1:
+        raise RuntimeError(
+            f"{asset}: Twelve Data devolvió {len(exact)} símbolos exactos XLON/USD/ETF"
+        )
+    candidate = exact[0]
+    params = {
+        "symbol": candidate["symbol"],
+        "mic_code": "XLON",
+        "interval": "1day",
+        "start_date": start.isoformat(),
+        "end_date": end.isoformat(),
+        "apikey": token,
+    }
+    payload = get_json(session, "https://api.twelvedata.com/time_series", params)
+    meta = payload.get("meta", {})
+    if (
+        str(meta.get("mic_code", "")).upper() != "XLON"
+        or str(meta.get("currency", "")).upper() != "USD"
+    ):
+        raise RuntimeError(f"{asset}: Twelve Data metadata XLON/USD no confirmada")
+    values = payload.get("values")
+    if not isinstance(values, list) or not values:
+        raise RuntimeError(f"{asset}: Twelve Data histórico diario vacío")
+    frame = pd.DataFrame(values)
+    required = ["datetime", "open", "high", "low", "close"]
+    if any(col not in frame.columns for col in required):
+        raise RuntimeError(f"{asset}: Twelve Data OHLC incompleto")
+    frame["date"] = pd.to_datetime(frame["datetime"], errors="coerce").dt.date
+    if frame["date"].isna().any():
+        raise RuntimeError(f"{asset}: Twelve Data fechas inválidas")
+    frame = frame.set_index("date").sort_index()
+    if frame.index.has_duplicates:
+        raise RuntimeError(f"{asset}: Twelve Data fechas duplicadas")
+    for col in ("open", "high", "low", "close"):
+        frame[col.title()] = pd.to_numeric(frame[col], errors="coerce")
+    frame["Volume"] = (
+        pd.to_numeric(frame["volume"], errors="coerce")
+        if "volume" in frame.columns else 0.0
+    )
+    return frame[["Open", "High", "Low", "Close", "Volume"]]
+
+
 def load_yfinance_daily(ticker, start, end):
     """Use the same yfinance options and date normalization as data_engine.py."""
     start_dt = datetime.combine(start, datetime.min.time(), tzinfo=timezone.utc)
@@ -262,7 +321,7 @@ def _price_error_metrics(left, right, suffix_left, suffix_right):
     return output
 
 
-def compare(asset, eod, yahoo, exchange, alternate, yahoo_yf, alternate_yf):
+def compare(asset, eod, yahoo, exchange, alternate, yahoo_yf, alternate_yf, twelvedata=None):
     joined = (
         eod.add_suffix("_eodhd")
         .join(yahoo.add_suffix("_yahoo"), how="inner")
@@ -313,6 +372,7 @@ def compare(asset, eod, yahoo, exchange, alternate, yahoo_yf, alternate_yf):
             "yahoo_chart_available": day in yahoo.index,
             "eodhd_available": day in eod.index,
             "six_available": day in alternate_yf.index,
+            "twelvedata_available": twelvedata is not None and day in twelvedata.index,
         }
         if day in yahoo.index:
             chart_close = pd.to_numeric(
@@ -351,6 +411,22 @@ def compare(asset, eod, yahoo, exchange, alternate, yahoo_yf, alternate_yf):
     six_integrity = ohlc_integrity(alternate)
     six_yfinance_integrity = ohlc_integrity(alternate_yf)
     alternate_repair_assessment = assess_alternate_repairs(yahoo_yf, alternate_yf)
+    twelvedata_metrics = None
+    if twelvedata is not None:
+        twelvedata_metrics = {
+            "integrity": ohlc_integrity(twelvedata),
+            "vs_eodhd_price_abs_pct_error": _price_error_metrics(
+                eod, twelvedata, "_eodhd", "_twelvedata"
+            ),
+            "vs_yahoo_yfinance_price_abs_pct_error": _price_error_metrics(
+                yahoo_yf, twelvedata, "_yahoo_yfinance", "_twelvedata"
+            ),
+            "overlap_sessions_with_yahoo_yfinance": int(
+                len(yahoo_yf.index.intersection(twelvedata.index))
+            ),
+            "first_date": str(twelvedata.index.min()),
+            "last_date": str(twelvedata.index.max()),
+        }
     # Gate the exact yfinance path used by extended backtests, not just Yahoo's chart endpoint.
     blockers = []
     if yahoo_yfinance_integrity["invalid_rows"] != 0:
@@ -378,6 +454,7 @@ def compare(asset, eod, yahoo, exchange, alternate, yahoo_yf, alternate_yf):
         "five_year_lse_six_last_date": str(full_lse_six.index.max()),
         "six_yfinance_vs_eodhd_price_abs_pct_error": six_errors,
         "alternate_repair_assessment": alternate_repair_assessment,
+        "twelvedata_independent_source": twelvedata_metrics,
         "yfinance_missing_session_diagnostics": {
             "chart_only_vs_yfinance_dates": [str(day) for day in chart_only_vs_yfinance],
             "eodhd_only_vs_yfinance_dates": [str(day) for day in eodhd_only_vs_yfinance],
@@ -430,8 +507,9 @@ def main():
     end = date.today() - timedelta(days=1)
     # Extend provider certification to the same ~5-year window used by daily backtests.
     start = end - timedelta(days=1825)
-    results, errors = [], []
-    print("AUDITORÍA OHLCV YAHOO vs EODHD | CSPX/CNDX | SOLO LECTURA")
+    results, errors, twelvedata_errors = [], [], []
+    twelvedata_token = os.environ.get("TWELVE_DATA_API_KEY", "").strip()
+    print("AUDITORÍA OHLCV YAHOO/EODHD/SIX/TWELVE DATA | CSPX/CNDX | SOLO LECTURA")
     print(f"Ventana solicitada: {start} -> {end}")
     print("Comparación: OHLC split-adjusted, sin ajuste por dividendos; volumen separado.")
     for asset, spec in ASSETS.items():
@@ -447,9 +525,25 @@ def main():
             )
             yahoo_yf = load_yfinance_daily(spec["yahoo"], start, end)
             alternate_yf = load_yfinance_daily(spec["alternate"], start, end)
+            twelvedata_frame = None
+            if twelvedata_token:
+                try:
+                    twelvedata_frame = load_twelvedata_daily(
+                        session, asset, start, end, twelvedata_token
+                    )
+                except Exception as exc:
+                    # Never log request exception text: it may contain API query parameters.
+                    twelvedata_errors.append(
+                        f"{asset}: {type(exc).__name__}: Twelve Data history unavailable"
+                    )
             result = compare(
                 asset, eod, yahoo, exchange, alternate,
-                yahoo_yf, alternate_yf,
+                yahoo_yf, alternate_yf, twelvedata_frame,
+            )
+            result["twelvedata_status"] = (
+                "available" if twelvedata_frame is not None
+                else "not_configured" if not twelvedata_token
+                else "unavailable"
             )
             result["alternate_symbol"] = spec["alternate"]
             result["alternate_exchange"] = alternate_exchange
@@ -466,6 +560,8 @@ def main():
         "requested_end": str(end),
         "results": results,
         "errors": errors,
+        "twelvedata_errors": twelvedata_errors,
+        "twelvedata_credential_configured": bool(twelvedata_token),
         "provider_research_approved": (
             not errors and len(results) == len(ASSETS) == 2
             and all(item.get("yahoo_research_quality_gate") == "PASS" for item in results)
