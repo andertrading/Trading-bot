@@ -369,3 +369,10 @@ Fuentes de identidad de los ETF:
 - CNDX, ISIN IE00B53SZB19, moneda USD, MIC XLON: https://www.londonstockexchange.com/en/quote/etps/CNDX/ishares-vii-plc
 - Twelve Data lista London Stock Exchange con MIC XLON: https://twelvedata.com/exchanges?country=United+Kingdom
 - Para los siete valores con identidad fijada, Twelve Data recibe filtros `exchange` y `mic_code` y la respuesta debe coincidir. Los tests son unitarios con metadata simulada; no se ha gastado cuota en una consulta real de confirmación.
+
+
+### Correspondencia entre baseline de investigación y estrategia de producción
+
+El evaluador `baseline` del run #110 llama directamente a `strategies.evaluate_signal_at`, es decir, al mismo evaluador que utiliza el bot de producción. En la investigación se fija la puntuación en 85 para igualar el tramo de riesgo entre hipótesis; por tanto, la señal es la misma, pero el dimensionamiento no reproduce la puntuación variable de producción.
+
+El baseline diario produjo 224 operaciones y +27.25 R brutos en la muestra completa. En el portfolio OOS core (10 activos) produjo 127 operaciones y +8.10% bruto, pero -14.97% neto bajo el escenario eToro modelado, incluso con spread adicional cero. Esto hace que el resultado sea directamente relevante para la estrategia actual, aunque sigue siendo evidencia exploratoria y no validación de ejecución real.
