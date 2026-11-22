@@ -305,7 +305,7 @@ jobs:
           python -m unittest discover -s tests -p "test_portfolio_backtest.py" -v
           python -m unittest discover -s tests -p "test_transaction_costs.py" -v
 
-      - name: Refresh all daily snapshots with five-year history
+      - name: Refresh core stocks and crypto daily snapshots with five-year history
         env:
           BACKTEST_DATA_MODE: download
           BACKTEST_SNAPSHOT_DIR: historicos_full_merged
@@ -323,15 +323,31 @@ jobs:
           root = Path("historicos_full_merged")
           manifest_path = root / "manifest.json"
           existing = json.loads(manifest_path.read_text(encoding="utf-8"))
+          retained_etfs = {"CSPX", "CNDX"}
+          retained_daily = [
+              item for item in existing
+              if str(item.get("timeframe", "")).lower() == "1d"
+              and str(item.get("asset", "")).upper() in retained_etfs
+          ]
+          if {item["asset"] for item in retained_daily} != retained_etfs:
+              raise SystemExit(
+                  "The existing 2-year CSPX/CNDX daily snapshots are missing."
+              )
+
           bt.SNAPSHOT_MANIFEST = [
               item for item in existing
               if str(item.get("timeframe", "")).lower() != "1d"
+              or str(item.get("asset", "")).upper() in retained_etfs
           ]
 
-          assets = bt.get_assets()
-          if len(assets) != 12:
+          assets = [
+              (asset, ticker)
+              for asset, ticker in bt.get_assets()
+              if asset not in retained_etfs
+          ]
+          if len(assets) != 10:
               raise SystemExit(
-                  f"Expected 12 configured assets; received {len(assets)}"
+                  f"Expected 10 core stock/crypto assets; received {len(assets)}"
               )
 
           minimum_start = (
@@ -374,11 +390,12 @@ jobs:
 
           bt._write_snapshot_manifest()
           report = {
-              "status": "PASS" if len(results) == 12 and not failures else "FAIL",
+              "status": "PASS" if len(results) == 10 and not failures else "FAIL",
               "requested_lookback_days": 1825,
               "minimum_history_days": 1460,
-              "expected_assets": 12,
-              "refreshed_assets": len(results),
+              "expected_core_assets": 10,
+              "refreshed_core_assets": len(results),
+              "retained_two_year_etf_snapshots": sorted(retained_etfs),
               "results": results,
               "failures": failures,
           }
@@ -389,7 +406,7 @@ jobs:
           print(json.dumps(report, ensure_ascii=False, indent=2))
           if report["status"] != "PASS":
               raise SystemExit(
-                  "Five-year daily history incomplete; do not run the research backtest."
+                  "Five-year core daily history incomplete; do not run the research backtest."
               )
           PY
 
@@ -474,7 +491,7 @@ jobs:
           BACKTEST_DATA_MODE: replay
           BACKTEST_SNAPSHOT_DIR: historicos_full_merged
           BACKTEST_DAILY_LOOKBACK_DAYS: "1825"
-          BACKTEST_EXTENDED_DAILY_HISTORY: "true"
+          BACKTEST_EXTENDED_DAILY_HISTORY: "false"
         run: python strategy_research.py
 
       - name: Upload research metrics and trade logs
