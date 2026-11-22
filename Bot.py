@@ -1363,7 +1363,7 @@ def apply_validation_gate(result, portfolio_status):
         # The sizing path is reachable only after every global, instrument,
         # market-data, strategy and paper-portfolio gate has passed.
         try:
-            entry_price = result.get("entry_reference", result.get("entry"))
+            entry_price = result.get("entry_reference") or result.get("entry")
             target_price = result.get("target")
             unit_costs = estimate_verified_registry_unit_costs(
                 result.get("asset"),
@@ -1458,8 +1458,10 @@ def apply_validation_gate(result, portfolio_status):
     # Even an approved candidate is a manual-review signal only. This gate
     # never places orders or authorizes broker execution.
 
-    logger.warning(
-        "CANDIDATE BLOCKED | %s | %s | reasons=%s",
+    logger.log(
+        logging.WARNING if blockers else logging.INFO,
+        "CANDIDATE %s | %s | %s | reasons=%s",
+        "BLOCKED" if blockers else "APPROVED",
         result.get("asset"),
         result.get("timeframe"),
         blockers,
