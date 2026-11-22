@@ -244,19 +244,11 @@ def run_audit(
     account_currency: str,
     now_utc: datetime,
 ) -> dict[str, Any]:
-    """Run account schema, exact instrument and realtime quote checks."""
-    snapshot = None
-    account_snapshot_status = "NOT_VALIDATED"
-    account_snapshot_missing_fields: list[str] = []
-    try:
-        snapshot = client.get_account_snapshot(account_currency)
-        account_valid = True
-        account_snapshot_status = "VALIDATED"
-    except Exception as exc:
-        account_valid = False
-        account_snapshot_status = _account_snapshot_status(exc)
-        account_snapshot_missing_fields = _account_snapshot_missing_fields(exc)
+    """Audit instrument resolution and market data without reading the user's portfolio.
 
+    Real-account balances, positions, and stop-risk are deliberately excluded
+    from Trading Bot 3.0 and never requested by this audit.
+    """
     enabled_assets = {
         symbol: asset
         for symbol, asset in assets.items()
@@ -270,40 +262,6 @@ def run_audit(
         resolution_status[symbol] = status
         if item is not None:
             resolved[symbol] = item
-
-    fee_classes_by_instrument_id: dict[int, str] = {}
-    for symbol, item in resolved.items():
-        actual_fee_class = _fee_class(item.get("instrumentType"))
-        expected_fee_class = enabled_assets[symbol].get("type")
-        if (
-            actual_fee_class is not None
-            and isinstance(expected_fee_class, str)
-            and actual_fee_class == expected_fee_class.strip().upper()
-        ):
-            fee_classes_by_instrument_id[item["instrumentId"]] = actual_fee_class
-
-    gross_position_risk_validated = False
-    complete_position_risk_validated = False
-    position_risk_diagnostic_status = "NOT_CHECKED"
-    if account_valid:
-        try:
-            risk_diagnostic = calculate_account_stop_risk_from_client(
-                client,
-                snapshot,
-                now_utc,
-                fee_classes_by_instrument_id,
-            )
-            gross_position_risk_validated = risk_diagnostic["status"] in {
-                "MODELED_UNCONFIRMED",
-                "VALIDATED_STOP_RISK",
-                "COMPLETE_NO_OPEN_POSITIONS",
-            }
-            complete_position_risk_validated = risk_diagnostic["complete"]
-            position_risk_diagnostic_status = risk_diagnostic["status"]
-        except Exception as exc:
-            gross_position_risk_validated = False
-            complete_position_risk_validated = False
-            position_risk_diagnostic_status = _resolution_error_status(exc)
 
     eligibility_valid = False
     eligibility_status = "NOT_CHECKED"
@@ -357,26 +315,18 @@ def run_audit(
         for symbol in enabled_assets
     ]
     overall = (
-        account_valid
-        and len(resolved) == len(enabled_assets)
+        len(resolved) == len(enabled_assets)
         and eligibility_valid
         and quotes_valid
-        and gross_position_risk_validated
     )
     return {
         "audit_scope": "read-only diagnostics; not authorization to trade",
-        "position_risk_scope": "eToro real-account risk only; separate from the bot's virtual paper portfolio",
-        "account_snapshot_schema_valid": account_valid,
-        "account_snapshot_status": account_snapshot_status,
-        "account_snapshot_missing_fields": account_snapshot_missing_fields,
+        "account_portfolio_data_accessed": False,
         "instrument_resolution": instrument_report,
         "instrument_eligibility_validated": eligibility_valid,
         "instrument_eligibility_status": eligibility_status,
         "complete_realtime_quotes_validated": quotes_valid,
         "realtime_quotes_status": quotes_status,
-        "gross_position_stop_risk_diagnostic_validated": gross_position_risk_validated,
-        "position_risk_diagnostic_status": position_risk_diagnostic_status,
-        "complete_position_risk_validated": complete_position_risk_validated,
         "portfolio_risk_admission_ready": False,
         "overall_pass": overall,
     }
