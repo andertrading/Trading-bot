@@ -427,8 +427,8 @@ class TestBotValidation(unittest.TestCase):
 
 
 
-    def test_sized_admission_gate_is_called_with_confirmed_open_positions(self):
-        sizing_result = {
+    def test_caller_supplied_sizing_is_ignored_without_verified_unit_costs(self):
+        fake_sizing = {
             "status": "SIMULACION_NO_VALIDADA",
             "validated": False,
             "risk_amount_usd": 5.0,
@@ -447,34 +447,48 @@ class TestBotValidation(unittest.TestCase):
         }
         portfolio = {
             "status": "OK",
+            "capital_usd": 1000.0,
+            "available_capital_usd": 1000.0,
+            "current_portfolio_risk_usd": 0.0,
             "open_positions": [],
             "positions_confirmed": True,
         }
         candidate = {
             **self.candidate,
-            "sizing_result": sizing_result,
+            "sizing_result": fake_sizing,
             "data_valid": True,
             "data_timestamp": datetime.now(timezone.utc).isoformat(),
             "data_age_minutes": 1.0,
         }
 
-        with patch.object(Bot, "ALLOW_POSITION_SIZING", True), \
-             patch.object(Bot, "CLOSE_FEES_CONFIRMED", True), \
-             patch.object(Bot, "SPREADS_CONFIRMED", True), \
-             patch.object(Bot, "FX_CONVERSION_CONFIRMED", True), \
-             patch.object(Bot, "ETORO_EXECUTION_TYPES_CONFIRMED", True), \
-             patch.object(Bot, "ETORO_FEE_SCHEDULE_CONFIRMED", True), \
-             patch.object(Bot, "ETORO_ACCOUNT_CURRENCY_CONFIRMED", True), \
-             patch.object(Bot, "ETORO_EXECUTION_PRICE_BASIS_CONFIRMED", True), \
-             patch.object(Bot, "STRATEGY_VALIDATED", True), \
-             patch.object(Bot, "classify_asset_economic", return_value={"status": "ELIGIBLE", "blockers": []}):
+        with (
+            patch.object(Bot, "ALLOW_POSITION_SIZING", True),
+            patch.object(Bot, "CLOSE_FEES_CONFIRMED", True),
+            patch.object(Bot, "SPREADS_CONFIRMED", True),
+            patch.object(Bot, "FX_CONVERSION_CONFIRMED", True),
+            patch.object(Bot, "ETORO_EXECUTION_TYPES_CONFIRMED", True),
+            patch.object(Bot, "ETORO_FEE_SCHEDULE_CONFIRMED", True),
+            patch.object(Bot, "ETORO_ACCOUNT_CURRENCY_CONFIRMED", True),
+            patch.object(Bot, "ETORO_EXECUTION_PRICE_BASIS_CONFIRMED", True),
+            patch.object(Bot, "STRATEGY_VALIDATED", True),
+            patch.object(Bot, "classify_asset_economic", return_value={"status": "ELIGIBLE", "blockers": []}),
+            patch.object(Bot, "estimate_verified_registry_unit_costs", return_value={
+                "valid": True,
+                "complete": False,
+                "unpriced_costs": ["historical_spread_model_not_validated"],
+            }),
+            patch.object(Bot, "calculate_position_size") as calculate,
+        ):
             result = Bot.apply_validation_gate(candidate, portfolio)
 
-        self.assertEqual(result["validation_status"], "APPROVED")
-        self.assertTrue(result["validated"])
-        self.assertTrue(result["tradable"])
-        self.assertTrue(result["portfolio_admission"]["allowed"])
-        self.assertFalse(result["portfolio_admission"]["live_execution_authorized"])
+        self.assertEqual(result["validation_status"], "BLOCKED")
+        self.assertFalse(result["tradable"])
+        self.assertNotIn("sizing_result", result)
+        self.assertIn(
+            "Bloqueo de coste unitario: historical_spread_model_not_validated",
+            result["validation_reasons"],
+        )
+        calculate.assert_not_called()
 
     def test_unverified_twelvedata_daily_split_adjustment_blocks_candidate(self):
         candidate = {
@@ -627,46 +641,39 @@ class TestBotValidation(unittest.TestCase):
             result["validation_reasons"],
         )
 
-    def test_sized_admission_gate_blocks_unconfirmed_open_positions(self):
-        sizing_result = {
-            "status": "SIMULACION_NO_VALIDADA",
-            "validated": False,
-            "risk_amount_usd": 5.0,
-            "position_risk_usd": 4.0,
-            "fixed_costs_usd": 1.0,
-            "position_size": 1.0,
-            "entry_price_quote": 100.0,
-            "quote_to_usd": 1.0,
-            "position_notional_usd": 100.0,
-            "minimum_order_notional_usd": 1.0,
-            "fractional_allowed": True,
-            "cash_required_usd": 101.0,
-            "costs_per_unit_quote": 0.0,
-            "available_capital_usd": 1000.0,
-            "total_reserved_risk_usd": 5.0,
+    def test_unconfirmed_open_positions_block_sizing_before_calculation(self):
+        candidate = {
+            **self.candidate,
+            "sizing_result": {"status": "SIMULACION_NO_VALIDADA", "validated": False},
         }
-        candidate = {**self.candidate, "sizing_result": sizing_result}
         portfolio = {
             "status": "OK",
             "open_positions": None,
             "positions_confirmed": False,
         }
 
-        with patch.object(Bot, "ALLOW_POSITION_SIZING", True), \
-             patch.object(Bot, "CLOSE_FEES_CONFIRMED", True), \
-             patch.object(Bot, "SPREADS_CONFIRMED", True), \
-             patch.object(Bot, "FX_CONVERSION_CONFIRMED", True), \
-             patch.object(Bot, "ETORO_EXECUTION_TYPES_CONFIRMED", True), \
-             patch.object(Bot, "ETORO_FEE_SCHEDULE_CONFIRMED", True), \
-             patch.object(Bot, "ETORO_ACCOUNT_CURRENCY_CONFIRMED", True), \
-             patch.object(Bot, "ETORO_EXECUTION_PRICE_BASIS_CONFIRMED", True), \
-             patch.object(Bot, "STRATEGY_VALIDATED", True):
+        with (
+            patch.object(Bot, "ALLOW_POSITION_SIZING", True),
+            patch.object(Bot, "CLOSE_FEES_CONFIRMED", True),
+            patch.object(Bot, "SPREADS_CONFIRMED", True),
+            patch.object(Bot, "FX_CONVERSION_CONFIRMED", True),
+            patch.object(Bot, "ETORO_EXECUTION_TYPES_CONFIRMED", True),
+            patch.object(Bot, "ETORO_FEE_SCHEDULE_CONFIRMED", True),
+            patch.object(Bot, "ETORO_ACCOUNT_CURRENCY_CONFIRMED", True),
+            patch.object(Bot, "ETORO_EXECUTION_PRICE_BASIS_CONFIRMED", True),
+            patch.object(Bot, "STRATEGY_VALIDATED", True),
+            patch.object(Bot, "calculate_position_size") as calculate,
+        ):
             result = Bot.apply_validation_gate(candidate, portfolio)
 
         self.assertEqual(result["validation_status"], "BLOCKED")
         self.assertFalse(result["tradable"])
-        self.assertFalse(result["portfolio_admission"]["allowed"])
-        self.assertIn("posiciones abiertas no están confirmadas", result["portfolio_admission"]["reason"])
+        self.assertNotIn("sizing_result", result)
+        self.assertIn(
+            "Las posiciones abiertas de la cartera virtual no están confirmadas",
+            result["validation_reasons"],
+        )
+        calculate.assert_not_called()
 
 
     def test_approved_candidate_is_included_in_telegram_report(self):
