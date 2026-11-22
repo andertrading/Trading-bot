@@ -86,12 +86,6 @@ class TestCommonCalendarOutOfSampleSplit(unittest.TestCase):
             and row["fee_mode"] == "published_fee_scenario"
         )
         self.assertAlmostEqual(etoro["commission_scenario_usd"], 4.02)
-        etoro_high = next(
-            row for row in cost_rows
-            if row["venue"] == "ETORO_REAL"
-            and row["fee_mode"] == "published_fee_scenario_upper_bound"
-        )
-        self.assertAlmostEqual(etoro_high["commission_scenario_usd"], 8.02)
 
     def test_synchronized_oos_trades_uses_shared_timeframe_midpoint_and_bounds(self):
         trades = [
@@ -261,6 +255,7 @@ class TestCommonCalendarOutOfSampleSplit(unittest.TestCase):
         )
         lookup = {(row["asset"], row["venue"], row["fee_mode"]): row for row in rows}
         self.assertEqual(lookup[("AAPL", "ETORO_REAL", "published_fee_scenario")]["commission_scenario_usd"], 2.0)
+        self.assertEqual(lookup[("AAPL", "ETORO_REAL", "published_fee_scenario_upper_bound")]["commission_scenario_usd"], 4.0)
         self.assertEqual(lookup[("AAPL", "XTB_OMI", "zero_commission_conditional")]["commission_scenario_usd"], 0.0)
         self.assertEqual(lookup[("AAPL", "XTB_OMI", "zero_commission_conditional")]["broker_symbol"], "AAPL.US")
         self.assertEqual(lookup[("BTC", "BITVAVO_SPOT", "maker")]["broker_symbol"], "BTC/EUR")
