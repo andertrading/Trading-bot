@@ -19,8 +19,16 @@
         "observed_at": null
       },
       "fees": {
-        "entry_usd": null,
-        "exit_usd": null,
+        "entry": {
+          "model": null,
+          "value": null,
+          "unit": null
+        },
+        "exit": {
+          "model": null,
+          "value": null,
+          "unit": null
+        },
         "confirmed": false,
         "source": null,
         "observed_at": null
@@ -48,7 +56,7 @@
         "conversion_fee_pct": null,
         "quote_to_account_rate": null,
         "confirmed": true,
-        "source": "same USD quote/account currency; verify instrument ticket",
+        "source": "USD quote and USD account currency; FX trade conversion not required",
         "observed_at": null
       }
     },
@@ -68,8 +76,16 @@
         "observed_at": null
       },
       "fees": {
-        "entry_usd": null,
-        "exit_usd": null,
+        "entry": {
+          "model": null,
+          "value": null,
+          "unit": null
+        },
+        "exit": {
+          "model": null,
+          "value": null,
+          "unit": null
+        },
         "confirmed": false,
         "source": null,
         "observed_at": null
@@ -97,7 +113,7 @@
         "conversion_fee_pct": null,
         "quote_to_account_rate": null,
         "confirmed": true,
-        "source": "same USD quote/account currency; verify instrument ticket",
+        "source": "USD quote and USD account currency; FX trade conversion not required",
         "observed_at": null
       }
     },
@@ -117,8 +133,16 @@
         "observed_at": null
       },
       "fees": {
-        "entry_usd": null,
-        "exit_usd": null,
+        "entry": {
+          "model": null,
+          "value": null,
+          "unit": null
+        },
+        "exit": {
+          "model": null,
+          "value": null,
+          "unit": null
+        },
         "confirmed": false,
         "source": null,
         "observed_at": null
@@ -146,7 +170,7 @@
         "conversion_fee_pct": null,
         "quote_to_account_rate": null,
         "confirmed": true,
-        "source": "same USD quote/account currency; verify instrument ticket",
+        "source": "USD quote and USD account currency; FX trade conversion not required",
         "observed_at": null
       }
     },
@@ -166,8 +190,16 @@
         "observed_at": null
       },
       "fees": {
-        "entry_usd": null,
-        "exit_usd": null,
+        "entry": {
+          "model": null,
+          "value": null,
+          "unit": null
+        },
+        "exit": {
+          "model": null,
+          "value": null,
+          "unit": null
+        },
         "confirmed": false,
         "source": null,
         "observed_at": null
@@ -195,7 +227,7 @@
         "conversion_fee_pct": null,
         "quote_to_account_rate": null,
         "confirmed": true,
-        "source": "same USD quote/account currency; verify instrument ticket",
+        "source": "USD quote and USD account currency; FX trade conversion not required",
         "observed_at": null
       }
     },
@@ -215,8 +247,16 @@
         "observed_at": null
       },
       "fees": {
-        "entry_usd": null,
-        "exit_usd": null,
+        "entry": {
+          "model": null,
+          "value": null,
+          "unit": null
+        },
+        "exit": {
+          "model": null,
+          "value": null,
+          "unit": null
+        },
         "confirmed": false,
         "source": null,
         "observed_at": null
@@ -244,7 +284,7 @@
         "conversion_fee_pct": null,
         "quote_to_account_rate": null,
         "confirmed": true,
-        "source": "same USD quote/account currency; verify instrument ticket",
+        "source": "USD quote and USD account currency; FX trade conversion not required",
         "observed_at": null
       }
     },
@@ -264,8 +304,16 @@
         "observed_at": null
       },
       "fees": {
-        "entry_usd": null,
-        "exit_usd": null,
+        "entry": {
+          "model": null,
+          "value": null,
+          "unit": null
+        },
+        "exit": {
+          "model": null,
+          "value": null,
+          "unit": null
+        },
         "confirmed": false,
         "source": null,
         "observed_at": null
@@ -293,7 +341,7 @@
         "conversion_fee_pct": null,
         "quote_to_account_rate": null,
         "confirmed": true,
-        "source": "same USD quote/account currency; verify instrument ticket",
+        "source": "USD quote and USD account currency; FX trade conversion not required",
         "observed_at": null
       }
     },
@@ -313,8 +361,16 @@
         "observed_at": null
       },
       "fees": {
-        "entry_usd": null,
-        "exit_usd": null,
+        "entry": {
+          "model": null,
+          "value": null,
+          "unit": null
+        },
+        "exit": {
+          "model": null,
+          "value": null,
+          "unit": null
+        },
         "confirmed": false,
         "source": null,
         "observed_at": null
@@ -342,7 +398,7 @@
         "conversion_fee_pct": null,
         "quote_to_account_rate": null,
         "confirmed": true,
-        "source": "same USD quote/account currency; verify instrument ticket",
+        "source": "USD quote and USD account currency; FX trade conversion not required",
         "observed_at": null
       }
     },
@@ -362,8 +418,16 @@
         "observed_at": null
       },
       "fees": {
-        "entry_usd": null,
-        "exit_usd": null,
+        "entry": {
+          "model": null,
+          "value": null,
+          "unit": null
+        },
+        "exit": {
+          "model": null,
+          "value": null,
+          "unit": null
+        },
         "confirmed": false,
         "source": null,
         "observed_at": null
@@ -391,7 +455,7 @@
         "conversion_fee_pct": null,
         "quote_to_account_rate": null,
         "confirmed": true,
-        "source": "same USD quote/account currency; verify instrument ticket",
+        "source": "USD quote and USD account currency; FX trade conversion not required",
         "observed_at": null
       }
     },
@@ -411,8 +475,16 @@
         "observed_at": null
       },
       "fees": {
-        "entry_usd": null,
-        "exit_usd": null,
+        "entry": {
+          "model": null,
+          "value": null,
+          "unit": null
+        },
+        "exit": {
+          "model": null,
+          "value": null,
+          "unit": null
+        },
         "confirmed": false,
         "source": null,
         "observed_at": null
@@ -440,7 +512,7 @@
         "conversion_fee_pct": null,
         "quote_to_account_rate": null,
         "confirmed": true,
-        "source": "same USD quote/account currency; verify instrument ticket",
+        "source": "USD quote and USD account currency; FX trade conversion not required",
         "observed_at": null
       }
     },
@@ -460,8 +532,16 @@
         "observed_at": null
       },
       "fees": {
-        "entry_usd": null,
-        "exit_usd": null,
+        "entry": {
+          "model": null,
+          "value": null,
+          "unit": null
+        },
+        "exit": {
+          "model": null,
+          "value": null,
+          "unit": null
+        },
         "confirmed": false,
         "source": null,
         "observed_at": null
@@ -489,7 +569,7 @@
         "conversion_fee_pct": null,
         "quote_to_account_rate": null,
         "confirmed": true,
-        "source": "same USD quote/account currency; verify instrument ticket",
+        "source": "USD quote and USD account currency; FX trade conversion not required",
         "observed_at": null
       }
     },
@@ -509,8 +589,16 @@
         "observed_at": null
       },
       "fees": {
-        "entry_usd": null,
-        "exit_usd": null,
+        "entry": {
+          "model": null,
+          "value": null,
+          "unit": null
+        },
+        "exit": {
+          "model": null,
+          "value": null,
+          "unit": null
+        },
         "confirmed": false,
         "source": null,
         "observed_at": null
@@ -538,7 +626,7 @@
         "conversion_fee_pct": null,
         "quote_to_account_rate": null,
         "confirmed": true,
-        "source": "same USD quote/account currency; verify instrument ticket",
+        "source": "USD quote and USD account currency; FX trade conversion not required",
         "observed_at": null
       }
     },
@@ -558,8 +646,16 @@
         "observed_at": null
       },
       "fees": {
-        "entry_usd": null,
-        "exit_usd": null,
+        "entry": {
+          "model": null,
+          "value": null,
+          "unit": null
+        },
+        "exit": {
+          "model": null,
+          "value": null,
+          "unit": null
+        },
         "confirmed": false,
         "source": null,
         "observed_at": null
@@ -587,7 +683,7 @@
         "conversion_fee_pct": null,
         "quote_to_account_rate": null,
         "confirmed": true,
-        "source": "same USD quote/account currency; verify instrument ticket",
+        "source": "USD quote and USD account currency; FX trade conversion not required",
         "observed_at": null
       }
     }
