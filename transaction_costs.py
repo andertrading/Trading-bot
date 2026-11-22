@@ -4,6 +4,7 @@ Published platform fees are estimates until checked in the user's execution tick
 Market spread, account-specific conversion and CFD financing are never guessed.
 """
 import math
+from functools import lru_cache
 
 from asset_economic_registry import (
     classify_registry_asset,
@@ -304,6 +305,12 @@ def estimate_etoro_trade_costs(
     return result
 
 
+@lru_cache(maxsize=1)
+def _load_default_economic_registry():
+    """Load the immutable default registry once per process/backtest."""
+    return load_registry()
+
+
 def estimate_verified_registry_trade_costs(
     asset,
     entry,
@@ -351,7 +358,7 @@ def estimate_verified_registry_trade_costs(
 
     try:
         if registry is None:
-            registry = load_registry()
+            registry = _load_default_economic_registry()
         classification = classify_registry_asset(asset, registry)
     except (OSError, ValueError, TypeError) as error:
         result["unpriced_costs"].append("economic_registry_invalid")
