@@ -266,7 +266,7 @@ Resultado: `provider_repair_approved=false`. Se descartan CSP1.L/CNX1.L como sus
 
 ### Estado de validación del código integrado
 
-En el run #614 de GitHub Actions, la suite de raíz pasó 16/16 y la suite `tests/` pasó 659/659; el arranque de `Bot.py` y las rutas `/` y `/health` también pasaron. El workflow de auditoría GBX queda manual para evitar consultas externas en cada actualización de la PR.
+En el run #619 de GitHub Actions, la suite de raíz pasó 16/16 y la suite `tests/` pasó 660/660; el arranque de `Bot.py` y las rutas `/` y `/health` también pasaron. El workflow de auditoría GBX queda manual para evitar consultas externas en cada actualización de la PR.
 
 
 ### Validación de datos antes de aprobar una candidata
