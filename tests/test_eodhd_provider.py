@@ -3,16 +3,17 @@ from unittest.mock import patch
 
 import pandas as pd
 import requests
+import exchange_calendars as xcals
 
 import eodhd_provider as provider
 import data_engine as engine
 
 
 def valid_payload(rows=225):
-    dates = pd.bdate_range(
-        end=pd.Timestamp.now(tz="UTC").date() - pd.Timedelta(days=1),
-        periods=rows,
-    )
+    calendar = xcals.get_calendar("XLON")
+    end = pd.Timestamp.now(tz="UTC").normalize().tz_localize(None)
+    start = end - pd.Timedelta(days=500)
+    dates = calendar.sessions_in_range(start, end)[-rows:]
     return [
         {
             "date": day.strftime("%Y-%m-%d"),
@@ -155,6 +156,26 @@ class TestEODHDProvider(unittest.TestCase):
             splits=[{"date": "2026-01-01", "split": "not-a-ratio"}],
         )
         self.assertIsNone(result)
+
+    def test_excludes_bars_on_london_exchange_holidays(self):
+        payload = valid_payload()
+        for day in ("2026-05-04", "2026-08-31"):
+            payload.append({
+                "date": day,
+                "open": 100.0,
+                "high": 102.0,
+                "low": 99.0,
+                "close": 101.0,
+                "adjusted_close": 100.5,
+                "volume": 1000,
+            })
+
+        result, _ = self.download(payload=payload)
+
+        self.assertIsNotNone(result)
+        self.assertEqual(len(result), 225)
+        self.assertNotIn(pd.Timestamp("2026-05-04", tz="UTC"), result.index)
+        self.assertNotIn(pd.Timestamp("2026-08-31", tz="UTC"), result.index)
 
     def test_rejects_incoherent_ohlc(self):
         payload = valid_payload()
