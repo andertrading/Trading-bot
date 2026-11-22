@@ -184,3 +184,17 @@ Artefacto reproducible: ejecución [44980363657](https://github.com/andertrading
 La reparación desde el listing SIX ya no compara únicamente el cierre. Para cada vela defectuosa compara contra el listing alternativo todos los campos OHLC primarios que sigan siendo estructuralmente fiables; solo excluye el campo primario que incumple las relaciones OHLC y que se pretende reparar. Si un campo fiable difiere más del 0,5%, se rechaza la reparación completa. Esto evita aceptar una vela con cierre parecido pero máximo/mínimo sustancialmente distinto.
 
 La auditoría histórica del 22/11/2026 también confirma que el 24/10/2025 fue una sesión de negociación de LSE; la falta de vela válida de CSPX/CNDX es un hueco de proveedor, no un festivo. No se completa con interpolación ni con precios de un broker minorista. La evidencia externa de precios de Trading 212 se conserva como pista de investigación, no como feed certificado ni como dato de backtest.
+
+
+### Candidato externo para investigar el hueco del 24/10/2025 (no incorporado)
+
+La página pública de Trading 212 muestra una fila histórica para los mismos instrumentos y sus ISIN de Londres:
+
+| Activo | Open | High | Low | Close | Fuente |
+|---|---:|---:|---:|---:|---|
+| CSPX | 723.06 | 727.85 | 721.88 | 727.26 | Trading 212, CSPX.GB |
+| CNDX | 1445.22 | 1455.61 | 1443.60 | 1454.60 | Trading 212, CNDX.GB |
+
+Referencias: https://www.trading212.com/trading-instruments/invest/CSPX.GB y https://www.trading212.com/es/trading-instruments/invest/CNDX.GB
+
+Las páginas identifican London Stock Exchange y los ISIN IE00B5BMR087 / IE00B53SZB19, pero la descripción de Trading 212 indica que sus valores OHLC son un índice de precio de compra diario. No se ha verificado que sea un feed de transacciones oficiales de bolsa ni se ha evaluado la metodología de construcción de máximos/mínimos. Por ello estos valores solo sirven como pista de que existe una referencia adicional; no se cargan al histórico, no rellenan huecos y no certifican Yahoo/EODHD/SIX.
