@@ -39,7 +39,7 @@ SPLIT_CASES = {
         "effective_date": "2024-06-10",
         "start_date": "2024-06-06",
         "end_date": "2024-06-13",
-        "official_source": "https://investor.nvidia.com/news/press-release-details/2024/NVIDIA-Announces-Financial-Results-for-First-Quarter-Fiscal-2025/",
+        "official_source": "https://investor.nvidia.com/files/doc_downloads/2024/05/NVIDIA-2024-Stock-Split-FAQ.pdf",
     },
 }
 

@@ -429,3 +429,17 @@ La regresión también está cubierta: un test construye un snapshot legado con 
 El escáner diario omite los diez activos cuya fuente diaria es Twelve Data antes de llamar al proveedor, mientras no exista evidencia independiente de ajuste por splits. Así evita descargar históricos que el propio gate acabaría rechazando. La ruta manual M15 sigue disponible y continúa solicitando datos intradía en modo raw documentado.
 
 Para desbloquear un activo en el futuro no basta un booleano: `twelvedata_daily_adjustment_verification` debe contener estado `INDEPENDENTLY_VERIFIED`, una fuente HTTPS y un `verified_at` ISO-8601 con zona horaria que no esté en el futuro. La misma evidencia se adjunta a los metadatos del histórico y se valida al cargar snapshots. CI #653 pasó con estas comprobaciones.
+
+
+### Auditoría independiente preparada para los splits de TSLA y NVDA
+
+Se ha añadido un auditor manual que compara las velas OHLC de Twelve Data con Yahoo Finance alrededor de los dos eventos que afectan al histórico de cinco años: TSLA 3:1 (25/08/2022) y NVDA 10:1 (primer día de cotización ajustada 10/06/2024). Comprueba también el evento y ratio de split de Yahoo frente a los comunicados oficiales de los emisores.
+
+- Dos solicitudes `time_series` de Twelve Data, una por símbolo; cero llamadas al endpoint `/splits` de 20 créditos.
+- Comparación de los cuatro campos OHLC en las sesiones comunes, tolerancia máxima 0,75%, y comprobación de continuidad del cierre en el límite del split.
+- Workflow exclusivamente manual con confirmación booleana explícita de posible consumo de créditos.
+- El informe propone la evidencia por activo, pero no modifica automáticamente `config.py`. No se ha ejecutado; no se han realizado llamadas ni consumido créditos.
+
+Fuentes oficiales:
+- TSLA: https://ir.tesla.com/press-release/tesla-announces-three-one-stock-split
+- NVDA: https://investor.nvidia.com/files/doc_downloads/2024/05/NVIDIA-2024-Stock-Split-FAQ.pdf
