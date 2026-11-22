@@ -9,6 +9,9 @@ import os
 import sys
 from pathlib import Path
 
+REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPOSITORY_ROOT))
+
 os.environ["BACKTEST_EXTENDED_DAILY_HISTORY"] = "true"
 os.environ["BACKTEST_DAILY_LOOKBACK_DAYS"] = "1825"
 
