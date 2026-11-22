@@ -358,7 +358,8 @@ def normalize_realtime_quotes(
 
     if not isinstance(response.data, Mapping):
         raise EtoroAPIError("La respuesta de cotizaciones no es un objeto JSON")
-    results = response.data.get("results")
+    is_v1_rates = "rates" in response.data
+    results = response.data.get("rates" if is_v1_rates else "results")
     if not isinstance(results, list):
         raise EtoroAPIError("Falta la lista de resultados de cotizaciones")
 
@@ -367,14 +368,18 @@ def normalize_realtime_quotes(
     for index, item in enumerate(results):
         if not isinstance(item, Mapping):
             raise EtoroAPIError(f"Cotización inválida: {index}")
-        instrument_id = item.get("instrumentId")
+        id_fields = ("instrumentID", "instrumentId") if is_v1_rates else ("instrumentId",)
+        present_ids = [field for field in id_fields if field in item]
+        if len(present_ids) != 1:
+            raise EtoroAPIError(f"instrumentId inválido en cotización {index}")
+        instrument_id = item[present_ids[0]]
         if isinstance(instrument_id, bool) or not isinstance(instrument_id, int) or instrument_id <= 0:
             raise EtoroAPIError(f"instrumentId inválido en cotización {index}")
         if instrument_id not in expected:
             raise EtoroAPIError(f"Instrumento inesperado en cotizaciones: {instrument_id}")
         if instrument_id in quotes:
             raise EtoroAPIError(f"Cotización duplicada para instrumento {instrument_id}")
-        if item.get("quoteType") != "realtime":
+        if not is_v1_rates and item.get("quoteType") != "realtime":
             raise EtoroAPIError(f"El instrumento {instrument_id} tiene cotización retrasada")
 
         bid = _decimal(item.get("bid"), f"rates[{index}].bid")
@@ -971,6 +976,7 @@ class EtoroReadOnlyClient:
             ("GET", "/api/v1/trading/info/real/pnl"),
             ("GET", "/api/v2/trading/info/instrument-breakdown"),
             ("GET", "/api/v2/market-data/rates"),
+            ("GET", "/api/v1/market-data/instruments/rates"),
             ("GET", "/api/v1/market-data/search"),
             ("GET", "/api/v2/market-data/instruments"),
             ("POST", "/api/v2/trading/info/costs"),
@@ -1217,7 +1223,7 @@ class EtoroReadOnlyClient:
             raise ValueError("instrument_ids no puede contener duplicados")
         return self._request(
             "GET",
-            "/api/v2/market-data/rates",
+            "/api/v1/market-data/instruments/rates",
             params={"instrumentIds": ",".join(map(str, instrument_ids))},
             allow_partial=True,
         )
