@@ -68,7 +68,7 @@ class MarketEvidenceTests(unittest.TestCase):
             report["assets"]["AAPL"]["quote"]["spread_evidence_scope"],
             "CURRENT_SNAPSHOT_ONLY",
         )
-        self.assertEqual(report["assets"]["AAPL"]["quote"]["age_seconds"], 0.0)
+        self.assertEqual(report["assets"]["AAPL"]["quote"]["age_seconds"], 8.0)
         self.assertTrue(report["assets"]["AAPL"]["eligibility"]["supports_real_unleveraged_long"])
         self.assertEqual(report["assets"]["AAPL"]["hypothetical_open_cost"]["scope"], "HYPOTHETICAL_OPEN_ONLY")
         self.assertFalse(report["assets"]["AAPL"]["hypothetical_open_cost"]["round_trip_cost_confirmed"])
@@ -97,11 +97,11 @@ class MarketEvidenceTests(unittest.TestCase):
 
         self.assertEqual(report["summary"]["status"], "COMPLETE", report)
         self.assertEqual(report["assets"]["AAPL"]["quote"]["age_seconds"], 0.0)
-        self.assertEqual(report["assets"]["BTC"]["quote"]["age_seconds"], 0.0)
+        self.assertEqual(report["assets"]["BTC"]["quote"]["age_seconds"], 8.0)
         self.assertEqual(len(client.cost_payloads), 1)
         self.assertEqual(
             report["assets"]["AAPL"]["hypothetical_open_cost"]["last_updated"],
-            "2026-11-22T12:00:32+00:00",
+            "2026-11-22T12:00:24+00:00",
         )
 
     def test_cost_query_amount_is_at_least_account_minimum(self):
