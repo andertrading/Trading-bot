@@ -19,6 +19,8 @@ from etoro_read_only import (
     resolve_unique_instrument_by_symbol,
     normalize_cost_estimate,
     normalize_instrument_eligibility,
+    normalize_instrument_display_data,
+    normalize_supported_exchanges,
     validate_what_if_payload,
 )
 
@@ -260,6 +262,49 @@ class EtoroReadOnlyClientTests(unittest.TestCase):
                 json_body={"action": "close"},
             )
         self.session.request.assert_not_called()
+
+
+    def test_instrument_display_metadata_endpoint_uses_ids(self):
+        self.session.request.return_value = FakeResponse(data={"instrumentDisplayDatas":[]})
+        result=self.client.get_instrument_display_data([101,202])
+        self.assertEqual(result.data,{"instrumentDisplayDatas":[]})
+        args,kwargs=self.session.request.call_args
+        self.assertEqual(args[0],"GET")
+        self.assertTrue(args[1].endswith("/api/v1/market-data/instruments"))
+        self.assertEqual(kwargs["params"],{"instrumentIds":"101,202"})
+
+    def test_supported_exchanges_endpoint_uses_ids(self):
+        self.session.request.return_value = FakeResponse(data={"exchangeInfo":[]})
+        self.client.get_supported_exchanges([7,8])
+        args,kwargs=self.session.request.call_args
+        self.assertTrue(args[1].endswith("/api/v1/market-data/exchanges"))
+        self.assertEqual(kwargs["params"],{"exchangeIds":"7,8"})
+
+    def test_metadata_methods_reject_invalid_ids_before_request(self):
+        for values in ([],[1,1],[0],[True]):
+            with self.subTest(values=values),self.assertRaises(ValueError):
+                self.client.get_instrument_display_data(values)
+        with self.assertRaises(ValueError):
+            self.client.get_supported_exchanges([0])
+        self.session.request.assert_not_called()
+
+    def test_instrument_display_data_requires_exact_complete_schema(self):
+        response=EtoroResponse({"instrumentDisplayDatas":[{
+            "instrumentID":11,"exchangeID":4,"symbolFull":"ABC","priceSource":"LSE"
+        }]},200,{})
+        result=normalize_instrument_display_data(response,[11])
+        self.assertEqual(result[11]["exchange_id"],4)
+        self.assertEqual(result[11]["symbol_full"],"ABC")
+        with self.assertRaises(EtoroAPIError):
+            normalize_instrument_display_data(EtoroResponse({"instrumentDisplayDatas":[]},200,{}),[11])
+
+    def test_exchange_normalizer_requires_exact_exchange_coverage(self):
+        response=EtoroResponse({"exchangeInfo":[{
+            "exchangeID":4,"exchangeDescription":"London Stock Exchange"
+        }]},200,{})
+        self.assertEqual(normalize_supported_exchanges(response,[4]),{4:"London Stock Exchange"})
+        with self.assertRaises(EtoroAPIError):
+            normalize_supported_exchanges(EtoroResponse({"exchangeInfo":[]},200,{}),[4])
 
 
 class AvailableCashTests(unittest.TestCase):
