@@ -84,6 +84,20 @@ References:
 
 Practical consequence: collecting time-stamped bid/ask snapshots from an available quote feed (and the eToro order ticket) can build forward evidence for paper trading, but it cannot reconstruct the missing historical spread series for the prior two-year backtest. Do not purchase or switch data plans until coverage, historical depth, quote semantics, and total cost have been checked for all relevant instruments.
 
+## Existing eToro read-only quote path
+
+The repository already contains a potentially useful forward-evidence source in `etoro_read_only.py`:
+
+- `EtoroReadOnlyClient.get_realtime_quotes()` obtains eToro bid/ask quotes for exact instrument IDs and validates that they are real-time, complete, non-crossed, and fresh (default 30 seconds while the relevant market is open).
+- `get_validated_what_if_costs()` calls the hypothetical-cost endpoint with `action="open"` and validates the returned instrument ID, USD cost components, and freshness (default 300 seconds).
+- The quote path uses the market-data rates endpoint; it does not need account positions or balances.
+- The hypothetical-cost endpoint is restricted to opening estimates by the current client validation. It must not be assumed to provide a complete round-trip cost until the response semantics and close-side fees are separately verified.
+- `Bot.py` and `scheduled_scan.py` do not currently call this client; it is not integrated into signal validation or scheduled capture.
+
+This offers a possible low-complexity route for **forward** evidence: resolve exact eToro instrument IDs, capture fresh bid/ask and the hypothetical opening-cost response at scan time, and persist only instrument-level quote/cost evidence. If implemented, restrict this workflow to market-data quotes and hypothetical-cost estimates. Do not call account P&L, client-portfolio, position-breakdown, or order endpoints, and do not feed the user's real holdings into the paper portfolio.
+
+This path still requires the user's explicit authorization before any account-key-backed API call. No eToro API call or account access was made during this audit. It also does not solve historical spread backfill; it would build evidence prospectively.
+
 ## Required integration design
 
 ### 1. One source of truth
