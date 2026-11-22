@@ -447,7 +447,11 @@ def normalize_realtime_quotes(
         age_seconds = (now_utc - quote_time).total_seconds()
         quote_type = "realtime"
         if age_seconds < -5:
-            raise EtoroAPIError(f"Cotización futura para instrumento {instrument_id}")
+            raise EtoroAPIError(
+                f"Cotización futura para instrumento {instrument_id}: "
+                f"timestamp={quote_time.isoformat()}, "
+                f"adelantada_segundos={-age_seconds:.3f}"
+            )
         if age_seconds > max_age_seconds:
             calendar_name = (asset_calendars or {}).get(instrument_id)
             if not calendar_name or calendar_name == "24/7":
