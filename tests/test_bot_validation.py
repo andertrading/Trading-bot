@@ -475,6 +475,25 @@ class TestBotValidation(unittest.TestCase):
         )
         self.assertFalse(result["tradable"])
 
+    def test_twelvedata_daily_claim_without_config_evidence_is_blocked(self):
+        candidate = {
+            **self.candidate,
+            "data_valid": True,
+            "data_timestamp": datetime.now(timezone.utc).isoformat(),
+            "data_age_minutes": 1.0,
+            "data_provider": "twelvedata",
+            "price_adjustment_verified": True,
+            "price_adjustment_verification_status": "INDEPENDENTLY_VERIFIED",
+            "price_adjustment_verification_source": None,
+            "price_adjustment_verified_at": None,
+        }
+        result = Bot.apply_validation_gate(candidate, {"status": "UNKNOWN"})
+        self.assertIn(
+            "Ajuste diario por splits de Twelve Data solicitado, pero no verificado independientemente",
+            result["validation_reasons"],
+        )
+        self.assertFalse(result["tradable"])
+
     def test_twelvedata_daily_cannot_pass_with_legacy_true_flag_only(self):
         candidate = {
             **self.candidate,

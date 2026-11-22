@@ -2569,16 +2569,29 @@ def _attach_market_data_metadata(dataframe, asset, interval):
             if independently_verified
             else "REQUESTED_NOT_INDEPENDENTLY_VERIFIED"
         )
+        evidence = (_asset_config(asset) or {}).get(
+            "twelvedata_daily_adjustment_verification"
+        )
+        dataframe.attrs["price_adjustment_verification_source"] = (
+            evidence.get("source") if independently_verified else None
+        )
+        dataframe.attrs["price_adjustment_verified_at"] = (
+            evidence.get("verified_at") if independently_verified else None
+        )
     elif provider == "twelvedata" and interval == "15m":
         dataframe.attrs["price_adjustment_verified"] = True
         dataframe.attrs["price_adjustment_verification_status"] = (
             "DOCUMENTED_RAW_MODE"
         )
+        dataframe.attrs["price_adjustment_verification_source"] = None
+        dataframe.attrs["price_adjustment_verified_at"] = None
     else:
         dataframe.attrs["price_adjustment_verified"] = True
         dataframe.attrs["price_adjustment_verification_status"] = (
             "PROVIDER_POLICY_ACCEPTED"
         )
+        dataframe.attrs["price_adjustment_verification_source"] = None
+        dataframe.attrs["price_adjustment_verified_at"] = None
     return dataframe
 
 

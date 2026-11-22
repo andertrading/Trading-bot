@@ -1086,6 +1086,14 @@ class TestPriceAdjustmentMetadata(unittest.TestCase):
             result.attrs["price_adjustment_verification_status"],
             "INDEPENDENTLY_VERIFIED",
         )
+        self.assertEqual(
+            result.attrs["price_adjustment_verification_source"],
+            "https://example.org/split-adjustment-audit.json",
+        )
+        self.assertEqual(
+            result.attrs["price_adjustment_verified_at"],
+            "2026-11-22T00:00:00Z",
+        )
 
     def test_boolean_without_sourced_evidence_does_not_unlock_daily_data(self):
         frame = make_ohlcv(

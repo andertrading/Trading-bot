@@ -237,6 +237,8 @@ class TestBacktestV3(unittest.TestCase):
             "price_adjustment_policy": "split_adjusted_ohlc_no_dividend_adjustment",
             "price_adjustment_verified": True,
             "price_adjustment_verification_status": "INDEPENDENTLY_VERIFIED",
+            "price_adjustment_verification_source": "https://example.org/split-adjustment-audit.json",
+            "price_adjustment_verified_at": "2026-11-22T00:00:00Z",
         })
         with (
             patch.object(backtest_v3, "BACKTEST_DATA_MODE", "download"),
@@ -263,6 +265,27 @@ class TestBacktestV3(unittest.TestCase):
             result = backtest_v3.download_history("AAPL", "15m", asset="AAPL")
         self.assertIsNone(result)
         self.assertIn("ajuste de precios no está verificado", backtest_v3.DOWNLOAD_ERRORS[("AAPL", "15m")])
+
+    def test_daily_twelvedata_verified_status_without_evidence_is_rejected(self):
+        data = self.make_data()
+        data.attrs.update({
+            "data_provider": "twelvedata",
+            "price_adjustment_policy": "split_adjusted_ohlc_no_dividend_adjustment",
+            "price_adjustment_verified": True,
+            "price_adjustment_verification_status": "INDEPENDENTLY_VERIFIED",
+            "price_adjustment_verification_source": None,
+            "price_adjustment_verified_at": None,
+        })
+        with (
+            patch.object(backtest_v3, "BACKTEST_DATA_MODE", "download"),
+            patch.object(backtest_v3, "download_data", return_value=data),
+        ):
+            result = backtest_v3.download_history("AAPL", "1d", asset="AAPL")
+        self.assertIsNone(result)
+        self.assertIn(
+            "no tiene evidencia independiente válida",
+            backtest_v3.DOWNLOAD_ERRORS[("AAPL", "1d")],
+        )
 
     def test_legacy_twelvedata_daily_snapshot_true_flag_is_not_trusted(self):
         index = pd.date_range(
@@ -336,6 +359,8 @@ class TestBacktestV3(unittest.TestCase):
             "price_adjustment_policy": "split_adjusted_ohlc_no_dividend_adjustment",
             "price_adjustment_verified": True,
             "price_adjustment_verification_status": "INDEPENDENTLY_VERIFIED",
+            "price_adjustment_verification_source": "https://example.org/split-adjustment-audit.json",
+            "price_adjustment_verified_at": "2026-11-22T00:00:00Z",
         })
         daily_metadata = backtest_v3._snapshot_metadata(
             "AAPL",
@@ -350,6 +375,10 @@ class TestBacktestV3(unittest.TestCase):
         self.assertEqual(
             daily_metadata["price_adjustment_verification_status"],
             "INDEPENDENTLY_VERIFIED",
+        )
+        self.assertEqual(
+            daily_metadata["price_adjustment_verification_source"],
+            "https://example.org/split-adjustment-audit.json",
         )
 
         daily_data.attrs.update({

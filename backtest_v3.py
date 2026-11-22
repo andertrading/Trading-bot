@@ -253,6 +253,18 @@ def _daily_period_label():
     )
 
 
+def _valid_independent_adjustment_evidence(source, verified_at):
+    if not isinstance(source, str) or not source.strip().startswith("https://"):
+        return False
+    try:
+        timestamp = pd.Timestamp(verified_at)
+    except (TypeError, ValueError):
+        return False
+    if pd.isna(timestamp) or timestamp.tzinfo is None:
+        return False
+    return timestamp <= pd.Timestamp.now(tz="UTC")
+
+
 def _snapshot_metadata(
     asset,
     ticker,
@@ -285,6 +297,12 @@ def _snapshot_metadata(
         "price_adjustment_verification_status": data.attrs.get(
             "price_adjustment_verification_status",
             "NOT_RECORDED",
+        ),
+        "price_adjustment_verification_source": data.attrs.get(
+            "price_adjustment_verification_source"
+        ),
+        "price_adjustment_verified_at": data.attrs.get(
+            "price_adjustment_verified_at"
         ),
         "price_source_detail": data.attrs.get("price_source_detail"),
         "ohlc_repair_count": int(data.attrs.get("ohlc_repair_count", 0) or 0),
@@ -473,9 +491,16 @@ def _load_snapshot(asset, ticker, interval):
             )
 
     if interval == "1d" and metadata.get("provider") == "twelvedata":
-        if metadata.get("price_adjustment_verification_status") != "INDEPENDENTLY_VERIFIED":
+        if (
+            metadata.get("price_adjustment_verification_status")
+            != "INDEPENDENTLY_VERIFIED"
+            or not _valid_independent_adjustment_evidence(
+                metadata.get("price_adjustment_verification_source"),
+                metadata.get("price_adjustment_verified_at"),
+            )
+        ):
             raise ValueError(
-                "El ajuste diario por splits de Twelve Data no está verificado independientemente"
+                "El ajuste diario por splits de Twelve Data no tiene evidencia independiente válida"
             )
 
     actual_hash = _sha256_file(csv_path)
@@ -1122,11 +1147,17 @@ def download_history(ticker, interval, asset=None):
         if (
             interval == "1d"
             and expected_provider == "twelvedata"
-            and data.attrs.get("price_adjustment_verification_status")
-            != "INDEPENDENTLY_VERIFIED"
+            and (
+                data.attrs.get("price_adjustment_verification_status")
+                != "INDEPENDENTLY_VERIFIED"
+                or not _valid_independent_adjustment_evidence(
+                    data.attrs.get("price_adjustment_verification_source"),
+                    data.attrs.get("price_adjustment_verified_at"),
+                )
+            )
         ):
             raise ValueError(
-                "El ajuste diario por splits de Twelve Data no está verificado independientemente"
+                "El ajuste diario por splits de Twelve Data no tiene evidencia independiente válida"
             )
         data = _normalize_columns(data.copy())
         required = ["Open", "High", "Low", "Close"]

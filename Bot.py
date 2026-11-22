@@ -1214,6 +1214,9 @@ def apply_validation_gate(result, portfolio_status):
             result.get("price_adjustment_verified") is not True
             or result.get("price_adjustment_verification_status")
             != "INDEPENDENTLY_VERIFIED"
+            or not is_twelvedata_daily_adjustment_verified(
+                result.get("asset")
+            )
         )
     ):
         blockers.append(
@@ -1442,6 +1445,12 @@ def analyze_asset(asset, timeframe, include_paper_bars=False):
         result["price_adjustment_verification_status"] = df.attrs.get(
             "price_adjustment_verification_status",
             "NOT_RECORDED",
+        )
+        result["price_adjustment_verification_source"] = df.attrs.get(
+            "price_adjustment_verification_source"
+        )
+        result["price_adjustment_verified_at"] = df.attrs.get(
+            "price_adjustment_verified_at"
         )
         result["mode"] = "PAPER_ONLY"
         result["currency"] = ACCOUNT_CURRENCY
