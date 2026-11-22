@@ -22,10 +22,10 @@ MAX_PORTFOLIO_RISK = 0.03
 # Riesgo provisional por nivel de calidad.
 # No habilitar para operativa real sin validación.
 RISK_TIERS = {
-    "A": 0.0025,
+    "A": 0.0075,
     "B": 0.0050,
-    "C": 0.0075,
-    "D": 0.0100,
+    "C": 0.0025,
+    "D": 0.00125,
 }
 
 # Temporalidades.
