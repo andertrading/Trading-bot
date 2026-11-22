@@ -17,6 +17,7 @@ class FakeAuditClient:
         self.rejected_fields = set(rejected_fields)
         self.search_calls = []
         self.quote_calls = []
+        self.eligibility_calls = 0
 
     def get_account_snapshot(self, account_currency):
         self.account_snapshot_calls += 1
@@ -49,6 +50,7 @@ class FakeAuditClient:
         }, 200, {})
 
     def get_validated_instrument_eligibility(self, instrument_ids, currency="USD"):
+        self.eligibility_calls += 1
         return {
             instrument_id: SimpleNamespace(supports_long=True)
             for instrument_id in instrument_ids
@@ -76,7 +78,9 @@ class ReadOnlyAuditTests(unittest.TestCase):
         report = run_audit(client, self.assets, "USD", self.now)
         self.assertFalse(report["account_portfolio_data_accessed"])
         self.assertEqual(client.account_snapshot_calls, 0)
-        self.assertTrue(report["instrument_eligibility_validated"])
+        self.assertFalse(report["instrument_eligibility_validated"])
+        self.assertEqual(report["instrument_eligibility_status"], "NOT_IN_SCOPE")
+        self.assertEqual(client.eligibility_calls, 0)
         self.assertTrue(report["complete_realtime_quotes_validated"])
         self.assertFalse(report["portfolio_risk_admission_ready"])
         self.assertTrue(report["overall_pass"])
@@ -147,24 +151,13 @@ class ReadOnlyAuditTests(unittest.TestCase):
         self.assertFalse(report["overall_pass"])
         self.assertNotIn("sensitive quote payload", str(report))
 
-    def test_long_ineligible_instrument_blocks_overall_pass(self):
+    def test_audit_does_not_query_account_specific_eligibility(self):
         client = FakeAuditClient()
-        client.get_validated_instrument_eligibility = Mock(return_value={
-            123: SimpleNamespace(supports_long=False)
-        })
         report = run_audit(client, self.assets, "USD", self.now)
         self.assertFalse(report["instrument_eligibility_validated"])
-        self.assertFalse(report["overall_pass"])
-
-    def test_eligibility_failure_blocks_overall_pass_without_leaking_details(self):
-        client = FakeAuditClient()
-        client.get_validated_instrument_eligibility = Mock(
-            side_effect=RuntimeError("private eligibility detail")
-        )
-        report = run_audit(client, self.assets, "USD", self.now)
-        self.assertFalse(report["instrument_eligibility_validated"])
-        self.assertFalse(report["overall_pass"])
-        self.assertNotIn("private eligibility detail", str(report))
+        self.assertEqual(report["instrument_eligibility_status"], "NOT_IN_SCOPE")
+        self.assertEqual(client.eligibility_calls, 0)
+        self.assertTrue(report["overall_pass"])
 
     def test_etf_resolution_retries_with_configured_exchange_suffix(self):
         class SuffixedEtfClient(FakeAuditClient):
@@ -208,25 +201,20 @@ class ReadOnlyAuditTests(unittest.TestCase):
         self.assertEqual(client.search_calls, ["CSPX", "CSPX.L"])
 
 
-    def test_audit_reports_redacted_diagnostic_codes_for_post_resolution_failures(self):
+    def test_quote_failure_is_redacted_and_blocks_overall_pass(self):
         client = FakeAuditClient()
-        client.get_validated_instrument_eligibility = Mock(
-            side_effect=EtoroAPIError("eToro respondió HTTP 403: private eligibility payload")
-        )
         client.get_realtime_quotes = Mock(
             side_effect=EtoroAPIError("eToro respondió HTTP 429: private quote payload")
         )
         report = run_audit(client, self.assets, "USD", self.now)
-
-        self.assertEqual(report["instrument_eligibility_status"], "HTTP_403")
         self.assertEqual(report["realtime_quotes_status"], "HTTP_429")
-        self.assertFalse(report["instrument_eligibility_validated"])
         self.assertFalse(report["complete_realtime_quotes_validated"])
+        self.assertFalse(report["overall_pass"])
         self.assertNotIn("private", str(report))
 
     def test_success_report_includes_validated_diagnostic_statuses(self):
         report = run_audit(FakeAuditClient(), self.assets, "USD", self.now)
-        self.assertEqual(report["instrument_eligibility_status"], "VALIDATED")
+        self.assertEqual(report["instrument_eligibility_status"], "NOT_IN_SCOPE")
         self.assertEqual(report["realtime_quotes_status"], "VALIDATED")
 
 
