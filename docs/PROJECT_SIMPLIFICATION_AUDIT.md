@@ -106,3 +106,19 @@ Las tarifas públicas no sustituyen al ticket concreto de la cuenta. La página 
 ## Resultado esperado
 
 Menos combinaciones, menos llamadas redundantes, menos estrategias no viables y una sola ruta de aceptación. El objetivo no es producir señales a toda costa: es que cada señal candidata tenga una expectativa positiva demostrable después de costes completos, y que si no hay oportunidad el sistema diga NO TRADE.
+
+
+## Matriz económica individual por instrumento (PR #115)
+
+Se añade `asset_economic_registry.json` y su evaluador `asset_economic_registry.py`. La matriz contiene una ficha independiente para cada uno de los 12 activos y conserva, por campo, el valor, confirmación, fuente y fecha de observación.
+
+- Tipo REAL/CFD del ticket.
+- Comisión por lado con modelo explícito: fija, porcentaje del nominal o cero confirmado. No se fuerza un importe USD fijo para activos cuya comisión depende del nominal.
+- Spread bid/ask observado.
+- Base de precio histórico frente a precio ejecutable.
+- Mínimo de orden y posibilidad de fraccionamiento.
+- Conversión FX de operación cuando sea necesaria.
+
+Los campos económicos permanecen vacíos y sin confirmar. No se rellenan con tarifas públicas estimadas, velas OHLC ni datos de cartera. Las fichas en USD no requieren conversión FX de operación porque la divisa de cotización y la divisa de referencia son ambas USD; esto no incluye conversión de depósitos, financiación ni retiradas.
+
+El evaluador devuelve `COSTS_UNVERIFIED` mientras falte evidencia material, y `INELIGIBLE` si el ticket confirma CFD para la política REAL-only. La matriz no se conecta a sizing, señales ni ejecución; es un registro previo de elegibilidad. Los tests de este módulo se han añadido, pero su ejecución en CI queda pendiente.
