@@ -310,3 +310,14 @@ En el artefacto recuperado, las operaciones diarias de acciones usan un presupue
 Para cripto, el mismo artefacto estima que la comisión del 1% por lado representa una mediana aproximada de 0.28–0.43 R por operación según el activo (BTC, ETH, SOL, XLM y XRP), también antes de añadir spread. Son estimaciones derivadas de los tamaños hipotéticos de las operaciones, no un cálculo de costes verificado por ticket.
 
 Esto demuestra que subir el capital reduce el peso relativo de la comisión fija de acciones, pero no elimina el coste porcentual de cripto ni crea por sí solo una ventaja estadística. No se debe aumentar el riesgo por operación para compensar comisiones: el límite absoluto del 1% permanece intacto.
+
+
+### Sensibilidad analítica al capital (no es un nuevo backtest)
+
+Se hizo una sensibilidad aislada sobre los costes por operación del artefacto: se mantuvieron los resultados brutos y las comisiones porcentuales de cripto, mientras que la comisión fija de acciones se escaló inversamente con el capital (suponiendo que el nominal y el presupuesto de riesgo crecen proporcionalmente). No se cambió el riesgo porcentual ni se incluyó spread adicional.
+
+- Donchian diario: neto estimado -30.25 R con 1.000 USD; -9.61 R con 2.500; -2.73 R con 5.000; +0.71 R con 10.000; +2.43 R con 20.000.
+- EMA reclaim diario: neto estimado -25.33 R con 1.000 USD y sigue en -5.19 R con 20.000 USD.
+- Baseline diario: neto estimado -59.84 R con 1.000 USD y sigue en -7.40 R con 20.000 USD.
+
+La sensibilidad no incluye spread, no simula el efecto de la trayectoria de equity sobre el tamaño de las posiciones y no constituye una validación de rentabilidad. Solo demuestra que aumentar capital reduce el peso de la comisión fija de acciones, pero no arregla por sí solo una estrategia con ventaja bruta insuficiente; no se recomienda aumentar el capital de referencia ni el riesgo para compensarlo.
