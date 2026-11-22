@@ -45,6 +45,7 @@ def classify_asset(
     account_currency: str | None = None,
     account_currency_confirmed: bool | None = None,
     fx_conversion_fee_pct: float | None = None,
+    quote_to_account_rate: float | None = None,
     minimum_order_constraints_confirmed: bool = False,
 ) -> dict:
     """Classify one asset for the daily long-only, unleveraged REAL MVP.
@@ -88,7 +89,10 @@ def classify_asset(
         str(configured_execution).upper() if configured_execution else None
     )
 
-    if execution_confirmed and str(configured_execution).upper() != "REAL":
+    if execution_confirmed and (
+        configured_execution is None
+        or str(configured_execution).upper() != "REAL"
+    ):
         result["status"] = "INELIGIBLE"
         result["blockers"] = ["mvp_requires_confirmed_REAL_execution"]
         return result
@@ -135,7 +139,16 @@ def classify_asset(
     if not quote_currency:
         blockers.append("instrument_quote_currency_missing")
     elif quote_currency != acct_currency:
-        if not _valid_non_negative_number(fx_conversion_fee_pct):
+        fx_fee = (
+            ETORO_FX_CONVERSION_FEE_PCT
+            if fx_conversion_fee_pct is None
+            else fx_conversion_fee_pct
+        )
+        if (
+            not _valid_non_negative_number(fx_fee)
+            or not _valid_non_negative_number(quote_to_account_rate)
+            or float(quote_to_account_rate) <= 0
+        ):
             blockers.append("trade_FX_conversion_fee_or_rate_not_verified")
 
     if not minimum_order_constraints_confirmed:
