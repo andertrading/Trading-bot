@@ -262,3 +262,8 @@ El audit de Yahoo Finance descargó 1.259 sesiones comunes CSPX/CSP1 y 1.254 CND
 - 24/10/2025 no tiene barra ni en la línea USD ni en la GBX de ninguno de los dos fondos.
 
 Resultado: `provider_repair_approved=false`. Se descartan CSP1.L/CNX1.L como sustitutos automáticos en el estado actual. El informe JSON/CSV queda adjunto al workflow para auditoría, sin modificar datos de producción.
+
+
+### Estado de validación del código integrado
+
+En el run #614 de GitHub Actions, la suite de raíz pasó 16/16 y la suite `tests/` pasó 659/659; el arranque de `Bot.py` y las rutas `/` y `/health` también pasaron. El workflow de auditoría GBX queda manual para evitar consultas externas en cada actualización de la PR.
