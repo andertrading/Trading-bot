@@ -173,6 +173,75 @@ def ohlc_integrity(frame):
     }
 
 
+def assess_alternate_repairs(primary, alternate):
+    """Mirror the production repair eligibility rules for every invalid yfinance bar."""
+    invalid = _invalid_ohlc_dates(primary)
+    maximum_repairs = max(10, int(np.ceil(len(primary) * 0.01)))
+    issues = []
+    deviations = []
+    for day in invalid:
+        if day not in alternate.index:
+            issues.append({"date": str(day), "reason": "alternate_date_missing"})
+            continue
+        alt = alternate.loc[day]
+        if isinstance(alt, pd.DataFrame) or bool(ohlc_integrity(alternate.loc[[day]])["invalid_rows"]):
+            issues.append({"date": str(day), "reason": "alternate_bar_invalid"})
+            continue
+        primary_close = pd.to_numeric(
+            pd.Series([primary.at[day, "Close"]]), errors="coerce"
+        ).iloc[0]
+        alternate_close = pd.to_numeric(
+            pd.Series([alt["Close"]]), errors="coerce"
+        ).iloc[0]
+        if (
+            not np.isfinite(primary_close) or primary_close <= 0
+            or not np.isfinite(alternate_close) or alternate_close <= 0
+        ):
+            issues.append({"date": str(day), "reason": "close_unverifiable"})
+            continue
+        deviation = abs(float(primary_close) / float(alternate_close) - 1.0) * 100.0
+        deviations.append(deviation)
+        if deviation > 0.5:
+            issues.append({
+                "date": str(day),
+                "reason": "close_deviation_over_0_5pct",
+                "close_deviation_pct": round(deviation, 6),
+            })
+    if len(invalid) > maximum_repairs:
+        issues.append({
+            "date": None,
+            "reason": "repair_count_over_production_limit",
+            "invalid_count": len(invalid),
+            "maximum_repairs": maximum_repairs,
+        })
+    return {
+        "invalid_primary_bar_count": len(invalid),
+        "maximum_repairs_allowed": maximum_repairs,
+        "alternate_repair_issues": issues,
+        "max_close_deviation_pct": round(max(deviations), 6) if deviations else None,
+        "all_invalid_bars_repairable": len(invalid) > 0 and not issues,
+        "no_repair_needed": len(invalid) == 0,
+    }
+
+
+def _invalid_ohlc_dates(frame):
+    mask = ohlc_integrity(frame)
+    required = ["Open", "High", "Low", "Close"]
+    values = frame[required].apply(pd.to_numeric, errors="coerce")
+    finite = np.isfinite(values.to_numpy(dtype=float)).all(axis=1)
+    positive = (values > 0).all(axis=1)
+    coherent = (
+        (values["High"] >= values["Low"])
+        & (values["High"] >= values["Open"])
+        & (values["High"] >= values["Close"])
+        & (values["Low"] <= values["Open"])
+        & (values["Low"] <= values["Close"])
+    )
+    invalid = ~(finite & positive & coherent)
+    return list(frame.index[invalid])
+
+
+
 def _price_error_metrics(left, right, suffix_left, suffix_right):
     joined = (
         left.add_suffix(suffix_left)
@@ -215,6 +284,7 @@ def compare(asset, eod, yahoo, exchange, alternate, yahoo_yf, alternate_yf):
     eodhd_integrity = ohlc_integrity(eod)
     six_integrity = ohlc_integrity(alternate)
     six_yfinance_integrity = ohlc_integrity(alternate_yf)
+    alternate_repair_assessment = assess_alternate_repairs(yahoo_yf, alternate_yf)
     # Gate the exact yfinance path used by extended backtests, not just Yahoo's chart endpoint.
     blockers = []
     if yahoo_yfinance_integrity["invalid_rows"] != 0:
@@ -236,6 +306,7 @@ def compare(asset, eod, yahoo, exchange, alternate, yahoo_yf, alternate_yf):
         "yahoo_chart_price_abs_pct_error": chart_price_errors,
         "yahoo_chart_vs_yfinance_price_abs_pct_error": chart_vs_yfinance,
         "six_yfinance_vs_eodhd_price_abs_pct_error": six_errors,
+        "alternate_repair_assessment": alternate_repair_assessment,
         "yahoo_research_quality_gate": "PASS" if not blockers else "FAIL",
         "yahoo_research_quality_blockers": blockers,
     })
