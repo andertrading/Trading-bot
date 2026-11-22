@@ -458,3 +458,6 @@ Lectura: **M15 no falla únicamente por el broker**. El edge bruto de la estrate
 
 
 La escala por operación explica el problema: en el baseline M15, el edge bruto medio fue aproximadamente **0,017R por operación cripto** y **0,019R por operación de acciones**. Con el riesgo de referencia de 5 USD por trade, la comisión Bitvavo maker modelada equivale a unos **0,20R por operación cripto**; el escenario eToro de 1 USD por lado en acciones equivale a unos **0,39R por operación**; el escenario eToro cripto de 1% por lado ronda **3,2R por operación**. Son aproximaciones de investigación, sin costes completos, pero muestran que aumentar el capital no corrige las comisiones porcentuales ni un edge tan pequeño.
+
+
+Nota operativa: como este workflow está dentro de la PR #117 y la PR sigue sin fusionar, GitHub no lo ofrece todavía para ejecución manual desde la rama principal. El script y sus tests offline sí están en la rama y pasan CI; el workflow solo podrá lanzarse desde GitHub cuando exista en la rama por defecto. No se ha fusionado la PR para habilitarlo.
