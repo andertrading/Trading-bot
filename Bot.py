@@ -1393,9 +1393,12 @@ def analyze_asset(asset, timeframe, include_paper_bars=False):
         )
 
 
-def run_scan(timeframes=None, include_paper_bars=False):
+def run_scan(timeframes=None, include_paper_bars=False, paper_assets=None):
     """Analyze selected timeframes without requiring broker/account access."""
     results = []
+    paper_assets = {
+        str(asset).upper() for asset in (paper_assets or [])
+    }
 
     if timeframes is None:
         selected_timeframes = (INTRADAY_INTERVAL, SWING_INTERVAL)
@@ -1461,7 +1464,9 @@ def run_scan(timeframes=None, include_paper_bars=False):
                 timeframe == INTRADAY_INTERVAL
                 and not is_intraday_market_open(asset)
             )
-            if market_closed and not include_paper_bars:
+            if market_closed and (
+                not include_paper_bars or asset not in paper_assets
+            ):
                 result = no_trade(
                     asset,
                     timeframe,
