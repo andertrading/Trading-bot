@@ -252,3 +252,13 @@ Referencias:
 - Histórico CSP1 GBX 24/10/2025: https://www.sharecompare.co.uk/shares/CSP1.L/history/
 - Referencias USD/GBX de Trading 212: https://www.trading212.com/trading-instruments/invest/CSPX.GB, https://www.trading212.com/es/trading-instruments/invest/CNDX.GB y https://www.trading212.com/es/trading-instruments/invest/CNX1.GB
 - GBP/USD 24/10/2025: https://www.exchange-rates.org/exchange-rate-history/gbp-usd-2025-10-24
+
+
+### Resultado del audit GBX de cinco años (GitHub Actions run #610)
+
+El audit de Yahoo Finance descargó 1.259 sesiones comunes CSPX/CSP1 y 1.254 CNDX/CNX1 entre 23/11/2021 y 20/11/2026. El contraste falla ampliamente:
+- CSPX: p95 máximo entre campos 8.4818% (High), desviación máxima 97.5733% (Low); 2 velas USD y 24 GBX no pasan integridad.
+- CNDX: p95 máximo 1.1668% (High), desviación máxima 9.3154% (Low); 9 velas USD y 52 GBX no pasan integridad. En 05/05/2023 el mínimo GBX convertido difiere 5.8056% del campo LSE USD que se considera fiable.
+- 24/10/2025 no tiene barra ni en la línea USD ni en la GBX de ninguno de los dos fondos.
+
+Resultado: `provider_repair_approved=false`. Se descartan CSP1.L/CNX1.L como sustitutos automáticos en el estado actual. El informe JSON/CSV queda adjunto al workflow para auditoría, sin modificar datos de producción.
