@@ -96,6 +96,22 @@ class PaperMarketDataTests(unittest.TestCase):
                 captured_at="2026-11-20T18:00:00+00:00",
             )
 
+    def test_persisted_source_calendar_and_listing_are_pinned(self):
+        state = empty_market_data_state()
+        state["source"] = "YAHOO"
+        with self.assertRaises(ValueError):
+            validate_market_data_state(state)
+
+        state = empty_market_data_state()
+        state["calendar"] = "XNYS"
+        with self.assertRaises(ValueError):
+            validate_market_data_state(state)
+
+        state = empty_market_data_state()
+        state["assets"]["CNDX"]["symbol"] = "CNDX.SIX"
+        with self.assertRaises(ValueError):
+            validate_market_data_state(state)
+
 
 if __name__ == "__main__":
     unittest.main()
