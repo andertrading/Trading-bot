@@ -1169,6 +1169,33 @@ class TestDailyGaps(unittest.TestCase):
         self.assertFalse(engine._has_daily_gaps(df, "ETH"))
 
 
+    def test_extended_history_ignores_gaps_older_than_requested_five_year_window(self):
+        df = self.make_daily([
+            "2020-11-12",
+            "2020-11-15",
+            "2026-11-19",
+            "2026-11-20",
+        ])
+        with patch.dict(os.environ, {
+            "BACKTEST_EXTENDED_DAILY_HISTORY": "true",
+            "BACKTEST_DAILY_LOOKBACK_DAYS": "1825",
+        }):
+            self.assertFalse(engine._has_daily_gaps(df, "ETH"))
+
+    def test_extended_history_rejects_gaps_inside_requested_five_year_window(self):
+        df = self.make_daily([
+            "2024-01-01",
+            "2024-01-04",
+            "2026-11-19",
+            "2026-11-20",
+        ])
+        with patch.dict(os.environ, {
+            "BACKTEST_EXTENDED_DAILY_HISTORY": "true",
+            "BACKTEST_DAILY_LOOKBACK_DAYS": "1825",
+        }):
+            self.assertTrue(engine._has_daily_gaps(df, "ETH"))
+
+
     def test_accepts_us_weekend_gap(self):
         df = self.make_daily([
             "2026-11-20",

@@ -264,6 +264,55 @@ class TestBacktestV3(unittest.TestCase):
         self.assertIsNone(result)
         self.assertIn("ajuste de precios no está verificado", backtest_v3.DOWNLOAD_ERRORS[("AAPL", "15m")])
 
+    def test_load_snapshot_accepts_mixed_two_and_five_year_daily_metadata(self):
+        for period in ("2y", "1825d"):
+            with self.subTest(period=period), tempfile.TemporaryDirectory() as temp_dir:
+                index = pd.date_range(
+                    "2025-01-01", periods=230, freq="D", tz="UTC"
+                )
+                data = pd.DataFrame({
+                    "Open": [100.0] * len(index),
+                    "High": [102.0] * len(index),
+                    "Low": [99.0] * len(index),
+                    "Close": [101.0] * len(index),
+                    "Volume": [1000.0] * len(index),
+                }, index=index)
+                data.attrs.update({
+                    "provider": "twelvedata",
+                    "price_adjustment_policy": (
+                        "split_adjusted_ohlc_no_dividend_adjustment"
+                    ),
+                    "price_adjustment_verified": True,
+                })
+
+                with (
+                    patch.object(
+                        backtest_v3, "SNAPSHOT_DIR",
+                        backtest_v3.Path(temp_dir),
+                    ),
+                    patch.object(
+                        backtest_v3, "BACKTEST_DAILY_LOOKBACK_DAYS", 1825
+                    ),
+                    patch.object(backtest_v3, "SNAPSHOT_MANIFEST", []),
+                ):
+                    metadata = backtest_v3._save_snapshot(
+                        "BTC", "BTC-USD", "1d", data
+                    )
+                    metadata["period_requested"] = period
+                    _, metadata_path = backtest_v3._snapshot_paths(
+                        "BTC", "1d"
+                    )
+                    metadata_path.write_text(
+                        json.dumps(metadata), encoding="utf-8"
+                    )
+                    loaded = backtest_v3._load_snapshot(
+                        "BTC", "BTC-USD", "1d"
+                    )
+
+                self.assertEqual(len(loaded), len(data))
+                self.assertTrue(loaded.index.equals(data.index))
+
+
     def test_load_snapshot_accepts_verified_coinbase_crypto_research_source(self):
         data = self.make_data(rows=230)
         data.index = data.index.tz_localize("UTC")
@@ -346,6 +395,20 @@ class TestBacktestV3(unittest.TestCase):
             "twelvedata",
         )
         self.assertEqual(daily_metadata["period_requested"], "2y")
+
+        with patch.object(backtest_v3, "BACKTEST_DAILY_LOOKBACK_DAYS", 1825):
+            extended_daily_metadata = backtest_v3._snapshot_metadata(
+                "AAPL",
+                "AAPL",
+                "1d",
+                daily_data,
+                backtest_v3.Path("extended_daily_snapshot.csv"),
+                "sha256",
+                "twelvedata",
+            )
+        self.assertEqual(
+            extended_daily_metadata["period_requested"], "1825d"
+        )
 
         daily_data.attrs.update({
             "price_source_detail": "LSE primary; SIX alternate OHLC repair",
