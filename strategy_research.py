@@ -266,6 +266,60 @@ def daily_swing_ema_reclaim(data, asset, timeframe, index=-1):
     )
 
 
+def daily_swing_donchian_breakout(data, asset, timeframe, index=-1):
+    """Daily trend breakout above the prior 20 completed sessions' highs.
+
+    The current candle is excluded from the Donchian reference window.
+    Signals are evaluated only on completed daily bars; the shared engine
+    handles next-bar entry, ATR exits, risk and cost accounting.
+    """
+    if timeframe != "1d":
+        return {"action": "NO TRADE"}
+
+    resolved_index = index if index >= 0 else len(data) + index
+    if resolved_index < 20 or resolved_index >= len(data):
+        return {"action": "NO TRADE"}
+
+    row = data.iloc[resolved_index]
+    previous_window = data.iloc[resolved_index - 20:resolved_index]
+    if "High" not in previous_window.columns or len(previous_window) != 20:
+        return {"action": "NO TRADE"}
+
+    prior_highs = pd.to_numeric(previous_window["High"], errors="coerce")
+    if prior_highs.isna().any():
+        return {"action": "NO TRADE"}
+    prior_20_session_high = float(prior_highs.max())
+
+    values = {
+        key: _number(row, key)
+        for key in ("Close", "EMA50", "EMA200", "ATR", "ATR_PERCENT")
+    }
+    if any(value is None for value in values.values()):
+        return {"action": "NO TRADE"}
+
+    established_uptrend = (
+        values["EMA50"] > values["EMA200"]
+        and values["Close"] > values["EMA50"]
+    )
+    confirmed_breakout = values["Close"] > prior_20_session_high
+    volatility_ok = (
+        0 < values["ATR_PERCENT"] <= strategies.MAX_ATR_PERCENT
+        and values["ATR"] > 0
+    )
+    if not (established_uptrend and confirmed_breakout and volatility_ok):
+        return {"action": "NO TRADE"}
+
+    return _candidate(
+        data, asset, timeframe, resolved_index,
+        [
+            "Tendencia diaria EMA50 sobre EMA200",
+            "Cierre diario sobre EMA50",
+            "Cierre supera el máximo de las 20 sesiones anteriores",
+            "Ruptura confirmada por cierre; entrada en la siguiente barra",
+        ],
+    )
+
+
 STRATEGIES = {
     "baseline": baseline,
     "trend_pullback_reclaim": trend_pullback_reclaim,
@@ -274,6 +328,7 @@ STRATEGIES = {
     "mtf_daily_price_confirmed_pullback": mtf_daily_price_confirmed_pullback,
     "daily_swing_trend_pullback": daily_swing_trend_pullback,
     "daily_swing_ema_reclaim": daily_swing_ema_reclaim,
+    "daily_swing_donchian_breakout": daily_swing_donchian_breakout,
 }
 
 
