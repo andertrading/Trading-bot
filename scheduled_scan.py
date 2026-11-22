@@ -20,7 +20,6 @@ from signal_lifecycle import (
     build_signal_record,
 )
 from paper_forward import (
-    DEFAULT_RISK_PER_TRADE,
     new_paper_state,
     paper_summary,
     process_signal_bar,
