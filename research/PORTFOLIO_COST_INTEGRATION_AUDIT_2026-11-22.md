@@ -93,6 +93,19 @@ Before net integration, add an explicit validated registry field such as `spread
 
 The choice must be supported by instrument-specific evidence and tests. Do not infer it from vendor names or from free-text descriptions.
 
+### 3. Historical cost evidence must be time-aligned
+
+The current registry stores one scalar `spread.bid_ask_bps` per asset. `_has_evidence()` checks that `observed_at` is a valid, timezone-aware timestamp not in the future, but it does not enforce an age limit. The verified estimator then applies that same scalar spread to every historical trade, regardless of the trade's entry and exit dates.
+
+That is not sufficient for historical net-performance validation:
+
+- Market spreads vary by instrument, time of day, volatility, liquidity, and market conditions.
+- A spread observed today is evidence of today's quote conditions, not the spread on a historical trade date.
+- A one-time spread can be used only as a clearly labeled current-cost sensitivity scenario, not as historical execution-cost proof.
+- The same temporal issue applies to FX conversion rates if a future instrument requires FX, and to fee schedules if rates changed during the backtest period.
+
+For historical net validation, require either (a) historical bid/ask data aligned to each entry and exit, or (b) a documented conservative spread model validated against time-stamped observations over the entire evaluation period. Fee and FX schedules must carry effective dates or be explicitly treated as current-schedule sensitivity assumptions. If this evidence is unavailable, keep historical net metrics unavailable.
+
 ### Existing sizing logic to reuse carefully
 
 `risk_manager.calculate_position_size()` already accepts variable costs per unit and fixed round-trip costs. Its core equation is equivalent to:
@@ -107,7 +120,7 @@ That is useful groundwork, but it is **not** currently the portfolio allocator:
 
 The implementation should extract or adapt the pure arithmetic behind this helper for the research simulator, preserving the production sizing gate as disabled. It must not simply toggle `ALLOW_POSITION_SIZING` globally or bypass the separate economic eligibility gate.
 
-### 3. Cost-aware risk sizing
+### 4. Cost-aware risk sizing
 
 Sizing must reserve the full modeled loss if the stop is reached, including round-trip costs. For a long position, define:
 
@@ -122,7 +135,7 @@ Because fixed per-side commissions are not proportional to quantity, do not appr
 
 Cash reservation must also include entry-side transaction costs, not only entry notional. Do not reserve the full round-trip fee as cash if the exit-side fee is only payable later; account for the timing explicitly.
 
-### 4. Minimum-order and fractional-quantity enforcement
+### 5. Minimum-order and fractional-quantity enforcement
 
 The registry records `minimum_notional` and `fractional_allowed`, but current admission logic only verifies that the evidence fields are present and well-formed. It does not compare a proposed trade's notional/quantity with those constraints. The verified cost estimator also does not enforce them, and `portfolio_backtest.simulate_portfolio()` accepts any positive fractional quantity.
 
@@ -136,7 +149,7 @@ Therefore, an asset-level `ELIGIBLE` status must not be treated as proof that ev
 
 This enforcement must occur in the portfolio allocator, not only in the signal-level hypothetical cost report.
 
-### 5. Realized net P&L exactly once
+### 6. Realized net P&L exactly once
 
 At exit, calculate verified round-trip costs once using the allocated quantity and actual simulated exit price:
 
@@ -148,7 +161,7 @@ Then use net P&L for equity, subsequent risk budgets, return, win rate, profit f
 
 Never subtract `result_R_after_known_fees` or any hypothetical-size cost field from portfolio P&L. That would mix position sizes and can double-count costs.
 
-### 6. Fail-closed net reporting
+### 7. Fail-closed net reporting
 
 A portfolio net metric is valid only when every accepted and closed trade has complete verified costs and verified execution-price basis. If one trade is incomplete:
 
@@ -159,7 +172,7 @@ A portfolio net metric is valid only when every accepted and closed trade has co
 
 The current registry state (0/12 eligible) means this gate must remain closed.
 
-### 7. Stop-gap risk is not a hard maximum
+### 8. Stop-gap risk is not a hard maximum
 
 Even a correct all-in loss calculation at the stop price does not guarantee a hard 1% maximum loss. The backtest explicitly models a gap through the stop by exiting at the next candle's open, which can be materially worse than the stop. Daily swing positions are exposed to overnight/weekend gaps, halts, and liquidity shocks.
 
@@ -170,7 +183,7 @@ Therefore:
 - Add gap-stress scenarios and report the frequency/severity of losses beyond the planned budget.
 - If a guaranteed maximum loss is a non-negotiable requirement, the strategy/instrument must support a genuinely guaranteed stop mechanism with its own verified availability and fee model. Ordinary stop orders do not provide that guarantee.
 
-### 8. Risk-limit semantics
+### 9. Risk-limit semantics
 
 The hard 1% per-trade and 3% aggregate limits must apply to modeled all-in stop loss, not only price movement to the stop. Add tests for simultaneous entries, fixed commissions, variable spread/FX costs, and costs that make a candidate infeasible under the risk budget.
 
@@ -183,6 +196,7 @@ The simulator remains a bar-based approximation: spread measurement and historic
 - Fixed fees are charged once per side and do not scale with quantity.
 - Percentage fees, spread, and FX scale with the correct entry/exit notionals.
 - Spread is deducted exactly once: separately for reference prices, or embedded in executable bid/ask prices, never both.
+- Historical spread/FX evidence is time-aligned with each trade or clearly labeled as a current-cost sensitivity scenario.
 - Missing/unknown spread treatment blocks net reporting.
 - Entry-side cash reservation and all-in stop-risk reservation are both respected.
 - A verified cost record is applied exactly once to realized P&L.
