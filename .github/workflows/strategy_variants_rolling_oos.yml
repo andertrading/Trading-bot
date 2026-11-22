@@ -13,6 +13,7 @@ on:
       - research/mtf-asset-class-cost-isolation-20261122
       - research/daily-swing-pullback-20261122
       - research/daily-swing-ema-reclaim-20261122
+      - research/daily-swing-donchian-breakout-20261122
 
 permissions:
   contents: read
