@@ -303,6 +303,35 @@ def compare(asset, eod, yahoo, exchange, alternate, yahoo_yf, alternate_yf):
         }
     yahoo_integrity = ohlc_integrity(yahoo)
     yahoo_yfinance_integrity = ohlc_integrity(yahoo_yf)
+    chart_only_vs_yfinance = list(yahoo.index.difference(yahoo_yf.index))
+    eodhd_only_vs_yfinance = list(eod.index.difference(yahoo_yf.index))
+    missing_session_crosscheck = []
+    for day in eodhd_only_vs_yfinance:
+        if day not in alternate_yf.index:
+            missing_session_crosscheck.append({
+                "date": str(day),
+                "six_available": False,
+                "eodhd_close": float(eod.at[day, "Close"]),
+            })
+            continue
+        six_row = alternate_yf.loc[day]
+        eod_row = eod.loc[day]
+        close_deviation = abs(float(six_row["Close"]) / float(eod_row["Close"]) - 1.0) * 100.0
+        ohlc_deviations = {
+            col: abs(float(six_row[col]) / float(eod_row[col]) - 1.0) * 100.0
+            for col in ("Open", "High", "Low", "Close")
+        }
+        missing_session_crosscheck.append({
+            "date": str(day),
+            "six_available": True,
+            "six_ohlc_valid": bool(ohlc_integrity(alternate_yf.loc[[day]])["invalid_rows"] == 0),
+            "six_close_deviation_vs_eodhd_pct": round(close_deviation, 6),
+            "six_ohlc_deviation_vs_eodhd_pct": {
+                key: round(value, 6) for key, value in ohlc_deviations.items()
+            },
+            "eodhd_close": float(eod_row["Close"]),
+            "six_close": float(six_row["Close"]),
+        })
     eodhd_integrity = ohlc_integrity(eod)
     six_integrity = ohlc_integrity(alternate)
     six_yfinance_integrity = ohlc_integrity(alternate_yf)
@@ -334,6 +363,11 @@ def compare(asset, eod, yahoo, exchange, alternate, yahoo_yf, alternate_yf):
         "five_year_lse_six_last_date": str(full_lse_six.index.max()),
         "six_yfinance_vs_eodhd_price_abs_pct_error": six_errors,
         "alternate_repair_assessment": alternate_repair_assessment,
+        "yfinance_missing_session_diagnostics": {
+            "chart_only_vs_yfinance_dates": [str(day) for day in chart_only_vs_yfinance],
+            "eodhd_only_vs_yfinance_dates": [str(day) for day in eodhd_only_vs_yfinance],
+            "eodhd_overlap_missing_session_crosscheck": missing_session_crosscheck,
+        },
         "yahoo_research_quality_gate": "PASS" if not blockers else "FAIL",
         "yahoo_research_quality_blockers": blockers,
     })
