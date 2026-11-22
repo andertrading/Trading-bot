@@ -223,6 +223,11 @@ class TestPortfolio(unittest.TestCase):
             "risk_amount_usd": 10.0,
             "position_risk_usd": 8.0,
             "fixed_costs_usd": 2.0,
+            "position_size": 1.0,
+            "entry_price_quote": 100.0,
+            "quote_to_usd": 1.0,
+            "position_notional_usd": 100.0,
+            "available_capital_usd": 1000.0,
             "total_reserved_risk_usd": 10.0,
         }
         result = can_add_sized_trade(
@@ -244,6 +249,11 @@ class TestPortfolio(unittest.TestCase):
             "risk_amount_usd": 10.0,
             "position_risk_usd": 9.0,
             "fixed_costs_usd": 1.0,
+            "position_size": 1.0,
+            "entry_price_quote": 100.0,
+            "quote_to_usd": 1.0,
+            "position_notional_usd": 100.0,
+            "available_capital_usd": 1000.0,
             "total_reserved_risk_usd": 10.0,
         }
         result = can_add_sized_trade(
@@ -263,6 +273,11 @@ class TestPortfolio(unittest.TestCase):
             "risk_amount_usd": 5.0,
             "position_risk_usd": 5.0,
             "fixed_costs_usd": 0.0,
+            "position_size": 1.0,
+            "entry_price_quote": 100.0,
+            "quote_to_usd": 1.0,
+            "position_notional_usd": 100.0,
+            "available_capital_usd": 1000.0,
             "total_reserved_risk_usd": 5.0,
         }
         result = can_add_sized_trade(
@@ -281,6 +296,11 @@ class TestPortfolio(unittest.TestCase):
             "risk_amount_usd": 5.0,
             "position_risk_usd": 5.0,
             "fixed_costs_usd": 0.0,
+            "position_size": 1.0,
+            "entry_price_quote": 100.0,
+            "quote_to_usd": 1.0,
+            "position_notional_usd": 100.0,
+            "available_capital_usd": 1000.0,
             "total_reserved_risk_usd": 5.0,
         }
         result = can_add_sized_trade(
@@ -300,6 +320,11 @@ class TestPortfolio(unittest.TestCase):
             "risk_amount_usd": 5.0,
             "position_risk_usd": 5.0,
             "fixed_costs_usd": 2.0,
+            "position_size": 1.0,
+            "entry_price_quote": 100.0,
+            "quote_to_usd": 1.0,
+            "position_notional_usd": 100.0,
+            "available_capital_usd": 1000.0,
             "total_reserved_risk_usd": 7.0,
         }
         result = can_add_sized_trade(
