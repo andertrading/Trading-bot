@@ -986,8 +986,16 @@ def normalize_instrument_eligibility(
             leverage_values = config.get("leverageValues")
             if not isinstance(settlement, str) or not settlement.strip():
                 raise EtoroAPIError("settlementType ausente en leverage config")
-            if not isinstance(direction, str) or direction not in {"LONG", "SHORT"}:
-                raise EtoroAPIError("direction inválida en leverage config")
+            if not isinstance(direction, str):
+                raise EtoroAPIError(
+                    f"direction inválida en leverage config: {direction!r} "
+                    f"({type(direction).__name__})"
+                )
+            normalized_direction = direction.strip().upper()
+            if normalized_direction not in {"LONG", "SHORT"}:
+                raise EtoroAPIError(
+                    f"direction inválida en leverage config: {direction!r}"
+                )
             if not isinstance(leverage_values, list) or not leverage_values:
                 raise EtoroAPIError("leverageValues ausente en leverage config")
             if any(
@@ -1031,7 +1039,9 @@ def normalize_instrument_eligibility(
                     if not minimum <= default <= maximum:
                         raise EtoroAPIError(f"Rangos {prefix} inconsistentes")
 
-            validated_configs.append(dict(config))
+            normalized_config = dict(config)
+            normalized_config["direction"] = normalized_direction
+            validated_configs.append(normalized_config)
 
         normalized[instrument_id] = EtoroInstrumentEligibility(
             instrument_id=instrument_id,
