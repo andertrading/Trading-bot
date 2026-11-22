@@ -227,6 +227,8 @@ class TestPortfolio(unittest.TestCase):
             "entry_price_quote": 100.0,
             "quote_to_usd": 1.0,
             "position_notional_usd": 100.0,
+            "cash_required_usd": 102,
+            "costs_per_unit_quote": 0.0,
             "available_capital_usd": 1000.0,
             "total_reserved_risk_usd": 10.0,
         }
@@ -273,6 +275,8 @@ class TestPortfolio(unittest.TestCase):
             "entry_price_quote": 100.0,
             "quote_to_usd": 1.0,
             "position_notional_usd": 1000.0,
+            "cash_required_usd": 1002,
+            "costs_per_unit_quote": 0.0,
             "available_capital_usd": 500.0,
             "total_reserved_risk_usd": 10.0,
         }
@@ -298,6 +302,8 @@ class TestPortfolio(unittest.TestCase):
             "entry_price_quote": 100.0,
             "quote_to_usd": 1.0,
             "position_notional_usd": 100.0,
+            "cash_required_usd": 102,
+            "costs_per_unit_quote": 0.0,
             "available_capital_usd": 1000.0,
             "total_reserved_risk_usd": 10.0,
         }
@@ -323,6 +329,8 @@ class TestPortfolio(unittest.TestCase):
             "entry_price_quote": 100.0,
             "quote_to_usd": 1.0,
             "position_notional_usd": 100.0,
+            "cash_required_usd": 101,
+            "costs_per_unit_quote": 0.0,
             "available_capital_usd": 1000.0,
             "total_reserved_risk_usd": 10.0,
         }
@@ -347,6 +355,8 @@ class TestPortfolio(unittest.TestCase):
             "entry_price_quote": 100.0,
             "quote_to_usd": 1.0,
             "position_notional_usd": 100.0,
+            "cash_required_usd": 100,
+            "costs_per_unit_quote": 0.0,
             "available_capital_usd": 1000.0,
             "total_reserved_risk_usd": 5.0,
         }
@@ -370,6 +380,8 @@ class TestPortfolio(unittest.TestCase):
             "entry_price_quote": 100.0,
             "quote_to_usd": 1.0,
             "position_notional_usd": 100.0,
+            "cash_required_usd": 100,
+            "costs_per_unit_quote": 0.0,
             "available_capital_usd": 1000.0,
             "total_reserved_risk_usd": 5.0,
         }
@@ -394,6 +406,8 @@ class TestPortfolio(unittest.TestCase):
             "entry_price_quote": 100.0,
             "quote_to_usd": 1.0,
             "position_notional_usd": 100.0,
+            "cash_required_usd": 102,
+            "costs_per_unit_quote": 0.0,
             "available_capital_usd": 1000.0,
             "total_reserved_risk_usd": 7.0,
         }
