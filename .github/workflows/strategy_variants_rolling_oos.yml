@@ -11,6 +11,7 @@ on:
       - research/mtf-daily-price-confirmation-20261122
       - research/etoro-stock-fee-range-20261122
       - research/mtf-asset-class-cost-isolation-20261122
+      - research/daily-swing-pullback-20261122
 
 permissions:
   contents: read

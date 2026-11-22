@@ -12,6 +12,7 @@ from strategy_research import (
     _portfolio_allocated_cost_trades,
     _net_portfolio_cost_scenarios,
     mtf_daily_price_confirmed_pullback,
+    daily_swing_trend_pullback,
     _asset_class_universes,
 )
 
@@ -52,6 +53,54 @@ class TestDailyPriceConfirmedMtfStrategy(unittest.TestCase):
         }])
         result = mtf_daily_price_confirmed_pullback(data, "AAPL", "1d")
         self.assertEqual(result["action"], "NO TRADE")
+
+
+class TestDailySwingTrendPullback(unittest.TestCase):
+
+    def test_daily_swing_accepts_completed_daily_pullback_reclaim(self):
+        data = pd.DataFrame([
+            {
+                "Close": 99.0, "Low": 98.5, "EMA20": 100.0,
+                "EMA50": 95.0, "EMA200": 90.0, "RSI": 48.0,
+                "MACD": 0.2, "MACD_SIGNAL": 0.3,
+                "ATR": 2.0, "ATR_PERCENT": 2.0,
+            },
+            {
+                "Close": 102.0, "Low": 100.0, "EMA20": 101.0,
+                "EMA50": 96.0, "EMA200": 90.5, "RSI": 54.0,
+                "MACD": 0.5, "MACD_SIGNAL": 0.4,
+                "ATR": 2.0, "ATR_PERCENT": 2.0,
+            },
+        ])
+        result = daily_swing_trend_pullback(data, "AAPL", "1d", index=1)
+        self.assertEqual(result["action"], "BUY CANDIDATE")
+        self.assertEqual(result["timeframe"], "1d")
+        self.assertFalse(result["tradable"])
+        self.assertFalse(result["validated"])
+
+    def test_daily_swing_rejects_intraday_and_weak_trend(self):
+        data = pd.DataFrame([
+            {
+                "Close": 99.0, "Low": 98.5, "EMA20": 100.0,
+                "EMA50": 95.0, "EMA200": 90.0, "RSI": 48.0,
+                "MACD": 0.2, "MACD_SIGNAL": 0.3,
+                "ATR": 2.0, "ATR_PERCENT": 2.0,
+            },
+            {
+                "Close": 102.0, "Low": 100.0, "EMA20": 101.0,
+                "EMA50": 89.0, "EMA200": 90.5, "RSI": 54.0,
+                "MACD": 0.5, "MACD_SIGNAL": 0.4,
+                "ATR": 2.0, "ATR_PERCENT": 2.0,
+            },
+        ])
+        self.assertEqual(
+            daily_swing_trend_pullback(data, "AAPL", "15m", index=1)["action"],
+            "NO TRADE",
+        )
+        self.assertEqual(
+            daily_swing_trend_pullback(data, "AAPL", "1d", index=1)["action"],
+            "NO TRADE",
+        )
 
 
 class TestCommonCalendarOutOfSampleSplit(unittest.TestCase):
