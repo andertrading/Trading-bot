@@ -263,27 +263,15 @@ def run_audit(
         if item is not None:
             resolved[symbol] = item
 
+    # Account-specific trading eligibility is intentionally not queried.
+    # The virtual simulator must not depend on the user's real eToro account.
     eligibility_valid = False
-    eligibility_status = "NOT_CHECKED"
+    eligibility_status = "NOT_IN_SCOPE"
+
     quotes_valid = False
     quotes_status = "NOT_CHECKED"
     if resolved and len(resolved) == len(enabled_assets):
         instrument_ids = [item["instrumentId"] for item in resolved.values()]
-        try:
-            eligibility = client.get_validated_instrument_eligibility(
-                instrument_ids,
-                currency="USD",
-            )
-            eligibility_valid = (
-                set(eligibility) == set(instrument_ids)
-                and all(item.supports_long for item in eligibility.values())
-            )
-            eligibility_status = (
-                "VALIDATED" if eligibility_valid else "LONG_NOT_SUPPORTED_OR_INCOMPLETE"
-            )
-        except Exception as exc:
-            eligibility_valid = False
-            eligibility_status = _resolution_error_status(exc)
         try:
             client.get_realtime_quotes(
                 instrument_ids,
@@ -316,7 +304,6 @@ def run_audit(
     ]
     overall = (
         len(resolved) == len(enabled_assets)
-        and eligibility_valid
         and quotes_valid
     )
     return {
