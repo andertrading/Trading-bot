@@ -240,6 +240,76 @@ class TestPortfolio(unittest.TestCase):
         self.assertAlmostEqual(result["proposed_risk_usd"], 10.0)
         self.assertFalse(result["live_execution_authorized"])
 
+    def test_sized_trade_admission_rejects_missing_cash_evidence(self):
+        from portfolio import can_add_sized_trade
+
+        sizing = {
+            "status": "SIMULACION_NO_VALIDADA",
+            "validated": False,
+            "risk_amount_usd": 10.0,
+            "position_risk_usd": 8.0,
+            "fixed_costs_usd": 2.0,
+            "total_reserved_risk_usd": 10.0,
+        }
+        result = can_add_sized_trade(
+            sizing,
+            open_positions=[],
+            positions_confirmed=True,
+            capital_usd=1000,
+        )
+        self.assertFalse(result["allowed"])
+        self.assertIn("nominal", result["reason"])
+
+    def test_sized_trade_admission_rejects_nominal_above_available_cash(self):
+        from portfolio import can_add_sized_trade
+
+        sizing = {
+            "status": "SIMULACION_NO_VALIDADA",
+            "validated": False,
+            "risk_amount_usd": 10.0,
+            "position_risk_usd": 8.0,
+            "fixed_costs_usd": 2.0,
+            "position_size": 10.0,
+            "entry_price_quote": 100.0,
+            "quote_to_usd": 1.0,
+            "position_notional_usd": 1000.0,
+            "available_capital_usd": 500.0,
+            "total_reserved_risk_usd": 10.0,
+        }
+        result = can_add_sized_trade(
+            sizing,
+            open_positions=[],
+            positions_confirmed=True,
+            capital_usd=1000,
+        )
+        self.assertFalse(result["allowed"])
+        self.assertIn("efectivo disponible", result["reason"])
+
+    def test_sized_trade_admission_rejects_inconsistent_reported_notional(self):
+        from portfolio import can_add_sized_trade
+
+        sizing = {
+            "status": "SIMULACION_NO_VALIDADA",
+            "validated": False,
+            "risk_amount_usd": 10.0,
+            "position_risk_usd": 8.0,
+            "fixed_costs_usd": 2.0,
+            "position_size": 2.0,
+            "entry_price_quote": 100.0,
+            "quote_to_usd": 1.0,
+            "position_notional_usd": 100.0,
+            "available_capital_usd": 1000.0,
+            "total_reserved_risk_usd": 10.0,
+        }
+        result = can_add_sized_trade(
+            sizing,
+            open_positions=[],
+            positions_confirmed=True,
+            capital_usd=1000,
+        )
+        self.assertFalse(result["allowed"])
+        self.assertIn("no cuadra", result["reason"])
+
     def test_sized_trade_admission_blocks_when_fees_push_over_aggregate_limit(self):
         from portfolio import can_add_sized_trade
 
