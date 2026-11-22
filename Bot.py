@@ -42,6 +42,7 @@ from config import (
 )
 
 from data_engine import (
+    PROVIDER_MAP,
     download_data,
     get_data_timestamp,
     is_data_fresh,
@@ -1308,6 +1309,19 @@ def analyze_asset(asset, timeframe, include_paper_bars=False):
     )
 
     try:
+        if (
+            timeframe == "1d"
+            and PROVIDER_MAP.get(asset) == "twelvedata"
+            and ASSETS.get(asset, {}).get(
+                "twelvedata_daily_adjustment_independently_verified"
+            ) is not True
+        ):
+            return no_trade(
+                asset,
+                timeframe,
+                "Escaneo diario omitido: el ajuste de splits de Twelve Data no está verificado independientemente; no se solicita histórico",
+            )
+
         logger.info(
             "DATA DOWNLOAD START | %s | %s",
             asset,

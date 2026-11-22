@@ -2531,11 +2531,18 @@ def _attach_market_data_metadata(dataframe, asset, interval):
     dataframe.attrs["price_adjustment_policy"] = policy
 
     if provider == "twelvedata" and interval == "1d":
-        # adjust=splits is requested and documented, but this is not empirical
-        # reconciliation against independent corporate-action factors.
-        dataframe.attrs["price_adjustment_verified"] = False
+        # This flag may only be enabled for an asset after independent
+        # corporate-action reconciliation has been completed and recorded.
+        independently_verified = (
+            (_asset_config(asset) or {}).get(
+                "twelvedata_daily_adjustment_independently_verified"
+            ) is True
+        )
+        dataframe.attrs["price_adjustment_verified"] = independently_verified
         dataframe.attrs["price_adjustment_verification_status"] = (
-            "REQUESTED_NOT_INDEPENDENTLY_VERIFIED"
+            "INDEPENDENTLY_VERIFIED"
+            if independently_verified
+            else "REQUESTED_NOT_INDEPENDENTLY_VERIFIED"
         )
     elif provider == "twelvedata" and interval == "15m":
         dataframe.attrs["price_adjustment_verified"] = True

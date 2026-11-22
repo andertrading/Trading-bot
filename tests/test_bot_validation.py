@@ -650,5 +650,29 @@ class TestBotValidation(unittest.TestCase):
         self.assertIn("CONFIRMA COSTES", messages[1])
 
 
+
+class TestTwelveDataDailyRequestSuppression(unittest.TestCase):
+
+    @patch("Bot.download_data")
+    def test_unverified_daily_twelvedata_is_skipped_before_api_request(
+        self,
+        mock_download,
+    ):
+        result = Bot.analyze_asset("TSLA", "1d")
+        mock_download.assert_not_called()
+        self.assertEqual(result["action"], "NO TRADE")
+        self.assertIn("no se solicita histórico", result["reason"])
+
+    @patch("Bot.download_data", return_value=None)
+    def test_manual_m15_lab_still_requests_twelvedata(
+        self,
+        mock_download,
+    ):
+        result = Bot.analyze_asset("TSLA", "15m")
+        mock_download.assert_called_once_with("TSLA", "15m")
+        self.assertEqual(result["action"], "NO TRADE")
+
+
+
 if __name__ == "__main__":
     unittest.main()
