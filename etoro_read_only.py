@@ -447,7 +447,11 @@ def normalize_realtime_quotes(
         age_seconds = (now_utc - quote_time).total_seconds()
         quote_type = "realtime"
         if age_seconds < -5:
-            raise EtoroAPIError(f"Cotización futura para instrumento {instrument_id}")
+            raise EtoroAPIError(
+                f"Cotización futura para instrumento {instrument_id}: "
+                f"timestamp={quote_time.isoformat()}, "
+                f"adelantada_segundos={-age_seconds:.3f}"
+            )
         if age_seconds > max_age_seconds:
             calendar_name = (asset_calendars or {}).get(instrument_id)
             if not calendar_name or calendar_name == "24/7":
@@ -986,8 +990,16 @@ def normalize_instrument_eligibility(
             leverage_values = config.get("leverageValues")
             if not isinstance(settlement, str) or not settlement.strip():
                 raise EtoroAPIError("settlementType ausente en leverage config")
-            if not isinstance(direction, str) or direction not in {"LONG", "SHORT"}:
-                raise EtoroAPIError("direction inválida en leverage config")
+            if not isinstance(direction, str):
+                raise EtoroAPIError(
+                    f"direction inválida en leverage config: {direction!r} "
+                    f"({type(direction).__name__})"
+                )
+            normalized_direction = direction.strip().upper()
+            if normalized_direction not in {"LONG", "SHORT"}:
+                raise EtoroAPIError(
+                    f"direction inválida en leverage config: {direction!r}"
+                )
             if not isinstance(leverage_values, list) or not leverage_values:
                 raise EtoroAPIError("leverageValues ausente en leverage config")
             if any(
@@ -1031,7 +1043,9 @@ def normalize_instrument_eligibility(
                     if not minimum <= default <= maximum:
                         raise EtoroAPIError(f"Rangos {prefix} inconsistentes")
 
-            validated_configs.append(dict(config))
+            normalized_config = dict(config)
+            normalized_config["direction"] = normalized_direction
+            validated_configs.append(normalized_config)
 
         normalized[instrument_id] = EtoroInstrumentEligibility(
             instrument_id=instrument_id,

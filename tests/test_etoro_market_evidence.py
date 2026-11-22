@@ -113,6 +113,48 @@ class MarketEvidenceTests(unittest.TestCase):
         self.assertEqual(report["assets"]["AAPL"]["hypothetical_open_cost"]["status"], "SKIPPED")
 
 
+    def test_v1_exact_symbol_search_fallback_resolves_etf_without_fuzzy_matching(self):
+        class V1FallbackClient(FakeMarketEvidenceClient):
+            def __init__(self):
+                super().__init__()
+                self.fallback_filters = []
+
+            def search_instrument_by_symbol(self, symbol):
+                raise EtoroAPIError("eToro devolvió HTTP 404")
+
+            def search_instruments(self, filters):
+                self.fallback_filters.append(dict(filters))
+                return EtoroResponse({
+                    "items": [{
+                        "instrumentId": 101,
+                        "internalSymbolFull": "CSPX",
+                        "displayname": "iShares Core S&P 500 UCITS ETF",
+                        "instrumentType": "ETFs",
+                        "isCurrentlyTradable": True,
+                        "isActiveInPlatform": True,
+                        "isBuyEnabled": True,
+                        "isDelisted": False,
+                    }],
+                    "totalItems": 1,
+                }, 200, {})
+
+        client = V1FallbackClient()
+        report = collect_market_evidence(
+            client,
+            symbols={"CSPX": {"market_calendar": "XLON", "type": "ETF"}},
+            now_utc=datetime(2026, 11, 22, 12, 0, tzinfo=timezone.utc),
+        )
+
+        self.assertEqual(client.fallback_filters, [{"internalSymbolFull": "CSPX"}])
+        self.assertEqual(report["summary"]["resolved_instruments"], 1)
+        self.assertEqual(
+            report["assets"]["CSPX"]["instrument"]["symbol"], "CSPX"
+        )
+        self.assertFalse(any(
+            "instrument_resolution" in error
+            for error in report["assets"]["CSPX"]["errors"]
+        ))
+
     def test_instrument_type_mismatch_blocks_quote_and_cost_capture(self):
         class WrongTypeClient(FakeMarketEvidenceClient):
             def search_instrument_by_symbol(self, symbol):
@@ -166,6 +208,38 @@ class MarketEvidenceTests(unittest.TestCase):
             self.assertIsNone(report["assets"][asset]["quote"])
         self.assertEqual(client.quote_requests, 0)
         self.assertEqual(client.cost_payloads, [])
+
+    def test_eligibility_failure_isolated_to_affected_instrument(self):
+        class OneInstrumentFailureClient(FakeMarketEvidenceClient):
+            def __init__(self):
+                super().__init__()
+                self.eligibility_requests = []
+
+            def get_validated_instrument_eligibility(self, ids):
+                self.eligibility_requests.append(list(ids))
+                if ids == [101]:
+                    raise EtoroAPIError("direction inválida en leverage config: 'BUY_SIDE'")
+                return super().get_validated_instrument_eligibility(ids)
+
+        client = OneInstrumentFailureClient()
+        report = collect_market_evidence(
+            client,
+            symbols={
+                "AAPL": {"market_calendar": "XNYS", "type": "STOCK"},
+                "BTC": {"market_calendar": "24/7", "type": "CRYPTO"},
+            },
+            now_utc=datetime(2026, 11, 22, 12, 0, tzinfo=timezone.utc),
+        )
+
+        self.assertEqual(client.eligibility_requests, [[101], [102]])
+        self.assertEqual(report["summary"]["status"], "PARTIAL")
+        self.assertIsNone(report["assets"]["AAPL"]["eligibility"])
+        self.assertIn(
+            "direction inválida",
+            " ".join(report["assets"]["AAPL"]["errors"]),
+        )
+        self.assertIsNotNone(report["assets"]["BTC"]["eligibility"])
+        self.assertIsNotNone(report["assets"]["BTC"]["hypothetical_open_cost"])
 
     def test_missing_eligibility_record_marks_capture_partial(self):
         client = FakeMarketEvidenceClient()

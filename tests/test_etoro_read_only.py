@@ -585,7 +585,7 @@ class RealtimeQuoteValidationTests(unittest.TestCase):
             self.response.data["results"][0],
             date="2026-11-21T12:00:10Z",
         )]}
-        with self.assertRaises(EtoroAPIError):
+        with self.assertRaisesRegex(EtoroAPIError, "adelantada_segundos"):
             normalize_realtime_quotes(EtoroResponse(future, 200, {}), [101], self.now)
 
     def test_closed_exchange_accepts_only_quote_from_last_completed_session(self):
@@ -915,6 +915,38 @@ class InstrumentEligibilityTests(unittest.TestCase):
         invalid = dict(self.response.data, eligibilities=[bad_config])
         with self.assertRaises(EtoroAPIError):
             normalize_instrument_eligibility(EtoroResponse(invalid, 200, {}), [101])
+
+    def test_direction_enum_is_normalized_case_insensitively(self):
+        for direction in ("LONG", "Long", "long", " SHORT "):
+            with self.subTest(direction=direction):
+                item = dict(self.item)
+                item["leverageConfigs"] = [dict(
+                    self.item["leverageConfigs"][0],
+                    direction=direction,
+                )]
+                response = EtoroResponse(
+                    dict(self.response.data, eligibilities=[item]), 200, {}
+                )
+                result = normalize_instrument_eligibility(response, [101])
+                expected = "SHORT" if direction.strip().upper() == "SHORT" else "LONG"
+                self.assertEqual(
+                    result[101].leverage_configs[0]["direction"], expected
+                )
+                self.assertEqual(
+                    result[101].supports_long, expected == "LONG"
+                )
+
+    def test_unsupported_direction_error_includes_safe_raw_enum_value(self):
+        item = dict(self.item)
+        item["leverageConfigs"] = [dict(
+            self.item["leverageConfigs"][0],
+            direction="BUY_SIDE",
+        )]
+        response = EtoroResponse(
+            dict(self.response.data, eligibilities=[item]), 200, {}
+        )
+        with self.assertRaisesRegex(EtoroAPIError, "BUY_SIDE"):
+            normalize_instrument_eligibility(response, [101])
 
     def test_non_openable_instrument_can_be_reported_without_leverage_configs(self):
         item = dict(

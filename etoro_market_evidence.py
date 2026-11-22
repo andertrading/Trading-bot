@@ -12,6 +12,7 @@ from config import ASSETS
 from etoro_read_only import (
     EtoroAPIError, EtoroConfigurationError, EtoroCostEstimate,
     EtoroInstrumentEligibility, EtoroQuote, EtoroReadOnlyClient,
+    resolve_unique_instrument,
     resolve_unique_instrument_by_symbol,
 )
 
@@ -19,6 +20,7 @@ class EtoroMarketEvidenceClient(EtoroReadOnlyClient):
     """Narrower client: only market search, quotes, eligibility and hypothetical open costs."""
     MARKET_ONLY_ENDPOINTS = frozenset({
         ("GET", "/api/v2/market-data/instruments"),
+        ("GET", "/api/v1/market-data/search"),
         ("GET", "/api/v1/market-data/instruments/rates"),
         ("POST", "/api/v2/trading/info/costs"),
         ("POST", "/api/v2/trading/info/eligibility"),
@@ -38,10 +40,26 @@ def _instrument_type_matches(configured_type: Any, etoro_type: Any) -> bool:
     )
     accepted = {
         "STOCK": {"stock", "stocks"},
-        "ETF": {"etf", "exchangetradedfund"},
+        "ETF": {"etf", "etfs", "exchangetradedfund"},
         "CRYPTO": {"crypto", "cryptocurrency"},
     }
     return actual in accepted.get(configured, set())
+
+
+def _resolve_instrument(client: Any, symbol: str) -> Mapping[str, Any]:
+    """Resolve an exact eToro symbol, falling back to the documented v1 search."""
+    try:
+        response = client.search_instrument_by_symbol(symbol)
+        return resolve_unique_instrument_by_symbol(response, symbol)
+    except EtoroAPIError as exc:
+        message = str(exc)
+        # The v2 exact-symbol endpoint may not index every listed ETF. Retry
+        # only a not-found/empty-result case through eToro's v1 exact filter;
+        # never fuzzy-match or silently substitute another instrument.
+        if "HTTP 404" not in message and "encontrados: 0" not in message:
+            raise
+        response = client.search_instruments({"internalSymbolFull": symbol})
+        return resolve_unique_instrument(response, symbol)
 
 
 def _real_unleveraged_long_config(item: EtoroInstrumentEligibility) -> Mapping[str, Any] | None:
@@ -83,8 +101,7 @@ def collect_market_evidence(client: Any, *, symbols: Mapping[str, Mapping[str, A
                   "quote": None, "hypothetical_open_cost": None, "errors": []}
         report["assets"][asset] = record
         try:
-            response = client.search_instrument_by_symbol(asset)
-            instrument = resolve_unique_instrument_by_symbol(response, asset)
+            instrument = _resolve_instrument(client, asset)
             expected_type = symbols[asset].get("type")
             if not _instrument_type_matches(
                 expected_type, instrument.get("instrumentType")
@@ -123,21 +140,31 @@ def collect_market_evidence(client: Any, *, symbols: Mapping[str, Mapping[str, A
             if asset not in duplicate_assets
         }
 
-    ids = [item["instrumentId"] for item in resolved.values()]
+    # Isolate eligibility parsing per instrument. A single malformed
+    # leverage configuration must not erase valid records for every other
+    # instrument in the batch.
     eligibility_by_id = {}
-    if ids:
+    for asset, instrument in resolved.items():
+        iid = instrument["instrumentId"]
         try:
-            eligibility_by_id = client.get_validated_instrument_eligibility(ids)
+            eligibility = client.get_validated_instrument_eligibility([iid]).get(iid)
+            if eligibility is None:
+                raise EtoroAPIError(
+                    "La respuesta no contiene la elegibilidad del instrumento solicitado"
+                )
+            eligibility_by_id[iid] = eligibility
         except Exception as exc:
-            message = f"eligibility_batch: {type(exc).__name__}: {exc}"
-            for asset in resolved:
-                report["assets"][asset]["errors"].append(message)
+            report["assets"][asset]["errors"].append(
+                f"eligibility: {type(exc).__name__}: {exc}"
+            )
 
     for asset, instrument in resolved.items():
         record = report["assets"][asset]
         iid = instrument["instrumentId"]
         eligibility = eligibility_by_id.get(iid)
-        if eligibility is None:
+        if eligibility is None and not any(
+            error.startswith("eligibility:") for error in record["errors"]
+        ):
             record["errors"].append(
                 "eligibility: no validated eligibility record returned for resolved instrument"
             )
