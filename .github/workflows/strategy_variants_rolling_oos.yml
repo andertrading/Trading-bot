@@ -8,6 +8,7 @@ on:
       - research/broker-cost-sensitivity-20261121
       - research/history-calendar-audit-20261121
       - research/net-stop-risk-accounting-20261121
+      - research/mtf-daily-price-confirmation-20261122
 
 permissions:
   contents: read
