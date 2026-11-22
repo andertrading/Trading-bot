@@ -152,6 +152,25 @@ class PaperForwardTests(unittest.TestCase):
         self.assertEqual(trade["exit_reason"], "TIME_EXIT")
         self.assertEqual(trade["exit_fill_price"], 101.0)
 
+    def test_stop_touch_before_entry_invalidates_waiting_trade(self):
+        item = signal()
+        process_signal_bar(
+            self.state, item,
+            bar("2026-11-22T10:15:00+00:00", 99.5, 99.8, 98.8, 99.2),
+        )
+        self.assertEqual(
+            self.state["trades"]["s1"]["status"],
+            "NO_FILL_STOP_TOUCHED",
+        )
+        process_signal_bar(
+            self.state, item,
+            bar("2026-11-22T10:30:00+00:00", 99.8, 100.5, 99.5, 100.2),
+        )
+        self.assertEqual(
+            self.state["trades"]["s1"]["status"],
+            "NO_FILL_STOP_TOUCHED",
+        )
+
     def test_zero_provisional_risk_never_creates_a_paper_fill(self):
         process_signal_bar(
             self.state, signal(),
