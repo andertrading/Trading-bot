@@ -67,6 +67,23 @@ For a long crypto position with a 1% fee on entry and 1% on exit, assuming the e
 
 This is a sensitivity calculation, not a measured strategy result. It demonstrates why the crypto fee model can consume a large share of the stop-risk budget when stops are tight. Actual spreads, slippage, execution type, and the trade's realized exit price can make the final result different.
 
+## Historical bid/ask data availability check
+
+A documentation-level check of the providers already used by the project did not identify a ready-made historical bid/ask archive:
+
+- Twelve Data's `/time_series` documentation describes OHLC time-series values. Its WebSocket documentation shows bid/ask fields only "where available"; it does not establish a historical bid/ask archive for this universe.
+- EODHD documents delayed quote snapshots with bid/ask for US equities and live quote WebSocket feeds. Its historical `/ticks` endpoint is described as individual trade executions, not historical bid/ask quote updates.
+- The current repository's EODHD/Yahoo/Twelve Data OHLC pipeline therefore cannot be assumed to contain historical executable bid/ask prices.
+
+References:
+- https://twelvedata.com/docs
+- https://twelvedata.com/docs/websocket/websocket-getting-started
+- https://eodhistoricaldata.github.io/EODHD-openapi/
+- https://eodhd.com/financial-apis/new-real-time-data-api-websockets
+- https://eodhd.com/financial-apis/us-stock-market-tick-data-api
+
+Practical consequence: collecting time-stamped bid/ask snapshots from an available quote feed (and the eToro order ticket) can build forward evidence for paper trading, but it cannot reconstruct the missing historical spread series for the prior two-year backtest. Do not purchase or switch data plans until coverage, historical depth, quote semantics, and total cost have been checked for all relevant instruments.
+
 ## Required integration design
 
 ### 1. One source of truth
