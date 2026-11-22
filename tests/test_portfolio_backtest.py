@@ -223,6 +223,39 @@ class TestPortfolioBacktest(unittest.TestCase):
             "limite_de_riesgo_o_capital_disponible",
         )
 
+    def test_reports_realized_loss_beyond_planned_gross_stop_risk(self):
+        trade = self.make_trade(result_R=-1.5)
+        result = simulate_portfolio([trade], capital_usd=1000.0)
+        row = result["trades"][0]
+        summary = result["summary"]
+
+        self.assertAlmostEqual(row["planned_gross_stop_risk_usd"], 5.0)
+        self.assertAlmostEqual(row["realized_pnl_usd"], -7.5)
+        self.assertTrue(row["exceeded_planned_gross_stop_risk"])
+        self.assertAlmostEqual(
+            row["loss_beyond_planned_gross_stop_risk_usd"], 2.5
+        )
+        self.assertEqual(summary["trades_exceeding_planned_gross_stop_risk"], 1)
+        self.assertAlmostEqual(
+            summary["total_loss_beyond_planned_gross_stop_risk_usd"], 2.5
+        )
+        self.assertAlmostEqual(
+            summary["max_loss_beyond_planned_gross_stop_risk_usd"], 2.5
+        )
+
+    def test_loss_at_exact_planned_stop_does_not_count_as_excess(self):
+        result = simulate_portfolio(
+            [self.make_trade(result_R=-1.0)], capital_usd=1000.0
+        )
+        row = result["trades"][0]
+        self.assertFalse(row["exceeded_planned_gross_stop_risk"])
+        self.assertEqual(
+            row["loss_beyond_planned_gross_stop_risk_usd"], 0.0
+        )
+        self.assertEqual(
+            result["summary"]["trades_exceeding_planned_gross_stop_risk"], 0
+        )
+
     def test_empty_portfolio_does_not_claim_net_performance(self):
         result = simulate_portfolio([], capital_usd=1000.0)
         summary = result["summary"]
