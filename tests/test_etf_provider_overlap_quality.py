@@ -111,9 +111,11 @@ class TestEtfProviderOverlapQuality(unittest.TestCase):
             }],
         }
         search_response = Mock()
+        search_response.status_code = 200
         search_response.json.return_value = search_payload
         search_response.raise_for_status.return_value = None
         series_response = Mock()
+        series_response.status_code = 200
         series_response.json.return_value = series_payload
         series_response.raise_for_status.return_value = None
         session = Mock()
