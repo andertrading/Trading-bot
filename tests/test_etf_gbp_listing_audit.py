@@ -47,7 +47,11 @@ class TestEtfGbpListingAudit(unittest.TestCase):
         self.assertEqual(result["fields"]["Close"]["max_abs_pct"], 0.0)
 
     def test_missing_primary_session_is_candidate_only_not_approved(self):
-        usd = make_frame([[730.0, 735.0, 729.0, 734.0]])
+        usd = pd.DataFrame(
+            [[730.0, 735.0, 729.0, 734.0]],
+            columns=["Open", "High", "Low", "Close"],
+            index=pd.to_datetime(["2025-10-27"]),
+        )
         alternate = make_frame([
             [721.0, 728.0, 720.0, 727.0],
             [730.0, 735.0, 729.0, 734.0],
