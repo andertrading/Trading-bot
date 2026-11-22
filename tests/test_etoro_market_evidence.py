@@ -10,6 +10,7 @@ from etoro_read_only import EtoroAPIError, EtoroCostEstimate, EtoroInstrumentEli
 class FakeMarketEvidenceClient:
     def __init__(self):
         self.cost_payloads = []
+        self.quote_requests = 0
 
     def search_instrument_by_symbol(self, symbol):
         iid = {"AAPL": 101, "BTC": 102}[symbol]
@@ -33,6 +34,7 @@ class FakeMarketEvidenceClient:
         return {101: item(101, "AAPL", "REAL"), 102: item(102, "BTC", "CFD")}
 
     def get_realtime_quotes(self, ids, now, asset_calendars=None):
+        self.quote_requests += 1
         iid = ids[0]
         return {iid: EtoroQuote(iid, Decimal("99"), Decimal("101"), now, "realtime")}
 
@@ -110,6 +112,33 @@ class MarketEvidenceTests(unittest.TestCase):
         self.assertEqual(len(client.cost_payloads), 0)
         self.assertEqual(report["assets"]["AAPL"]["hypothetical_open_cost"]["status"], "SKIPPED")
 
+
+    def test_duplicate_instrument_ids_block_both_configured_assets(self):
+        class DuplicateInstrumentClient(FakeMarketEvidenceClient):
+            def search_instrument_by_symbol(self, symbol):
+                response = super().search_instrument_by_symbol(symbol)
+                response.data["results"][0]["instrumentId"] = 101
+                return response
+
+        client = DuplicateInstrumentClient()
+        report = collect_market_evidence(
+            client,
+            symbols={"AAPL": {"market_calendar": "XNYS"},
+                     "BTC": {"market_calendar": "24/7"}},
+            now_utc=datetime(2026, 11, 22, 12, 0, tzinfo=timezone.utc),
+        )
+
+        self.assertEqual(report["summary"]["status"], "PARTIAL")
+        self.assertEqual(report["summary"]["resolved_instruments"], 0)
+        for asset in ("AAPL", "BTC"):
+            self.assertTrue(any(
+                "duplicate eToro instrument ID 101" in error
+                for error in report["assets"][asset]["errors"]
+            ))
+            self.assertIsNone(report["assets"][asset]["eligibility"])
+            self.assertIsNone(report["assets"][asset]["quote"])
+        self.assertEqual(client.quote_requests, 0)
+        self.assertEqual(client.cost_payloads, [])
 
     def test_missing_eligibility_record_marks_capture_partial(self):
         client = FakeMarketEvidenceClient()
