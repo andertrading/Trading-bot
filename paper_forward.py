@@ -83,6 +83,79 @@ def _open_notional(state: dict) -> float:
     )
 
 
+def paper_portfolio_snapshot(
+    state: dict,
+    expected_initial_capital_usd: float = DEFAULT_INITIAL_CAPITAL_USD,
+) -> dict:
+    """Return a validated cash/risk snapshot from the isolated paper ledger.
+
+    Gross-only realized gains are not allowed to increase the risk/cash base
+    above the original reference capital while trading costs remain unverified.
+    Open positions must carry both reserved risk and notional evidence.
+    """
+    _validate_state(state)
+    if state.get("execution_mode") != "PAPER_ONLY" or state.get("currency") != "USD":
+        raise ValueError("paper portfolio must be PAPER_ONLY and denominated in USD")
+
+    expected_capital = _number(
+        expected_initial_capital_usd, "expected_initial_capital_usd"
+    )
+    initial_capital = _number(
+        state.get("initial_capital_usd"), "initial_capital_usd"
+    )
+    if not math.isclose(initial_capital, expected_capital, rel_tol=0.0, abs_tol=1e-8):
+        raise ValueError("paper portfolio initial capital does not match the configured reference")
+
+    equity = _number(state.get("equity_usd"), "equity_usd")
+    # Costs are not priced in the forward ledger yet. Never let gross gains
+    # enlarge the capital base; realized gross losses still reduce it.
+    capital_base = min(equity, initial_capital)
+
+    open_positions = []
+    open_risk_usd = 0.0
+    invested_notional_usd = 0.0
+    for signal_id, trade in state["trades"].items():
+        if not isinstance(trade, dict):
+            raise ValueError("paper trade record is invalid")
+        if trade.get("status") != "OPEN":
+            continue
+        risk_usd = _number(
+            trade.get("risk_reserved_usd"), f"{signal_id}.risk_reserved_usd"
+        )
+        notional_usd = _number(
+            trade.get("notional_usd"), f"{signal_id}.notional_usd"
+        )
+        open_risk_usd += risk_usd
+        invested_notional_usd += notional_usd
+        if not math.isfinite(open_risk_usd) or not math.isfinite(invested_notional_usd):
+            raise ValueError("paper portfolio open-position totals are invalid")
+        open_positions.append({
+            "signal_id": str(signal_id),
+            "asset": str(trade.get("asset") or ""),
+            "risk_usd": risk_usd,
+            "notional_usd": notional_usd,
+        })
+
+    available_capital_usd = capital_base - invested_notional_usd
+    if available_capital_usd < -1e-8:
+        raise ValueError("paper portfolio open notional exceeds conservative capital")
+    available_capital_usd = max(0.0, available_capital_usd)
+
+    return {
+        "execution_mode": "PAPER_ONLY",
+        "portfolio_basis": "PAPER_GROSS_CONSERVATIVE_CAPITAL",
+        "initial_capital_usd": initial_capital,
+        "equity_usd": equity,
+        "capital_usd": capital_base,
+        "open_positions": open_positions,
+        "positions_confirmed": True,
+        "current_portfolio_risk_usd": open_risk_usd,
+        "invested_notional_usd": invested_notional_usd,
+        "available_capital_usd": available_capital_usd,
+        "costs_status": state.get("costs_status", "NOT_INCLUDED_UNVERIFIED"),
+    }
+
+
 def _bar_values(bar: dict) -> tuple[datetime, float, float, float, float]:
     if not isinstance(bar, dict):
         raise ValueError("bar must be a dictionary")
