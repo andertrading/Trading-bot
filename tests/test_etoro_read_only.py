@@ -835,6 +835,32 @@ class InstrumentEligibilityTests(unittest.TestCase):
             "notFoundSymbols": [],
         }, 200, {})
 
+    def test_zero_stop_take_profit_bounds_allowed_when_feature_disabled(self):
+        config = dict(self.item["leverageConfigs"][0])
+        config["allowStopLossTakeProfit"] = False
+        for field in (
+            "minStopLossPercentage", "maxStopLossPercentage",
+            "defaultStopLossPercentage", "minTakeProfitPercentage",
+            "maxTakeProfitPercentage", "defaultTakeProfitPercentage",
+        ):
+            config[field] = 0
+        item = dict(self.item, leverageConfigs=[config])
+        response = EtoroResponse(
+            dict(self.response.data, eligibilities=[item]), 200, {}
+        )
+        result = normalize_instrument_eligibility(response, [101])
+        self.assertTrue(result[101].allow_open_position)
+        self.assertFalse(result[101].leverage_configs[0]["allowStopLossTakeProfit"])
+
+    def test_zero_percentage_rejected_when_stop_take_profit_is_enabled(self):
+        config = dict(self.item["leverageConfigs"][0], minStopLossPercentage=0)
+        item = dict(self.item, leverageConfigs=[config])
+        response = EtoroResponse(
+            dict(self.response.data, eligibilities=[item]), 200, {}
+        )
+        with self.assertRaisesRegex(EtoroAPIError, "allowStopLossTakeProfit"):
+            normalize_instrument_eligibility(response, [101])
+
     def test_complete_eligibility_is_normalized_without_inventing_permissions(self):
         result = normalize_instrument_eligibility(self.response, [101])
         self.assertIsInstance(result[101], EtoroInstrumentEligibility)
