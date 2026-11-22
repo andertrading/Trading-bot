@@ -313,7 +313,7 @@ class TestBacktestV3(unittest.TestCase):
                 backtest_v3._save_snapshot("AAPL", "AAPL", "1d", data)
                 with self.assertRaisesRegex(
                     ValueError,
-                    "no está verificado independientemente",
+                    "no tiene evidencia independiente válida",
                 ):
                     backtest_v3._load_snapshot("AAPL", "AAPL", "1d")
 
