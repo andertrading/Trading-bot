@@ -33,6 +33,14 @@ def get_json(session, url, params):
     return response.json()
 
 
+EODHD_MAX_HISTORY_DAYS = 365
+
+
+def eodhd_window_start(requested_start, end):
+    """Respect the current one-year EODHD history window without buying a plan."""
+    return max(requested_start, end - timedelta(days=EODHD_MAX_HISTORY_DAYS))
+
+
 def load_eodhd(session, asset, spec, token, start, end):
     rows = get_json(session, f"{BASE_EODHD}/eod/{spec['eodhd']}", {
         "api_token": token, "from": start.isoformat(),
@@ -655,14 +663,16 @@ def main():
     end = date.today() - timedelta(days=1)
     # Extend provider certification to the same ~5-year window used by daily backtests.
     start = end - timedelta(days=1825)
+    eodhd_start = eodhd_window_start(start, end)
     results, errors, twelvedata_errors = [], [], []
     twelvedata_token = os.environ.get("TWELVE_DATA_API_KEY", "").strip()
     print("AUDITORÍA OHLCV YAHOO/EODHD/SIX/TWELVE DATA | CSPX/CNDX | SOLO LECTURA")
-    print(f"Ventana solicitada: {start} -> {end}")
+    print(f"Ventana Yahoo/SIX: {start} -> {end}")
+    print(f"Ventana EODHD (límite actual): {eodhd_start} -> {end}")
     print("Comparación: OHLC split-adjusted, sin ajuste por dividendos; volumen separado.")
     for asset, spec in ASSETS.items():
         try:
-            eod = load_eodhd(session, asset, spec, token, start, end)
+            eod = load_eodhd(session, asset, spec, token, eodhd_start, end)
             yahoo, exchange = load_yahoo(
                 session, asset, spec, start, end,
                 symbol_key="yahoo", expected_market="london",
@@ -706,6 +716,8 @@ def main():
         "orders_or_signals_enabled": False,
         "requested_start": str(start),
         "requested_end": str(end),
+        "eodhd_requested_start": str(eodhd_start),
+        "eodhd_window_days": (end - eodhd_start).days,
         "results": results,
         "errors": errors,
         "twelvedata_errors": twelvedata_errors,
