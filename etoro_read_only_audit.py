@@ -270,19 +270,46 @@ def run_audit(
 
     quotes_valid = False
     quotes_status = "NOT_CHECKED"
+    quote_diagnostics: list[dict[str, Any]] = []
     if resolved and len(resolved) == len(enabled_assets):
         instrument_ids = [item["instrumentId"] for item in resolved.values()]
         try:
-            client.get_realtime_quotes(
+            calendars_by_id = {
+                item["instrumentId"]: enabled_assets[symbol].get("market_calendar")
+                for symbol, item in resolved.items()
+            }
+            quotes = client.get_realtime_quotes(
                 instrument_ids,
                 now_utc,
                 max_age_seconds=30,
+                asset_calendars=calendars_by_id,
+                max_closed_age_seconds=604800,
             )
             quotes_valid = True
-            quotes_status = "VALIDATED"
+            quotes_status = (
+                "VALIDATED_WITH_CLOSED_MARKETS"
+                if any(quote.quote_type == "last_session" for quote in quotes.values())
+                else "VALIDATED"
+            )
+            quote_diagnostics = [
+                {
+                    "symbol": symbol,
+                    "market_calendar": calendars_by_id[item["instrumentId"]],
+                    "quote_status": (
+                        "CLOSED_LAST_SESSION"
+                        if quotes[item["instrumentId"]].quote_type == "last_session"
+                        else "FRESH"
+                    ),
+                    "age_seconds": round(
+                        (now_utc - quotes[item["instrumentId"]].timestamp).total_seconds()
+                    ),
+                }
+                for symbol, item in resolved.items()
+            ]
         except Exception as exc:
             quotes_valid = False
             quotes_status = _resolution_error_status(exc)
+            quote_diagnostics = [{"quote_status": quotes_status}]
 
     instrument_report = [
         {
@@ -314,6 +341,7 @@ def run_audit(
         "instrument_eligibility_status": eligibility_status,
         "complete_realtime_quotes_validated": quotes_valid,
         "realtime_quotes_status": quotes_status,
+        "quote_diagnostics": quote_diagnostics,
         "portfolio_risk_admission_ready": False,
         "overall_pass": overall,
     }
