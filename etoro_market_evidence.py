@@ -30,6 +30,20 @@ class EtoroMarketEvidenceClient(EtoroReadOnlyClient):
         return super()._request(method, path, **kwargs)
 
 
+def _instrument_type_matches(configured_type: Any, etoro_type: Any) -> bool:
+    configured = str(configured_type or "").strip().upper()
+    actual = "".join(
+        character for character in str(etoro_type or "").casefold()
+        if character.isalnum()
+    )
+    accepted = {
+        "STOCK": {"stock", "stocks"},
+        "ETF": {"etf", "exchangetradedfund"},
+        "CRYPTO": {"crypto", "cryptocurrency"},
+    }
+    return actual in accepted.get(configured, set())
+
+
 def _real_unleveraged_long_config(item: EtoroInstrumentEligibility) -> Mapping[str, Any] | None:
     if not item.allow_open_position:
         return None
@@ -71,6 +85,15 @@ def collect_market_evidence(client: Any, *, symbols: Mapping[str, Mapping[str, A
         try:
             response = client.search_instrument_by_symbol(asset)
             instrument = resolve_unique_instrument_by_symbol(response, asset)
+            expected_type = symbols[asset].get("type")
+            if not _instrument_type_matches(
+                expected_type, instrument.get("instrumentType")
+            ):
+                raise EtoroAPIError(
+                    "instrument_resolution: eToro instrument type does not match "
+                    f"configured asset type ({expected_type!r} vs "
+                    f"{instrument.get('instrumentType')!r})"
+                )
             resolved[asset] = instrument
             record["instrument"] = {
                 "instrument_id": instrument["instrumentId"],
