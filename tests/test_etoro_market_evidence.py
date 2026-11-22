@@ -109,7 +109,6 @@ class MarketEvidenceTests(unittest.TestCase):
         self.assertEqual(report["summary"]["assets_with_market_closed_cost_skips"], 1)
         self.assertEqual(report["summary"]["assets_with_no_realtime_quote_skips"], 0)
         self.assertEqual(report["summary"]["assets_with_validated_open_costs"], 0)
-        self.assertEqual(report["summary"]["assets_with_no_realtime_quote_skips"], 1)
         self.assertEqual(report["summary"]["status"], "PARTIAL")
 
     def test_quote_failure_skips_hypothetical_cost_request(self):
@@ -133,6 +132,7 @@ class MarketEvidenceTests(unittest.TestCase):
         )
         self.assertEqual(client.cost_payloads, [])
         self.assertEqual(report["summary"]["assets_with_validated_open_costs"], 0)
+        self.assertEqual(report["summary"]["assets_with_no_realtime_quote_skips"], 1)
         self.assertEqual(report["summary"]["status"], "PARTIAL")
 
     def test_configured_etoro_symbol_is_used_for_exact_instrument_resolution(self):
