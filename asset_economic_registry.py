@@ -78,6 +78,14 @@ def validate_registry(registry: dict) -> None:
             raise ValueError(f"{symbol}: fee confirmation must be boolean")
         if not isinstance(item["spread"].get("confirmed"), bool):
             raise ValueError(f"{symbol}: spread confirmation must be boolean")
+        if item["spread"].get("treatment") not in {
+            None, "SEPARATE_FROM_PRICES", "EMBEDDED_IN_EXECUTION_PRICES"
+        }:
+            raise ValueError(f"{symbol}: unsupported spread treatment")
+        if item["spread"].get("evidence_scope") not in {
+            None, "CURRENT_SNAPSHOT_ONLY", "HISTORICAL_CONSERVATIVE_MODEL"
+        }:
+            raise ValueError(f"{symbol}: unsupported spread evidence scope")
         if not isinstance(item["price_basis"].get("confirmed"), bool):
             raise ValueError(f"{symbol}: price-basis confirmation must be boolean")
         if not isinstance(item["minimum_order"].get("confirmed"), bool):
@@ -144,6 +152,12 @@ def classify_registry_asset(symbol: str, registry: dict | None = None) -> dict:
         or not _valid_number(spread.get("bid_ask_bps"))
     ):
         blockers.append("observed_bid_ask_spread_evidence_missing")
+    if spread.get("treatment") not in {
+        "SEPARATE_FROM_PRICES", "EMBEDDED_IN_EXECUTION_PRICES"
+    }:
+        blockers.append("spread_treatment_unverified")
+    if spread.get("evidence_scope") != "HISTORICAL_CONSERVATIVE_MODEL":
+        blockers.append("historical_spread_model_not_validated")
 
     basis = item["price_basis"]
     if (

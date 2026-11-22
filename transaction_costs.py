@@ -405,10 +405,18 @@ def estimate_verified_registry_trade_costs(
         result["entry_commission_cost"] + result["exit_commission_cost"]
     )
 
-    spread_bps = float(item["spread"]["bid_ask_bps"])
-    result["market_spread_cost"] = (
-        total_turnover * spread_bps / 20000.0 * quote_to_account_rate
-    )
+    spread_treatment = item["spread"]["treatment"]
+    if spread_treatment == "SEPARATE_FROM_PRICES":
+        spread_bps = float(item["spread"]["bid_ask_bps"])
+        result["market_spread_cost"] = (
+            total_turnover * spread_bps / 20000.0 * quote_to_account_rate
+        )
+    elif spread_treatment == "EMBEDDED_IN_EXECUTION_PRICES":
+        result["market_spread_cost"] = 0.0
+    else:
+        # Defensive guard: classification should already block unknown values.
+        result["unpriced_costs"].append("spread_treatment_unverified")
+        return result
 
     if fx.get("required"):
         result["fx_conversion_cost"] = (
