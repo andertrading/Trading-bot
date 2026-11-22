@@ -60,6 +60,13 @@ class MarketEvidenceTests(unittest.TestCase):
         }, now_utc=now)
         self.assertEqual(report["summary"]["status"], "COMPLETE", report)
         self.assertEqual(report["assets"]["AAPL"]["quote"]["spread_absolute"], "2")
+        self.assertEqual(report["assets"]["AAPL"]["quote"]["midpoint"], "100")
+        self.assertEqual(report["assets"]["AAPL"]["quote"]["spread_bps"], "200")
+        self.assertEqual(
+            report["assets"]["AAPL"]["quote"]["spread_evidence_scope"],
+            "CURRENT_SNAPSHOT_ONLY",
+        )
+        self.assertEqual(report["assets"]["AAPL"]["quote"]["age_seconds"], 0.0)
         self.assertTrue(report["assets"]["AAPL"]["eligibility"]["supports_real_unleveraged_long"])
         self.assertEqual(report["assets"]["AAPL"]["hypothetical_open_cost"]["scope"], "HYPOTHETICAL_OPEN_ONLY")
         self.assertFalse(report["assets"]["AAPL"]["hypothetical_open_cost"]["round_trip_cost_confirmed"])
