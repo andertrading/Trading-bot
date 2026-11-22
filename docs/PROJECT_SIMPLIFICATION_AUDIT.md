@@ -422,3 +422,10 @@ CI #646 pasó en el head `62d098ac40f0607c1379038dc36b7c92c2ba1189`.
 
 
 La regresión también está cubierta: un test construye un snapshot legado con `price_adjustment_verified=True` pero sin estado de verificación independiente y confirma que el loader lo rechaza. CI #648 pasó con esta prueba incluida.
+
+
+### Supresión de llamadas diarias mientras falte evidencia
+
+El escáner diario omite los diez activos cuya fuente diaria es Twelve Data antes de llamar al proveedor, mientras no exista evidencia independiente de ajuste por splits. Así evita descargar históricos que el propio gate acabaría rechazando. La ruta manual M15 sigue disponible y continúa solicitando datos intradía en modo raw documentado.
+
+Para desbloquear un activo en el futuro no basta un booleano: `twelvedata_daily_adjustment_verification` debe contener estado `INDEPENDENTLY_VERIFIED`, una fuente HTTPS y un `verified_at` ISO-8601 con zona horaria que no esté en el futuro. La misma evidencia se adjunta a los metadatos del histórico y se valida al cargar snapshots. CI #653 pasó con estas comprobaciones.
