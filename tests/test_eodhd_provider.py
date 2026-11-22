@@ -247,7 +247,11 @@ class TestEODHDDispatch(unittest.TestCase):
         self.assertEqual(daily_etf.attrs["price_adjustment_policy"], "split_adjusted_ohlc_no_dividend_adjustment")
         self.assertEqual(daily_etf.attrs["data_provider"], "eodhd")
         self.assertTrue(intraday.attrs["price_adjustment_verified"])
-        self.assertTrue(daily_stock.attrs["price_adjustment_verified"])
+        self.assertFalse(daily_stock.attrs["price_adjustment_verified"])
+        self.assertEqual(
+            daily_stock.attrs["price_adjustment_verification_status"],
+            "REQUESTED_NOT_INDEPENDENTLY_VERIFIED",
+        )
         self.assertTrue(daily_etf.attrs["price_adjustment_verified"])
 
     def test_daily_london_etf_uses_eodhd(self):

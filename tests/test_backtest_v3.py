@@ -304,6 +304,7 @@ class TestBacktestV3(unittest.TestCase):
             "data_provider": "twelvedata",
             "price_adjustment_policy": "split_adjusted_ohlc_no_dividend_adjustment",
             "price_adjustment_verified": True,
+            "price_adjustment_verification_status": "INDEPENDENTLY_VERIFIED",
         })
         daily_metadata = backtest_v3._snapshot_metadata(
             "AAPL",
