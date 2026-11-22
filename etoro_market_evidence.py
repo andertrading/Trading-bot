@@ -127,10 +127,23 @@ def collect_market_evidence(client: Any, *, symbols: Mapping[str, Mapping[str, A
                 [iid], now_utc,
                 asset_calendars={iid: symbols[asset].get("market_calendar", "24/7")},
             )[iid]
+            midpoint = (quote.bid + quote.ask) / Decimal("2")
+            spread_absolute = quote.ask - quote.bid
+            spread_bps = (
+                spread_absolute / midpoint * Decimal("10000")
+                if midpoint > 0 else None
+            )
+            quote_age_seconds = (now_utc - quote.timestamp).total_seconds()
             record["quote"] = {
-                "bid": str(quote.bid), "ask": str(quote.ask),
-                "spread_absolute": str(quote.ask - quote.bid),
-                "timestamp": quote.timestamp.isoformat(), "quote_type": quote.quote_type,
+                "bid": str(quote.bid),
+                "ask": str(quote.ask),
+                "midpoint": str(midpoint),
+                "spread_absolute": str(spread_absolute),
+                "spread_bps": str(spread_bps) if spread_bps is not None else None,
+                "spread_evidence_scope": "CURRENT_SNAPSHOT_ONLY",
+                "timestamp": quote.timestamp.isoformat(),
+                "age_seconds": quote_age_seconds,
+                "quote_type": quote.quote_type,
             }
         except Exception as exc:
             record["errors"].append(f"quote: {type(exc).__name__}: {exc}")
