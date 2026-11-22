@@ -17,6 +17,7 @@ def signal(signal_id="s1", status="PENDING"):
         "data_timestamp": "2026-11-22T10:00:00+00:00",
         "generated_at": "2026-11-22T10:00:00+00:00",
         "expires_at": "2026-11-22T11:00:00+00:00",
+        "monitoring_expires_at": "2026-11-22T18:00:00+00:00",
         "entry_reference": 100.0,
         "stop": 95.0,
         "target": 110.0,
@@ -96,6 +97,38 @@ class PaperForwardTests(unittest.TestCase):
             "2026-11-22T10:10:00+00:00", 99, 101, 98, 100
         ))
         self.assertEqual(self.state["trades"]["s1"]["status"], "OPEN")
+
+
+    def test_aggregate_open_risk_cap_blocks_additional_paper_trade(self):
+        first = signal("first")
+        second = signal("second")
+        fill_bar = bar("2026-11-22T10:15:00+00:00", 99, 101, 98, 100)
+        process_signal_bar(
+            self.state, first, fill_bar, max_portfolio_risk=0.003
+        )
+        process_signal_bar(
+            self.state, second, fill_bar, max_portfolio_risk=0.003
+        )
+        self.assertEqual(self.state["trades"]["first"]["status"], "OPEN")
+        self.assertEqual(
+            self.state["trades"]["second"]["status"],
+            "REJECTED_PORTFOLIO_RISK",
+        )
+        self.assertAlmostEqual(self.state["open_risk_usd"], 2.5)
+
+    def test_open_trade_exits_at_monitoring_deadline(self):
+        item = signal()
+        item["monitoring_expires_at"] = "2026-11-22T10:30:00+00:00"
+        process_signal_bar(self.state, item, bar(
+            "2026-11-22T10:15:00+00:00", 99, 101, 98, 100
+        ))
+        process_signal_bar(self.state, item, bar(
+            "2026-11-22T10:30:00+00:00", 100, 101, 99.5, 101
+        ))
+        trade = self.state["trades"]["s1"]
+        self.assertEqual(trade["status"], "CLOSED")
+        self.assertEqual(trade["exit_reason"], "TIME_EXIT")
+        self.assertEqual(trade["exit_fill_price"], 101.0)
 
     def test_hard_per_trade_risk_cap_cannot_be_overridden(self):
         with self.assertRaises(ValueError):
