@@ -107,6 +107,8 @@ def calculate_position_size(
     portfolio_risk_usd=None,
     costs_per_unit_quote=None,
     fixed_costs_quote=None,
+    minimum_order_notional_usd=None,
+    fractional_allowed=None,
 ):
     """
     Calcula el tamaño teórico de una posición en USD.
@@ -133,6 +135,12 @@ def calculate_position_size(
     available_capital_usd:
         Efectivo disponible en la cartera virtual tras reservar
         posiciones abiertas. Es obligatorio y limita el nominal.
+
+    minimum_order_notional_usd:
+        Nominal mínimo confirmado del instrumento, convertido a USD.
+
+    fractional_allowed:
+        Regla confirmada del instrumento para permitir unidades fraccionarias.
 
     El cálculo permanece bloqueado mientras
     ALLOW_POSITION_SIZING sea False.
@@ -172,6 +180,21 @@ def calculate_position_size(
             "Falta confirmar los costes fijos totales de apertura y cierre."
         )
 
+    if minimum_order_notional_usd is None:
+        return _blocked_status(
+            "Falta confirmar el nominal mínimo del instrumento."
+        )
+
+    if fractional_allowed is None:
+        return _blocked_status(
+            "Falta confirmar si el instrumento admite unidades fraccionarias."
+        )
+
+    if not isinstance(fractional_allowed, bool):
+        return _blocked_status(
+            "La regla de unidades fraccionarias no es válida."
+        )
+
     values = {
         "entry": entry,
         "stop": stop,
@@ -182,6 +205,7 @@ def calculate_position_size(
         "portfolio_risk_usd": portfolio_risk_usd,
         "costs_per_unit_quote": costs_per_unit_quote,
         "fixed_costs_quote": fixed_costs_quote,
+        "minimum_order_notional_usd": minimum_order_notional_usd,
         "MAX_RISK_PER_TRADE": MAX_RISK_PER_TRADE,
         "MAX_PORTFOLIO_RISK": MAX_PORTFOLIO_RISK,
     }
@@ -201,6 +225,7 @@ def calculate_position_size(
     portfolio_risk_usd = float(portfolio_risk_usd)
     costs_per_unit_quote = float(costs_per_unit_quote)
     fixed_costs_quote = float(fixed_costs_quote)
+    minimum_order_notional_usd = float(minimum_order_notional_usd)
 
     configured_trade_limit = float(MAX_RISK_PER_TRADE)
     configured_portfolio_limit = float(MAX_PORTFOLIO_RISK)
@@ -249,6 +274,11 @@ def calculate_position_size(
     if fixed_costs_quote < 0:
         return _blocked_status(
             "Los costes fijos no pueden ser negativos."
+        )
+
+    if minimum_order_notional_usd <= 0:
+        return _blocked_status(
+            "El nominal mínimo del instrumento debe ser positivo."
         )
 
     if configured_trade_limit <= 0:
@@ -385,7 +415,18 @@ def calculate_position_size(
         risk_based_position_size,
         max_cash_position_size,
     )
+    if not fractional_allowed:
+        position_size = float(math.floor(position_size))
+    if not _is_finite_number(position_size) or position_size <= 0:
+        return _blocked_status(
+            "El tamaño calculado no alcanza una unidad mínima permitida por el instrumento."
+        )
+
     position_notional_usd = position_size * entry * quote_to_usd
+    if position_notional_usd + 1e-8 < minimum_order_notional_usd:
+        return _blocked_status(
+            "El nominal calculado es inferior al mínimo confirmado del instrumento."
+        )
     cash_required_usd = (
         position_size * cash_cost_per_unit_usd + fixed_costs_usd
     )
@@ -437,6 +478,8 @@ def calculate_position_size(
         "entry_price_quote": entry,
         "quote_to_usd": quote_to_usd,
         "position_notional_usd": position_notional_usd,
+        "minimum_order_notional_usd": minimum_order_notional_usd,
+        "fractional_allowed": fractional_allowed,
         "cash_required_usd": cash_required_usd,
         "costs_per_unit_quote": costs_per_unit_quote,
         "available_capital_usd": available_capital_usd,
