@@ -456,6 +456,44 @@ class TestBotValidation(unittest.TestCase):
         self.assertTrue(result["portfolio_admission"]["allowed"])
         self.assertFalse(result["portfolio_admission"]["live_execution_authorized"])
 
+    def test_unverified_twelvedata_daily_split_adjustment_blocks_candidate(self):
+        candidate = {
+            **self.candidate,
+            "data_valid": True,
+            "data_timestamp": datetime.now(timezone.utc).isoformat(),
+            "data_age_minutes": 1.0,
+            "data_provider": "twelvedata",
+            "price_adjustment_verified": False,
+            "price_adjustment_verification_status": (
+                "REQUESTED_NOT_INDEPENDENTLY_VERIFIED"
+            ),
+        }
+        result = Bot.apply_validation_gate(candidate, {"status": "UNKNOWN"})
+        self.assertIn(
+            "Ajuste diario por splits de Twelve Data solicitado, pero no verificado independientemente",
+            result["validation_reasons"],
+        )
+        self.assertFalse(result["tradable"])
+
+    def test_twelvedata_daily_cannot_pass_with_legacy_true_flag_only(self):
+        candidate = {
+            **self.candidate,
+            "data_valid": True,
+            "data_timestamp": datetime.now(timezone.utc).isoformat(),
+            "data_age_minutes": 1.0,
+            "data_provider": "twelvedata",
+            "price_adjustment_verified": True,
+            "price_adjustment_verification_status": (
+                "REQUESTED_NOT_INDEPENDENTLY_VERIFIED"
+            ),
+        }
+        result = Bot.apply_validation_gate(candidate, {"status": "UNKNOWN"})
+        self.assertIn(
+            "Ajuste diario por splits de Twelve Data solicitado, pero no verificado independientemente",
+            result["validation_reasons"],
+        )
+        self.assertFalse(result["tradable"])
+
     def test_global_flags_cannot_bypass_unverified_instrument_registry(self):
         sizing_result = {
             "status": "SIMULACION_NO_VALIDADA",

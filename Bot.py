@@ -1205,6 +1205,19 @@ def apply_validation_gate(result, portfolio_status):
             "Datos de mercado no validados o timestamp de datos no verificable"
         )
 
+    if (
+        result.get("timeframe") == "1d"
+        and result.get("data_provider") == "twelvedata"
+        and (
+            result.get("price_adjustment_verified") is not True
+            or result.get("price_adjustment_verification_status")
+            != "INDEPENDENTLY_VERIFIED"
+        )
+    ):
+        blockers.append(
+            "Ajuste diario por splits de Twelve Data solicitado, pero no verificado independientemente"
+        )
+
     try:
         risk_is_valid = (
             isinstance(provisional_risk_pct, (int, float))
@@ -1409,6 +1422,13 @@ def analyze_asset(asset, timeframe, include_paper_bars=False):
         result["data_provider"] = df.attrs.get("data_provider", "unknown")
         result["price_adjustment_policy"] = df.attrs.get(
             "price_adjustment_policy", "unknown"
+        )
+        result["price_adjustment_verified"] = (
+            df.attrs.get("price_adjustment_verified") is True
+        )
+        result["price_adjustment_verification_status"] = df.attrs.get(
+            "price_adjustment_verification_status",
+            "NOT_RECORDED",
         )
         result["mode"] = "PAPER_ONLY"
         result["currency"] = ACCOUNT_CURRENCY

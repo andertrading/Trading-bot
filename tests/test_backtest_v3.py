@@ -235,6 +235,7 @@ class TestBacktestV3(unittest.TestCase):
             "data_provider": "twelvedata",
             "price_adjustment_policy": "split_adjusted_ohlc_no_dividend_adjustment",
             "price_adjustment_verified": True,
+            "price_adjustment_verification_status": "INDEPENDENTLY_VERIFIED",
         })
         with (
             patch.object(backtest_v3, "BACKTEST_DATA_MODE", "download"),
@@ -261,6 +262,27 @@ class TestBacktestV3(unittest.TestCase):
             result = backtest_v3.download_history("AAPL", "15m", asset="AAPL")
         self.assertIsNone(result)
         self.assertIn("ajuste de precios no está verificado", backtest_v3.DOWNLOAD_ERRORS[("AAPL", "15m")])
+
+    def test_backtest_rejects_daily_twelvedata_without_independent_split_verification(self):
+        data = self.make_data()
+        data.attrs.update({
+            "data_provider": "twelvedata",
+            "price_adjustment_policy": "split_adjusted_ohlc_no_dividend_adjustment",
+            "price_adjustment_verified": False,
+            "price_adjustment_verification_status": (
+                "REQUESTED_NOT_INDEPENDENTLY_VERIFIED"
+            ),
+        })
+        with (
+            patch.object(backtest_v3, "BACKTEST_DATA_MODE", "download"),
+            patch.object(backtest_v3, "download_data", return_value=data),
+        ):
+            result = backtest_v3.download_history("AAPL", "1d", asset="AAPL")
+        self.assertIsNone(result)
+        self.assertIn(
+            "ajuste de precios no está verificado",
+            backtest_v3.DOWNLOAD_ERRORS[("AAPL", "1d")],
+        )
 
     def test_snapshot_metadata_records_provider_and_adjustment_policy(self):
         data = self.make_data()
@@ -293,6 +315,10 @@ class TestBacktestV3(unittest.TestCase):
             "twelvedata",
         )
         self.assertEqual(daily_metadata["period_requested"], "2y")
+        self.assertEqual(
+            daily_metadata["price_adjustment_verification_status"],
+            "INDEPENDENTLY_VERIFIED",
+        )
 
         daily_data.attrs.update({
             "price_source_detail": "LSE primary; SIX alternate OHLC repair",

@@ -1053,6 +1053,32 @@ class TestIntradayGaps(unittest.TestCase):
         )
 
 
+class TestPriceAdjustmentMetadata(unittest.TestCase):
+
+    def test_twelvedata_daily_split_adjustment_is_not_marked_verified(self):
+        frame = make_ohlcv(
+            pd.date_range("2026-01-01T00:00:00Z", periods=5, freq="D")
+        )
+        result = engine._attach_market_data_metadata(frame, "TSLA", "1d")
+        self.assertEqual(result.attrs["data_provider"], "twelvedata")
+        self.assertFalse(result.attrs["price_adjustment_verified"])
+        self.assertEqual(
+            result.attrs["price_adjustment_verification_status"],
+            "REQUESTED_NOT_INDEPENDENTLY_VERIFIED",
+        )
+
+    def test_twelvedata_intraday_raw_mode_remains_documented(self):
+        frame = make_ohlcv(
+            pd.date_range("2026-11-18T14:30:00Z", periods=5, freq="15min")
+        )
+        result = engine._attach_market_data_metadata(frame, "TSLA", "15m")
+        self.assertTrue(result.attrs["price_adjustment_verified"])
+        self.assertEqual(
+            result.attrs["price_adjustment_verification_status"],
+            "DOCUMENTED_RAW_MODE",
+        )
+
+
 class TestTwelveDataInstrumentMetadata(unittest.TestCase):
 
     def test_accepts_crypto_identity_without_mic_code(self):

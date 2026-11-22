@@ -2505,7 +2505,7 @@ def _download_yahoo(asset, config, interval):
 # ---------------------------------------------------------------------
 
 def _attach_market_data_metadata(dataframe, asset, interval):
-    """Attach explicit, provider-verified OHLC adjustment metadata."""
+    """Attach adjustment-policy metadata without overstating empirical verification."""
     extended_daily_backtest = (
         interval == "1d"
         and os.getenv(
@@ -2529,7 +2529,24 @@ def _attach_market_data_metadata(dataframe, asset, interval):
     dataframe = dataframe.copy()
     dataframe.attrs["data_provider"] = provider
     dataframe.attrs["price_adjustment_policy"] = policy
-    dataframe.attrs["price_adjustment_verified"] = True
+
+    if provider == "twelvedata" and interval == "1d":
+        # adjust=splits is requested and documented, but this is not empirical
+        # reconciliation against independent corporate-action factors.
+        dataframe.attrs["price_adjustment_verified"] = False
+        dataframe.attrs["price_adjustment_verification_status"] = (
+            "REQUESTED_NOT_INDEPENDENTLY_VERIFIED"
+        )
+    elif provider == "twelvedata" and interval == "15m":
+        dataframe.attrs["price_adjustment_verified"] = True
+        dataframe.attrs["price_adjustment_verification_status"] = (
+            "DOCUMENTED_RAW_MODE"
+        )
+    else:
+        dataframe.attrs["price_adjustment_verified"] = True
+        dataframe.attrs["price_adjustment_verification_status"] = (
+            "PROVIDER_POLICY_ACCEPTED"
+        )
     return dataframe
 
 
