@@ -286,6 +286,10 @@ def compare(asset, eod, yahoo, exchange, alternate, yahoo_yf, alternate_yf):
     full_lse_six_errors = _price_error_metrics(
         yahoo_yf, alternate_yf, "_lse", "_six"
     )
+    full_lse_six.to_csv(
+        OUT / f"{asset.lower()}_five_year_lse_vs_six.csv",
+        index_label="date",
+    )
     full_lse_six_outliers = {}
     for col in ("Open", "High", "Low", "Close"):
         error = (
