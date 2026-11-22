@@ -107,7 +107,9 @@ class MarketEvidenceTests(unittest.TestCase):
         self.assertEqual(client.cost_payloads, [])
         self.assertEqual(report["summary"]["assets_with_last_session_quotes"], 1)
         self.assertEqual(report["summary"]["assets_with_market_closed_cost_skips"], 1)
+        self.assertEqual(report["summary"]["assets_with_no_realtime_quote_skips"], 0)
         self.assertEqual(report["summary"]["assets_with_validated_open_costs"], 0)
+        self.assertEqual(report["summary"]["assets_with_no_realtime_quote_skips"], 1)
         self.assertEqual(report["summary"]["status"], "PARTIAL")
 
     def test_quote_failure_skips_hypothetical_cost_request(self):
@@ -228,6 +230,7 @@ class MarketEvidenceTests(unittest.TestCase):
             now_utc=datetime(2026, 11, 22, 12, 0, tzinfo=timezone.utc))
         self.assertEqual(len(client.cost_payloads), 0)
         self.assertEqual(report["assets"]["AAPL"]["hypothetical_open_cost"]["status"], "SKIPPED")
+        self.assertEqual(report["summary"]["assets_without_real_unleveraged_long"], 1)
 
 
     def test_v1_exact_symbol_search_fallback_resolves_etf_without_fuzzy_matching(self):
