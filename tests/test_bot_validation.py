@@ -724,20 +724,24 @@ class TestTwelveDataDailyRequestSuppression(unittest.TestCase):
                 },
             }],
         }
-        with patch.object(Bot, "TELEGRAM_ENABLED", True), \\
-             patch.object(Bot, "SIGNAL_ALERTS_ENABLED", True), \\
-             patch.object(Bot, "STRATEGY_VALIDATED", True), \\
-             patch.object(Bot, "send_telegram_message") as send:
+        with (
+            patch.object(Bot, "TELEGRAM_ENABLED", True),
+            patch.object(Bot, "SIGNAL_ALERTS_ENABLED", True),
+            patch.object(Bot, "STRATEGY_VALIDATED", True),
+            patch.object(Bot, "send_telegram_message") as send,
+        ):
             result = Bot.send_telegram_notifications(scan)
 
         self.assertEqual(result, "held:no_eligible_candidates")
         send.assert_not_called()
 
     def test_legacy_telegram_path_requires_global_alert_and_strategy_gates(self):
-        with patch.object(Bot, "TELEGRAM_ENABLED", True), \\
-             patch.object(Bot, "SIGNAL_ALERTS_ENABLED", False), \\
-             patch.object(Bot, "STRATEGY_VALIDATED", True), \\
-             patch.object(Bot, "send_telegram_message") as send:
+        with (
+            patch.object(Bot, "TELEGRAM_ENABLED", True),
+            patch.object(Bot, "SIGNAL_ALERTS_ENABLED", False),
+            patch.object(Bot, "STRATEGY_VALIDATED", True),
+            patch.object(Bot, "send_telegram_message") as send,
+        ):
             result = Bot.send_telegram_notifications({"results": []})
 
         self.assertEqual(result, "held:global_validation_gate")
