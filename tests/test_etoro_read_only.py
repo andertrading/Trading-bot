@@ -667,6 +667,34 @@ class RealtimeQuoteValidationTests(unittest.TestCase):
             datetime(2026, 11, 21, 11, 59, 45, tzinfo=timezone.utc),
         )
 
+    def test_current_etoro_rates_schema_accepts_instrument_id_and_timestamp(self):
+        response = EtoroResponse({
+            "rates": [{
+                "instrumentId": 101,
+                "symbol": "AAPL",
+                "bid": 198.42,
+                "ask": 198.56,
+                "lastPrice": 198.49,
+                "timestamp": "2026-11-21T11:59:45Z",
+            }]
+        }, 200, {})
+        quotes = normalize_realtime_quotes(response, [101], self.now)
+        self.assertEqual(quotes[101].bid, Decimal("198.42"))
+        self.assertEqual(quotes[101].ask, Decimal("198.56"))
+        self.assertEqual(
+            quotes[101].timestamp,
+            datetime(2026, 11, 21, 11, 59, 45, tzinfo=timezone.utc),
+        )
+
+    def test_quote_rejects_ambiguous_date_and_timestamp_fields(self):
+        item = dict(
+            self.response.data["results"][0],
+            timestamp="2026-11-21T11:59:45Z",
+        )
+        response = EtoroResponse({"rates": [item]}, 200, {})
+        with self.assertRaisesRegex(EtoroAPIError, "exactamente un campo"):
+            normalize_realtime_quotes(response, [101], self.now)
+
     def test_client_get_realtime_quotes_uses_strict_validation(self):
         session = Mock()
         session.request.return_value = FakeResponse(
