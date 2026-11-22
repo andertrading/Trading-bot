@@ -122,3 +122,8 @@ Se añade `asset_economic_registry.json` y su evaluador `asset_economic_registry
 Los campos económicos permanecen vacíos y sin confirmar. No se rellenan con tarifas públicas estimadas, velas OHLC ni datos de cartera. Las fichas en USD no requieren conversión FX de operación porque la divisa de cotización y la divisa de referencia son ambas USD; esto no incluye conversión de depósitos, financiación ni retiradas.
 
 El evaluador devuelve `COSTS_UNVERIFIED` mientras falte evidencia material, y `INELIGIBLE` si el ticket confirma CFD para la política REAL-only. La matriz no se conecta a sizing, señales ni ejecución; es un registro previo de elegibilidad. Los tests de este módulo se han añadido, pero su ejecución en CI queda pendiente.
+
+
+### Endurecimiento del registro (continuación PR #115)
+
+La ficha del instrumento también requiere confirmación, fuente y timestamp con zona horaria; el ticker/listing por sí solo no prueba que sea el mismo instrumento que aparece en el ticket del broker. Los timestamps de evidencia deben ser ISO-8601 con zona horaria. Para las comisiones porcentuales, el campo `PERCENT` se expresa en puntos porcentuales: `0.01` significa `0.01%`, no una fracción decimal de `1%`. Esta convención queda documentada antes de conectar el registro con cualquier cálculo de costes.
