@@ -58,7 +58,9 @@ La reducción del universo debe hacerse con criterios previos y documentados, no
 - Usar un proveedor primario por mercado/timeframe y un segundo proveedor solo para auditoría/discrepancias o fallback explícito.
 - No mezclar silenciosamente velas de Yahoo/Twelve Data/EODHD en una misma serie.
 - Comparar las velas live con la fuente del backtest en una prueba de solapamiento antes de aceptar la equivalencia.
-- No comprar un plan de datos todavía. Twelve Data Basic publica 8 créditos/minuto y 800 solicitudes/día; el histórico intradía disponible depende del instrumento. La cobertura de los listings LSE debe confirmarse antes de diseñar el MVP alrededor de ese proveedor.
+- No comprar un plan de datos todavía. Twelve Data Basic publica 8 créditos/minuto y 800 solicitudes/día. Su cobertura Basic incluye datos de EE. UU.; los mercados internacionales tienen disponibilidad limitada/de prueba según mercado y símbolo. Twelve Data documenta que el histórico diario suele remontarse al inicio del instrumento, mientras que el intradía suele abarcar desde meses hasta varios años según activo. Cada llamada de time series tiene coste por símbolo y el máximo por respuesta es 5.000 barras.
+- El código actual usa Twelve Data para acciones USA y cripto, Yahoo para los ETF LSE y EODHD para el diario live de esos ETF; por tanto, no se debe cambiar el proveedor ni contratar un plan hasta comparar OHLCV en el periodo de solapamiento y confirmar disponibilidad por símbolo. La diferencia actual entre el proveedor live y el histórico extendido de CSPX/CNDX debe ser un test explícito, no una suposición.
+- Referencias de datos: https://twelvedata.com/pricing ; https://twelvedata.com/stocks ; https://support.twelvedata.com/en/articles/5656039-how-to-get-historical-prices ; https://support.twelvedata.com/en/articles/5214728-getting-historical-data.
 
 ### E. Una sola cadena de validación reutilizable
 
