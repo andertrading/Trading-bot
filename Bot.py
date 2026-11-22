@@ -1236,7 +1236,7 @@ def apply_validation_gate(result, portfolio_status):
     return result
 
 
-def analyze_asset(asset, timeframe):
+def analyze_asset(asset, timeframe, include_paper_bars=False):
     logger.info(
         "ANALYSIS START | %s | %s",
         asset,
@@ -1339,6 +1339,22 @@ def analyze_asset(asset, timeframe):
         result["last_price"] = float(df["Close"].iloc[-1])
         result["last_high"] = float(df["High"].iloc[-1])
         result["last_low"] = float(df["Low"].iloc[-1])
+        if include_paper_bars:
+            paper_bars = []
+            for bar_timestamp, bar_row in df.tail(120).iterrows():
+                bar_time = pd.Timestamp(bar_timestamp)
+                if bar_time.tzinfo is None:
+                    bar_time = bar_time.tz_localize("UTC")
+                else:
+                    bar_time = bar_time.tz_convert("UTC")
+                paper_bars.append({
+                    "timestamp": bar_time.isoformat(),
+                    "open": float(bar_row["Open"]),
+                    "high": float(bar_row["High"]),
+                    "low": float(bar_row["Low"]),
+                    "close": float(bar_row["Close"]),
+                })
+            result["paper_bars"] = paper_bars
         result["data_provider"] = df.attrs.get("data_provider", "unknown")
         result["price_adjustment_policy"] = df.attrs.get(
             "price_adjustment_policy", "unknown"
@@ -1377,7 +1393,7 @@ def analyze_asset(asset, timeframe):
         )
 
 
-def run_scan(timeframes=None):
+def run_scan(timeframes=None, include_paper_bars=False):
     """Analyze selected timeframes without requiring broker/account access."""
     results = []
 
@@ -1441,10 +1457,11 @@ def run_scan(timeframes=None):
 
     for asset in enabled_assets:
         for timeframe in selected_timeframes:
-            if (
+            market_closed = (
                 timeframe == INTRADAY_INTERVAL
                 and not is_intraday_market_open(asset)
-            ):
+            )
+            if market_closed and not include_paper_bars:
                 result = no_trade(
                     asset,
                     timeframe,
@@ -1452,7 +1469,21 @@ def run_scan(timeframes=None):
                 )
                 result["market_closed"] = True
             else:
-                result = analyze_asset(asset, timeframe)
+                result = analyze_asset(
+                    asset,
+                    timeframe,
+                    include_paper_bars=include_paper_bars,
+                )
+                if market_closed:
+                    # A closed-market scan may replay the last completed bars
+                    # for existing paper trades, but must not create a fresh
+                    # entry signal from a stale close.
+                    result["action"] = "NO TRADE"
+                    result["market_closed"] = True
+                    result["reason"] = (
+                        "Mercado cerrado: datos utilizados solo para "
+                        "actualizar la simulación prospectiva"
+                    )
 
             result = apply_validation_gate(
                 result,
