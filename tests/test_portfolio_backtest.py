@@ -136,6 +136,20 @@ class TestPortfolioBacktest(unittest.TestCase):
         self.assertAlmostEqual(result["summary"]["ending_equity_usd"], 1000.0)
         self.assertAlmostEqual(result["summary"]["max_drawdown_usd"], 0.0)
 
+    def test_drawdown_summary_discloses_realized_only_basis(self):
+        result = simulate_portfolio(
+            [self.make_trade(result_R=-1.0)],
+            capital_usd=1000.0,
+        )
+
+        summary = result["summary"]
+        self.assertEqual(
+            summary["drawdown_basis"],
+            "realized_exit_events_only",
+        )
+        self.assertFalse(summary["intratrade_drawdown_included"])
+        self.assertFalse(summary["unrealized_pnl_included"])
+
     def test_drawdown_percentage_uses_equity_peak(self):
         winning = self.make_trade(
             asset="AAPL",
