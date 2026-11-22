@@ -113,7 +113,10 @@ def load_yahoo(session, asset, spec, start, end, symbol_key="yahoo", expected_ma
 
 
 def _get_twelvedata_json(session, url, params, stage):
-    response = session.get(url, params=params, timeout=45)
+    try:
+        response = session.get(url, params=params, timeout=45)
+    except requests.RequestException:
+        raise RuntimeError(f"Twelve Data {stage} network error") from None
     if response.status_code >= 400:
         raise RuntimeError(f"Twelve Data {stage} HTTP {response.status_code}")
     payload = response.json()
@@ -553,7 +556,7 @@ def main():
                 except Exception as exc:
                     # Never log request exception text: it may contain API query parameters.
                     twelvedata_errors.append(
-                        f"{asset}: {type(exc).__name__}: Twelve Data history unavailable"
+                        f"{asset}: {type(exc).__name__}: {exc}"
                     )
             result = compare(
                 asset, eod, yahoo, exchange, alternate,
