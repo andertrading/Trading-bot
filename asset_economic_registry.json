@@ -1,0 +1,595 @@
+{
+  "schema_version": 1,
+  "policy": "DAILY_LONG_ONLY_UNLEVERAGED_REAL",
+  "description": "Per-instrument evidence register. Null or unconfirmed values block eligibility; never infer costs from public estimates or OHLC data.",
+  "assets": {
+    "CSPX": {
+      "instrument": {
+        "name": "iShares Core S&P 500",
+        "type": "ETF",
+        "listing": "CSPX.LSE",
+        "currency": "USD",
+        "calendar": "XLON",
+        "isin": null
+      },
+      "execution": {
+        "type": null,
+        "confirmed": false,
+        "source": null,
+        "observed_at": null
+      },
+      "fees": {
+        "entry_usd": null,
+        "exit_usd": null,
+        "confirmed": false,
+        "source": null,
+        "observed_at": null
+      },
+      "spread": {
+        "bid_ask_bps": null,
+        "confirmed": false,
+        "source": null,
+        "observed_at": null
+      },
+      "price_basis": {
+        "confirmed": false,
+        "source": null,
+        "observed_at": null
+      },
+      "minimum_order": {
+        "minimum_notional": null,
+        "fractional_allowed": null,
+        "confirmed": false,
+        "source": null,
+        "observed_at": null
+      },
+      "fx": {
+        "required": false,
+        "conversion_fee_pct": null,
+        "quote_to_account_rate": null,
+        "confirmed": true,
+        "source": "same USD quote/account currency; verify instrument ticket",
+        "observed_at": null
+      }
+    },
+    "CNDX": {
+      "instrument": {
+        "name": "iShares Nasdaq 100",
+        "type": "ETF",
+        "listing": "CNDX.LSE",
+        "currency": "USD",
+        "calendar": "XLON",
+        "isin": null
+      },
+      "execution": {
+        "type": null,
+        "confirmed": false,
+        "source": null,
+        "observed_at": null
+      },
+      "fees": {
+        "entry_usd": null,
+        "exit_usd": null,
+        "confirmed": false,
+        "source": null,
+        "observed_at": null
+      },
+      "spread": {
+        "bid_ask_bps": null,
+        "confirmed": false,
+        "source": null,
+        "observed_at": null
+      },
+      "price_basis": {
+        "confirmed": false,
+        "source": null,
+        "observed_at": null
+      },
+      "minimum_order": {
+        "minimum_notional": null,
+        "fractional_allowed": null,
+        "confirmed": false,
+        "source": null,
+        "observed_at": null
+      },
+      "fx": {
+        "required": false,
+        "conversion_fee_pct": null,
+        "quote_to_account_rate": null,
+        "confirmed": true,
+        "source": "same USD quote/account currency; verify instrument ticket",
+        "observed_at": null
+      }
+    },
+    "TSLA": {
+      "instrument": {
+        "name": "Tesla",
+        "type": "STOCK",
+        "listing": "TSLA",
+        "currency": "USD",
+        "calendar": "XNYS",
+        "isin": null
+      },
+      "execution": {
+        "type": null,
+        "confirmed": false,
+        "source": null,
+        "observed_at": null
+      },
+      "fees": {
+        "entry_usd": null,
+        "exit_usd": null,
+        "confirmed": false,
+        "source": null,
+        "observed_at": null
+      },
+      "spread": {
+        "bid_ask_bps": null,
+        "confirmed": false,
+        "source": null,
+        "observed_at": null
+      },
+      "price_basis": {
+        "confirmed": false,
+        "source": null,
+        "observed_at": null
+      },
+      "minimum_order": {
+        "minimum_notional": null,
+        "fractional_allowed": null,
+        "confirmed": false,
+        "source": null,
+        "observed_at": null
+      },
+      "fx": {
+        "required": false,
+        "conversion_fee_pct": null,
+        "quote_to_account_rate": null,
+        "confirmed": true,
+        "source": "same USD quote/account currency; verify instrument ticket",
+        "observed_at": null
+      }
+    },
+    "NVDA": {
+      "instrument": {
+        "name": "Nvidia",
+        "type": "STOCK",
+        "listing": "NVDA",
+        "currency": "USD",
+        "calendar": "XNYS",
+        "isin": null
+      },
+      "execution": {
+        "type": null,
+        "confirmed": false,
+        "source": null,
+        "observed_at": null
+      },
+      "fees": {
+        "entry_usd": null,
+        "exit_usd": null,
+        "confirmed": false,
+        "source": null,
+        "observed_at": null
+      },
+      "spread": {
+        "bid_ask_bps": null,
+        "confirmed": false,
+        "source": null,
+        "observed_at": null
+      },
+      "price_basis": {
+        "confirmed": false,
+        "source": null,
+        "observed_at": null
+      },
+      "minimum_order": {
+        "minimum_notional": null,
+        "fractional_allowed": null,
+        "confirmed": false,
+        "source": null,
+        "observed_at": null
+      },
+      "fx": {
+        "required": false,
+        "conversion_fee_pct": null,
+        "quote_to_account_rate": null,
+        "confirmed": true,
+        "source": "same USD quote/account currency; verify instrument ticket",
+        "observed_at": null
+      }
+    },
+    "AAPL": {
+      "instrument": {
+        "name": "Apple",
+        "type": "STOCK",
+        "listing": "AAPL",
+        "currency": "USD",
+        "calendar": "XNYS",
+        "isin": null
+      },
+      "execution": {
+        "type": null,
+        "confirmed": false,
+        "source": null,
+        "observed_at": null
+      },
+      "fees": {
+        "entry_usd": null,
+        "exit_usd": null,
+        "confirmed": false,
+        "source": null,
+        "observed_at": null
+      },
+      "spread": {
+        "bid_ask_bps": null,
+        "confirmed": false,
+        "source": null,
+        "observed_at": null
+      },
+      "price_basis": {
+        "confirmed": false,
+        "source": null,
+        "observed_at": null
+      },
+      "minimum_order": {
+        "minimum_notional": null,
+        "fractional_allowed": null,
+        "confirmed": false,
+        "source": null,
+        "observed_at": null
+      },
+      "fx": {
+        "required": false,
+        "conversion_fee_pct": null,
+        "quote_to_account_rate": null,
+        "confirmed": true,
+        "source": "same USD quote/account currency; verify instrument ticket",
+        "observed_at": null
+      }
+    },
+    "MSFT": {
+      "instrument": {
+        "name": "Microsoft",
+        "type": "STOCK",
+        "listing": "MSFT",
+        "currency": "USD",
+        "calendar": "XNYS",
+        "isin": null
+      },
+      "execution": {
+        "type": null,
+        "confirmed": false,
+        "source": null,
+        "observed_at": null
+      },
+      "fees": {
+        "entry_usd": null,
+        "exit_usd": null,
+        "confirmed": false,
+        "source": null,
+        "observed_at": null
+      },
+      "spread": {
+        "bid_ask_bps": null,
+        "confirmed": false,
+        "source": null,
+        "observed_at": null
+      },
+      "price_basis": {
+        "confirmed": false,
+        "source": null,
+        "observed_at": null
+      },
+      "minimum_order": {
+        "minimum_notional": null,
+        "fractional_allowed": null,
+        "confirmed": false,
+        "source": null,
+        "observed_at": null
+      },
+      "fx": {
+        "required": false,
+        "conversion_fee_pct": null,
+        "quote_to_account_rate": null,
+        "confirmed": true,
+        "source": "same USD quote/account currency; verify instrument ticket",
+        "observed_at": null
+      }
+    },
+    "TTWO": {
+      "instrument": {
+        "name": "Take-Two Interactive",
+        "type": "STOCK",
+        "listing": "TTWO",
+        "currency": "USD",
+        "calendar": "XNYS",
+        "isin": null
+      },
+      "execution": {
+        "type": null,
+        "confirmed": false,
+        "source": null,
+        "observed_at": null
+      },
+      "fees": {
+        "entry_usd": null,
+        "exit_usd": null,
+        "confirmed": false,
+        "source": null,
+        "observed_at": null
+      },
+      "spread": {
+        "bid_ask_bps": null,
+        "confirmed": false,
+        "source": null,
+        "observed_at": null
+      },
+      "price_basis": {
+        "confirmed": false,
+        "source": null,
+        "observed_at": null
+      },
+      "minimum_order": {
+        "minimum_notional": null,
+        "fractional_allowed": null,
+        "confirmed": false,
+        "source": null,
+        "observed_at": null
+      },
+      "fx": {
+        "required": false,
+        "conversion_fee_pct": null,
+        "quote_to_account_rate": null,
+        "confirmed": true,
+        "source": "same USD quote/account currency; verify instrument ticket",
+        "observed_at": null
+      }
+    },
+    "BTC": {
+      "instrument": {
+        "name": "Bitcoin",
+        "type": "CRYPTO",
+        "listing": "BTC-USD",
+        "currency": "USD",
+        "calendar": "24/7",
+        "isin": null
+      },
+      "execution": {
+        "type": null,
+        "confirmed": false,
+        "source": null,
+        "observed_at": null
+      },
+      "fees": {
+        "entry_usd": null,
+        "exit_usd": null,
+        "confirmed": false,
+        "source": null,
+        "observed_at": null
+      },
+      "spread": {
+        "bid_ask_bps": null,
+        "confirmed": false,
+        "source": null,
+        "observed_at": null
+      },
+      "price_basis": {
+        "confirmed": false,
+        "source": null,
+        "observed_at": null
+      },
+      "minimum_order": {
+        "minimum_notional": null,
+        "fractional_allowed": null,
+        "confirmed": false,
+        "source": null,
+        "observed_at": null
+      },
+      "fx": {
+        "required": false,
+        "conversion_fee_pct": null,
+        "quote_to_account_rate": null,
+        "confirmed": true,
+        "source": "same USD quote/account currency; verify instrument ticket",
+        "observed_at": null
+      }
+    },
+    "ETH": {
+      "instrument": {
+        "name": "Ethereum",
+        "type": "CRYPTO",
+        "listing": "ETH-USD",
+        "currency": "USD",
+        "calendar": "24/7",
+        "isin": null
+      },
+      "execution": {
+        "type": null,
+        "confirmed": false,
+        "source": null,
+        "observed_at": null
+      },
+      "fees": {
+        "entry_usd": null,
+        "exit_usd": null,
+        "confirmed": false,
+        "source": null,
+        "observed_at": null
+      },
+      "spread": {
+        "bid_ask_bps": null,
+        "confirmed": false,
+        "source": null,
+        "observed_at": null
+      },
+      "price_basis": {
+        "confirmed": false,
+        "source": null,
+        "observed_at": null
+      },
+      "minimum_order": {
+        "minimum_notional": null,
+        "fractional_allowed": null,
+        "confirmed": false,
+        "source": null,
+        "observed_at": null
+      },
+      "fx": {
+        "required": false,
+        "conversion_fee_pct": null,
+        "quote_to_account_rate": null,
+        "confirmed": true,
+        "source": "same USD quote/account currency; verify instrument ticket",
+        "observed_at": null
+      }
+    },
+    "SOL": {
+      "instrument": {
+        "name": "Solana",
+        "type": "CRYPTO",
+        "listing": "SOL-USD",
+        "currency": "USD",
+        "calendar": "24/7",
+        "isin": null
+      },
+      "execution": {
+        "type": null,
+        "confirmed": false,
+        "source": null,
+        "observed_at": null
+      },
+      "fees": {
+        "entry_usd": null,
+        "exit_usd": null,
+        "confirmed": false,
+        "source": null,
+        "observed_at": null
+      },
+      "spread": {
+        "bid_ask_bps": null,
+        "confirmed": false,
+        "source": null,
+        "observed_at": null
+      },
+      "price_basis": {
+        "confirmed": false,
+        "source": null,
+        "observed_at": null
+      },
+      "minimum_order": {
+        "minimum_notional": null,
+        "fractional_allowed": null,
+        "confirmed": false,
+        "source": null,
+        "observed_at": null
+      },
+      "fx": {
+        "required": false,
+        "conversion_fee_pct": null,
+        "quote_to_account_rate": null,
+        "confirmed": true,
+        "source": "same USD quote/account currency; verify instrument ticket",
+        "observed_at": null
+      }
+    },
+    "XLM": {
+      "instrument": {
+        "name": "Stellar",
+        "type": "CRYPTO",
+        "listing": "XLM-USD",
+        "currency": "USD",
+        "calendar": "24/7",
+        "isin": null
+      },
+      "execution": {
+        "type": null,
+        "confirmed": false,
+        "source": null,
+        "observed_at": null
+      },
+      "fees": {
+        "entry_usd": null,
+        "exit_usd": null,
+        "confirmed": false,
+        "source": null,
+        "observed_at": null
+      },
+      "spread": {
+        "bid_ask_bps": null,
+        "confirmed": false,
+        "source": null,
+        "observed_at": null
+      },
+      "price_basis": {
+        "confirmed": false,
+        "source": null,
+        "observed_at": null
+      },
+      "minimum_order": {
+        "minimum_notional": null,
+        "fractional_allowed": null,
+        "confirmed": false,
+        "source": null,
+        "observed_at": null
+      },
+      "fx": {
+        "required": false,
+        "conversion_fee_pct": null,
+        "quote_to_account_rate": null,
+        "confirmed": true,
+        "source": "same USD quote/account currency; verify instrument ticket",
+        "observed_at": null
+      }
+    },
+    "XRP": {
+      "instrument": {
+        "name": "XRP",
+        "type": "CRYPTO",
+        "listing": "XRP-USD",
+        "currency": "USD",
+        "calendar": "24/7",
+        "isin": null
+      },
+      "execution": {
+        "type": null,
+        "confirmed": false,
+        "source": null,
+        "observed_at": null
+      },
+      "fees": {
+        "entry_usd": null,
+        "exit_usd": null,
+        "confirmed": false,
+        "source": null,
+        "observed_at": null
+      },
+      "spread": {
+        "bid_ask_bps": null,
+        "confirmed": false,
+        "source": null,
+        "observed_at": null
+      },
+      "price_basis": {
+        "confirmed": false,
+        "source": null,
+        "observed_at": null
+      },
+      "minimum_order": {
+        "minimum_notional": null,
+        "fractional_allowed": null,
+        "confirmed": false,
+        "source": null,
+        "observed_at": null
+      },
+      "fx": {
+        "required": false,
+        "conversion_fee_pct": null,
+        "quote_to_account_rate": null,
+        "confirmed": true,
+        "source": "same USD quote/account currency; verify instrument ticket",
+        "observed_at": null
+      }
+    }
+  }
+}
