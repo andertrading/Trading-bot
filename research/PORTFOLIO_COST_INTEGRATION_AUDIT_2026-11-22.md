@@ -46,6 +46,20 @@ Before net integration, add an explicit validated registry field such as `spread
 
 The choice must be supported by instrument-specific evidence and tests. Do not infer it from vendor names or from free-text descriptions.
 
+### Existing sizing logic to reuse carefully
+
+`risk_manager.calculate_position_size()` already accepts variable costs per unit and fixed round-trip costs. Its core equation is equivalent to:
+
+`quantity = (risk_budget - fixed_costs) / (entry - stop + variable_costs_per_unit)`
+
+That is useful groundwork, but it is **not** currently the portfolio allocator:
+
+- `portfolio_backtest.simulate_portfolio()` does not call it and currently sizes against gross stop distance only.
+- `calculate_position_size()` returns BLOCKED while `ALLOW_POSITION_SIZING=False`. That safety gate must not be enabled to make a research backtest work.
+- The helper does not itself solve simultaneous pro-rata allocation, available-cash reservation including entry-side costs, or instrument minimum/fractional quantity rules.
+
+The implementation should extract or adapt the pure arithmetic behind this helper for the research simulator, preserving the production sizing gate as disabled. It must not simply toggle `ALLOW_POSITION_SIZING` globally or bypass the separate economic eligibility gate.
+
 ### 3. Cost-aware risk sizing
 
 Sizing must reserve the full modeled loss if the stop is reached, including round-trip costs. For a long position, define:
