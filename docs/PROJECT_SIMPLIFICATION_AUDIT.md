@@ -146,7 +146,7 @@ El archivo `research/etf_provider_overlap_audit.py` compara las cotizaciones dia
 - genera CSV por activo y un resumen JSON como artefacto de GitHub Actions;
 - no accede a eToro, cartera, órdenes ni señales, y no cambia el proveedor activo.
 
-El workflow `.github/workflows/etf_provider_overlap_audit.yml` ejecuta la auditoría al cambiar estos archivos en una PR y también permite ejecución manual. Requiere el secreto existente `EODHD_API_KEY`; nunca imprime ni guarda la clave.
+El workflow `.github/workflows/etf_provider_overlap_audit.yml` se ejecuta manualmente (`workflow_dispatch`) y serializa las ejecuciones para no consumir innecesariamente la cuota del proveedor. Los tests unitarios del script sí se ejecutan automáticamente en CI. Requiere el secreto existente `EODHD_API_KEY`; nunca imprime ni guarda la clave.
 
 **Estado:** herramienta añadida; comparación real pendiente de ejecución y revisión del artefacto. Hasta entonces, Yahoo y EODHD no se consideran equivalentes y no se cambia el enrutamiento de datos.
 
@@ -230,3 +230,8 @@ La comisión de conversión FX del registro se expresa también en puntos porcen
 El backtest conserva el ajuste parcial por tarifas públicas como sensibilidad, pero el campo `costs_complete` y las métricas netas verificadas dependen exclusivamente de `estimate_verified_registry_trade_costs`. Añade columnas separadas para coste completo verificado, P&L neto y resultado R neto; si el registro no está completo, esos campos permanecen vacíos y no entran en métricas netas.
 
 El gate de candidatas de `Bot.py` consulta además `asset_economic_eligibility` directamente. Las banderas globales de confirmación ya no pueden convertir un activo `COSTS_UNVERIFIED` en candidato aprobado. La comprobación de coste mostrada al usuario también usa el registro. La aprobación sigue siendo manual y no habilita ejecución automática.
+
+
+### Control de cuota de proveedores externos
+
+El audit de mercado queda manual y serializado: cada ejecución puede consumir llamadas de EODHD, splits y Yahoo. En los últimos intentos EODHD respondió HTTP 402 incluso con una ventana de aproximadamente un año. No se ha determinado si se trata de cuota agotada, permiso del plan o una restricción temporal; no se contratará un plan ni se harán reintentos automáticos. La última ejecución disponible con éxito del smoke de EODHD había devuelto 252 sesiones por activo; los intentos posteriores con 402 no certifican el estado actual del proveedor.
