@@ -214,7 +214,7 @@ Therefore:
 
 ### 10. Risk-limit semantics
 
-The hard 1% per-trade and 3% aggregate limits must apply to modeled all-in stop loss, not only price movement to the stop. Add tests for simultaneous entries, fixed commissions, variable spread/FX costs, and costs that make a candidate infeasible under the risk budget.
+The configured 1% per-trade and 3% aggregate limits should cap planned all-in stop-risk at entry, not only gross price movement to the stop. They are not guaranteed maximum realized losses because gaps can exceed stop prices. Add tests for simultaneous entries, fixed commissions, variable spread/FX costs, and costs that make a candidate infeasible under the risk budget.
 
 The simulator remains a bar-based approximation: spread measurement and historical-to-executable price parity must be verified independently. Cost subtraction cannot repair missing execution-price evidence or intrabar path uncertainty.
 
