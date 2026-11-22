@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import json
 import math
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from config import ASSETS, ACCOUNT_CURRENCY
@@ -45,7 +45,9 @@ def _has_evidence(section: dict) -> bool:
         timestamp = datetime.fromisoformat(observed_at.replace("Z", "+00:00"))
     except ValueError:
         return False
-    return timestamp.tzinfo is not None and timestamp.utcoffset() is not None
+    if timestamp.tzinfo is None or timestamp.utcoffset() is None:
+        return False
+    return timestamp <= datetime.now(timezone.utc)
 
 
 def validate_registry(registry: dict) -> None:
