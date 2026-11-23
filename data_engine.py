@@ -516,8 +516,39 @@ def _normalise_dataframe(df):
         logger.error("Faltan columnas OHLC")
         return None
 
-    if "Volume" not in df.columns:
-        df["Volume"] = 0.0
+    volume_column_present = "Volume" in df.columns
+
+    if volume_column_present:
+        raw_volume = pd.to_numeric(
+            df["Volume"],
+            errors="coerce",
+        )
+        invalid_volume = (
+            raw_volume.isna()
+            | ~np.isfinite(raw_volume.to_numpy(dtype=float))
+            | (raw_volume < 0)
+        )
+        volume_zero_count = int((raw_volume == 0).sum())
+        volume_positive_count = int((raw_volume > 0).sum())
+        volume_invalid_count = int(invalid_volume.sum())
+
+        if volume_invalid_count:
+            volume_quality = "invalid_or_missing_values"
+        elif volume_positive_count == 0:
+            volume_quality = "all_zero"
+        elif volume_zero_count:
+            volume_quality = "contains_zero_bars"
+        else:
+            volume_quality = "available"
+    else:
+        raw_volume = pd.Series(
+            np.zeros(len(df), dtype=float),
+            index=df.index,
+        )
+        volume_zero_count = len(df)
+        volume_positive_count = 0
+        volume_invalid_count = 0
+        volume_quality = "missing_column"
 
     df = df[COLUMNS].copy()
 
@@ -533,6 +564,14 @@ def _normalise_dataframe(df):
     )
     df["Volume"] = df["Volume"].fillna(0.0)
     df.loc[df["Volume"] < 0, "Volume"] = 0.0
+
+    # Preserve the distinction between genuine zero volume and values
+    # that were absent/invalid before the legacy zero-fill normalization.
+    df.attrs["volume_quality"] = volume_quality
+    df.attrs["volume_column_present"] = volume_column_present
+    df.attrs["volume_zero_count_before_normalization"] = volume_zero_count
+    df.attrs["volume_positive_count_before_normalization"] = volume_positive_count
+    df.attrs["volume_invalid_count_before_normalization"] = volume_invalid_count
 
     for col in required:
         values = df[col].to_numpy(dtype=float)
