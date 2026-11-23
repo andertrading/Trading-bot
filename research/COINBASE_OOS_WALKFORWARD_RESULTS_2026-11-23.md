@@ -61,6 +61,6 @@ No changes to production strategy selection, asset routing, risk limits, sizing,
 
 ## Reproducibility
 
-- Workflow run: [45244766224](https://github.com/andertrading/Trading-bot/actions/runs/45244766224)
-- Artifact: [coinbase-oos-walkforward-45244766224](https://github.com/andertrading/Trading-bot/actions/runs/45244766224/artifacts/14852244870)
-- Artifact SHA-256: `9e1d33001b7359e13e9540bd88a23057c394290f1eaa75134d788c5de406ffb6`
+- Workflow run: [45245218562](https://github.com/andertrading/Trading-bot/actions/runs/45244766224)
+- Artifact: [coinbase-oos-walkforward-45244766224](https://github.com/andertrading/Trading-bot/actions/runs/45244766224/artifacts/14852528494)
+- Artifact SHA-256: `01d097d31b547d3bc75e42da35f8f602b4b1e65315428a573e800e899f6990ae`
