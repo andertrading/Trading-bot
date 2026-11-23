@@ -326,7 +326,7 @@ class TestPortfolioBacktest(unittest.TestCase):
         result = simulate_portfolio([trade], capital_usd=1000.0)
         row = result["trades"][0]
         self.assertEqual(row["verified_costs_status"], "COSTS_UNVERIFIED")
-        self.assertIsNone(row["verified_net_pnl_on_gross_allocations_usd"])
+        self.assertIsNone(row["verified_net_pnl_on_gross_allocation_usd"])
         self.assertIsNone(result["summary"]["verified_net_pnl_on_gross_allocations_usd"])
         self.assertFalse(result["summary"]["costs_included"])
 
