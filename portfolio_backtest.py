@@ -2,8 +2,10 @@
 
 This module combines independently simulated trade outcomes in chronological
 order. It is deliberately a conservative *risk/cash allocation layer*, not
-a tick-level portfolio execution engine. Costs remain excluded from P&L because
-the current cost model has unpriced components.
+a tick-level portfolio execution engine. Portfolio equity and allocation remain
+gross. When actual exit prices are supplied, verified costs are recomputed at
+the portfolio-allocated quantity as a separate diagnostic; they are not included
+in equity or treated as validated net portfolio performance.
 """
 import math
 
@@ -16,6 +18,7 @@ from config import (
     MAX_RISK_PER_TRADE,
 )
 from risk_manager import risk_pct_for_score
+from transaction_costs import estimate_verified_registry_trade_costs
 
 
 HARD_MAX_RISK_PER_TRADE = 0.01
@@ -82,9 +85,12 @@ def simulate_portfolio(
     capital_usd=None,
     max_portfolio_risk_pct=None,
     max_risk_per_trade_pct=None,
+    economic_registry=None,
 ):
     """Allocate simultaneous long trades under shared risk and cash limits.
 
+    Verified cost diagnostics use actual exit prices and allocated quantities,
+    but never change gross allocation, equity or drawdown in this function.
     Drawdown is measured only from realized equity after grouped exit events.
     Intratrade mark-to-market losses and unrealized P&L are not available here.
 
@@ -150,8 +156,16 @@ def simulate_portfolio(
                 stop = float(trade["stop"])
                 score = float(trade["score"])
                 result_r = float(trade["result_R"])
+                raw_exit_price = trade.get("exit")
+                exit_price = (
+                    float(raw_exit_price) if raw_exit_price is not None else None
+                )
                 if not all(_finite(v) for v in (entry, stop, score, result_r)):
                     raise ValueError("valor no finito")
+                if exit_price is not None and (
+                    not _finite(exit_price) or exit_price <= 0
+                ):
+                    raise ValueError("precio de salida inválido")
                 if entry <= 0 or stop <= 0 or stop >= entry:
                     raise ValueError("niveles long inválidos")
                 if exit_time < entry_time:
@@ -173,6 +187,7 @@ def simulate_portfolio(
                     "stop": stop,
                     "score": score,
                     "result_R": result_r,
+                    "exit_price": exit_price,
                     "requested_risk_pct": requested_pct,
                     "risk_per_unit": entry - stop,
                 })
@@ -333,6 +348,53 @@ def simulate_portfolio(
 
     accepted_rows = []
     for position in accepted:
+        verified_costs = None
+        verified_costs_status = "EXIT_PRICE_MISSING"
+        verified_costs_total = None
+        verified_net_pnl = None
+        verified_result_r = None
+        gross_pnl_from_exit = None
+        exit_pnl_difference = None
+        unpriced_costs = ["exit_price_missing"]
+        exit_price = position.get("exit_price")
+        if exit_price is not None:
+            gross_pnl_from_exit = (
+                (exit_price - position["entry"]) * position["quantity"]
+            )
+            exit_pnl_difference = abs(
+                gross_pnl_from_exit - position.get("realized_pnl_usd", 0.0)
+            )
+            if exit_pnl_difference > max(
+                0.01, abs(position.get("realized_pnl_usd", 0.0)) * 1e-4
+            ):
+                verified_costs_status = "EXIT_PRICE_RESULT_R_MISMATCH"
+                unpriced_costs = ["exit_price_inconsistent_with_result_R"]
+            else:
+                try:
+                    verified_costs = estimate_verified_registry_trade_costs(
+                        position["asset"],
+                        position["entry"],
+                        exit_price,
+                        position["quantity"],
+                        registry=economic_registry,
+                    )
+                    if verified_costs.get("complete"):
+                        verified_costs_total = float(
+                            verified_costs["known_costs_total"]
+                        )
+                        verified_net_pnl = gross_pnl_from_exit - verified_costs_total
+                        verified_result_r = (
+                            verified_net_pnl / position["allocated_risk_usd"]
+                            if position["allocated_risk_usd"] > 0 else None
+                        )
+                        verified_costs_status = "VERIFIED_REGISTRY_COSTS_COMPLETE"
+                        unpriced_costs = []
+                    else:
+                        verified_costs_status = "COSTS_UNVERIFIED"
+                        unpriced_costs = verified_costs.get("unpriced_costs", [])
+                except Exception as exc:
+                    verified_costs_status = "COST_MODEL_ERROR"
+                    unpriced_costs = [f"{type(exc).__name__}: {exc}"]
         accepted_rows.append({
             "asset": position["asset"],
             "timeframe": position["timeframe"],
@@ -341,6 +403,7 @@ def simulate_portfolio(
             "score": position["score"],
             "entry": position["entry"],
             "stop": position["stop"],
+            "exit_price": exit_price,
             "result_R": position["result_R"],
             "requested_risk_pct": position["requested_risk_pct"],
             "allocated_risk_usd": round(position["allocated_risk_usd"], 8),
@@ -356,6 +419,24 @@ def simulate_portfolio(
             "allocation_factor": round(position["allocation_factor"], 8),
             "realized_pnl_usd": round(position.get("realized_pnl_usd", 0.0), 8),
             "equity_after_exit_usd": round(position.get("equity_after_exit_usd", equity), 8),
+            "gross_pnl_from_exit_price_usd": (
+                round(gross_pnl_from_exit, 8) if gross_pnl_from_exit is not None else None
+            ),
+            "exit_price_pnl_difference_usd": (
+                round(exit_pnl_difference, 8) if exit_pnl_difference is not None else None
+            ),
+            "verified_costs_status": verified_costs_status,
+            "verified_costs_complete": verified_costs_total is not None,
+            "verified_costs_total_usd": (
+                round(verified_costs_total, 8) if verified_costs_total is not None else None
+            ),
+            "verified_net_pnl_on_gross_allocation_usd": (
+                round(verified_net_pnl, 8) if verified_net_pnl is not None else None
+            ),
+            "verified_net_R_on_gross_allocation": (
+                round(verified_result_r, 8) if verified_result_r is not None else None
+            ),
+            "verified_unpriced_costs": ";".join(str(x) for x in unpriced_costs),
             "costs_included": False,
         })
 
@@ -363,7 +444,38 @@ def simulate_portfolio(
     gains = sum(value for value in pnl_values if value > 0)
     losses = abs(sum(value for value in pnl_values if value < 0))
     summary = result["summary"]
+    verified_costs_complete = bool(accepted_rows) and all(
+        row["verified_costs_complete"] for row in accepted_rows
+    )
+    verified_costs_total_usd = (
+        sum(row["verified_costs_total_usd"] for row in accepted_rows)
+        if verified_costs_complete else None
+    )
+    verified_net_pnl_on_gross_allocations_usd = (
+        sum(row["verified_net_pnl_on_gross_allocation_usd"] for row in accepted_rows)
+        if verified_costs_complete else None
+    )
     summary.update({
+        "verified_costs_complete_trades": sum(
+            row["verified_costs_complete"] for row in accepted_rows
+        ),
+        "verified_costs_unpriced_trades": sum(
+            not row["verified_costs_complete"] for row in accepted_rows
+        ),
+        "verified_costs_total_usd": (
+            round(verified_costs_total_usd, 8)
+            if verified_costs_total_usd is not None else None
+        ),
+        "verified_net_pnl_on_gross_allocations_usd": (
+            round(verified_net_pnl_on_gross_allocations_usd, 8)
+            if verified_net_pnl_on_gross_allocations_usd is not None else None
+        ),
+        "verified_net_return_on_gross_allocations_pct": (
+            round(verified_net_pnl_on_gross_allocations_usd / capital * 100, 6)
+            if verified_net_pnl_on_gross_allocations_usd is not None else None
+        ),
+        "verified_net_costs_included_in_allocation": False,
+        "verified_net_performance_validated": False,
         "ending_equity_usd": round(equity, 8),
         "gross_pnl_usd": round(equity - capital, 8),
         "net_pnl_usd": None,
