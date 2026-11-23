@@ -1,0 +1,62 @@
+{
+  "mode": "RESEARCH_ONLY_OOS_TEMPORAL_DEPENDENCE_AUDIT",
+  "artifact": {
+    "workflow_run_id": 45244766224,
+    "artifact_id": 14852244870,
+    "sha256": "9e1d33001b7359e13e9540bd88a23057c394290f1eaa75134d788c5de406ffb6"
+  },
+  "source_validation": {
+    "provider": "coinbase_exchange_only",
+    "series_count": 10,
+    "test_folds": 21,
+    "test_trades": 1252,
+    "duplicate_trade_identities": 0,
+    "duplicate_same_asset_same_signal_time_across_timeframes": 0,
+    "network_requests": 0,
+    "production_changes": false,
+    "etoro_price_equivalence": "not_established"
+  },
+  "overlaps": {
+    "same_asset_any_timeframe": {
+      "overlapping_pairs": 19,
+      "unique_trades_involved": 20
+    },
+    "same_asset_same_timeframe": {
+      "overlapping_pairs": 0,
+      "unique_trades_involved": 0
+    },
+    "same_asset_cross_timeframe": {
+      "overlapping_pairs": 19,
+      "unique_trades_involved": 20
+    },
+    "different_assets": {
+      "overlapping_pairs": 1707,
+      "unique_trades_involved": 1022
+    }
+  },
+  "maximum_concurrent_positions": {
+    "portfolio": 6,
+    "by_asset": {
+      "BTC": 2,
+      "ETH": 1,
+      "SOL": 1,
+      "XLM": 1,
+      "XRP": 1
+    },
+    "by_asset_timeframe": {
+      "BTC_15m": 1,
+      "BTC_1d": 1,
+      "ETH_15m": 1,
+      "ETH_1d": 1,
+      "SOL_15m": 1,
+      "SOL_1d": 1,
+      "XLM_15m": 1,
+      "XRP_15m": 1
+    }
+  },
+  "overlap_policy": {
+    "pair_overlap": "positive-duration entry-to-exit intersection",
+    "concurrency_ties": "entries before exits, matching conservative portfolio allocator"
+  },
+  "decision": "NOT_APPROVED; trade count is not independent-observation count; retain synchronized block bootstrap and existing cost/validation gates"
+}
