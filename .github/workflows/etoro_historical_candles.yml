@@ -1,6 +1,12 @@
 name: eToro Historical Market Candles (Read-Only)
 
 on:
+  push:
+    branches:
+      - main
+    paths:
+      - etoro_historical_candles.py
+      - .github/workflows/etoro_historical_candles.yml
   schedule:
     - cron: "15 0 * * 0"
   workflow_dispatch:
