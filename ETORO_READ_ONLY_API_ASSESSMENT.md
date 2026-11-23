@@ -234,3 +234,10 @@ The expanded secondary comparison now overlaps all 12 assets. Median absolute da
 The 805-test main-branch CI after these changes passed. No Twelve Data/EODHD credits were consumed, no account portfolio/positions were accessed, and no order action was performed.
 
 For the five crypto comparisons, a ±1 calendar-day Yahoo offset increased the median absolute close difference materially (BTC 1.26–1.45%, ETH 1.72–1.90%, SOL 2.15–2.39%, XLM 2.06–2.20%, XRP 1.76–2.07%) versus the zero-day alignment above. This suggests the remaining median differences are not resolved by a simple one-day date shift; it does not identify which provider's chart price is correct.
+
+
+### Economic registry blocker matrix — 23 November 2026
+
+A direct classification of the current 12-asset registry confirms **0/12 eligible**. Every asset has the same four unresolved gates: (1) complete entry-and-exit fee evidence; (2) explicit spread treatment (separate from prices versus embedded); (3) a historical conservative spread model rather than a single current snapshot; and (4) a documented mapping between historical chart prices and executable prices. Minimum-order rules are confirmed for all 12, and none requires FX conversion under the current USD-quoted/USD-account policy.
+
+The current hypothetical opening-cost snapshot is retained as evidence of that one opening scenario only. It must not be copied into the exit-fee field, treated as a round-trip cost, or used to approve an asset. The new weekday spread aggregation is intended to build a multi-session distribution; it will still require review and will not automatically approve assets.
