@@ -2674,7 +2674,7 @@ def main():
         "Cartera simulada: "
         f"{portfolio_metrics['trades_accepted']} aceptadas / "
         f"{portfolio_metrics['trades_rejected']} rechazadas | "
-        f"PnL bruto: {portfolio_metrics['net_pnl_usd']:.2f} USD | "
+        f"PnL bruto: {portfolio_metrics['gross_pnl_usd']:.2f} USD | "
         f"DD realizado máximo: {portfolio_metrics['max_drawdown_usd']:.2f} USD"
     )
     print(
