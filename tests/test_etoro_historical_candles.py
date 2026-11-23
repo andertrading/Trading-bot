@@ -130,6 +130,9 @@ class HistoricalCandleTests(unittest.TestCase):
     def test_collector_marks_conflicting_daily_history_unusable(self):
         data = history_response().data
         data["candles"][0]["candles"][1]["fromDate"] = "2026-11-22T00:00:00Z"
+        data["candles"][0]["candles"].append(
+            candle("2026-11-20T00:00:00Z", "97", "100", "96", "98")
+        )
         client = FakeClient(response=EtoroResponse(
             data=data, status_code=200, headers={}
         ))
