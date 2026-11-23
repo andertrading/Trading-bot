@@ -237,7 +237,7 @@ def fetch_artifact_reports(
         payload = _github_json(
             session,
             f"{root}/actions/workflows/{EVIDENCE_WORKFLOW}/runs"
-            f"?branch=main&status=success&per_page=100&page={page}",
+            f"?branch=main&status=completed&per_page=100&page={page}",
             headers,
         )
         batch = payload.get("workflow_runs", [])
@@ -249,7 +249,11 @@ def fetch_artifact_reports(
     cutoff = now_utc.astimezone(timezone.utc) - timedelta(days=lookback_days)
     eligible_run_ids = set()
     for run in runs:
-        if not isinstance(run, Mapping) or run.get("head_branch") != "main":
+        if (
+            not isinstance(run, Mapping)
+            or run.get("head_branch") != "main"
+            or run.get("conclusion") != "success"
+        ):
             continue
         created = _timestamp(run.get("created_at"))
         if created is not None and cutoff <= created <= now_utc.astimezone(timezone.utc):
