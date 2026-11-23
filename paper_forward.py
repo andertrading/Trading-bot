@@ -218,6 +218,28 @@ def _bar_values(bar: dict) -> tuple[datetime, float, float, float, float]:
     return timestamp, opening, high, low, close
 
 
+def _bar_evidence(bar: dict, timestamp, opening, high, low, close) -> dict:
+    evidence = {
+        "timestamp": timestamp.isoformat(),
+        "open": opening,
+        "high": high,
+        "low": low,
+        "close": close,
+    }
+    for field in (
+        "data_provider",
+        "price_adjustment_policy",
+        "price_adjustment_verified",
+        "price_adjustment_verification_status",
+        "price_adjustment_verification_source",
+        "price_adjustment_verified_at",
+        "currency",
+    ):
+        if field in bar:
+            evidence[field] = bar[field]
+    return evidence
+
+
 def _levels(signal: dict) -> tuple[float, float, float]:
     entry = _number(signal.get("entry_reference"), "signal.entry_reference")
     stop = _number(signal.get("stop"), "signal.stop")
@@ -236,6 +258,7 @@ def _finish_trade(
     reason: str,
     *,
     economic_registry: dict | None = None,
+    exit_bar: dict | None = None,
 ) -> None:
     quantity = float(trade["quantity"])
     pnl = (exit_price - float(trade["entry_fill_price"])) * quantity
@@ -282,6 +305,8 @@ def _finish_trade(
             if net_pnl is not None else None
         ),
     })
+    if exit_bar is not None:
+        trade["exit_bar"] = dict(exit_bar)
     state["realized_gross_pnl_usd"] += pnl
     state["peak_equity_usd"] = max(state["peak_equity_usd"], state["equity_usd"])
     state.setdefault("equity_history", []).append({
@@ -313,6 +338,7 @@ def process_signal_bar(
         raise ValueError("signal must contain signal_id")
     signal_id = str(signal["signal_id"])
     timestamp, opening, high, low, close = _bar_values(bar)
+    bar_evidence = _bar_evidence(bar, timestamp, opening, high, low, close)
     prior_bar = state["processed_bars"].get(signal_id)
     if prior_bar and timestamp <= _timestamp(prior_bar, "processed_bar"):
         return state
@@ -322,6 +348,23 @@ def process_signal_bar(
         trade = {"signal_id": signal_id, "asset": signal.get("asset"),
                  "timeframe": signal.get("timeframe"), "status": "WAITING"}
         state["trades"][signal_id] = trade
+
+    trade.setdefault("signal_evidence", {
+        field: signal.get(field)
+        for field in (
+            "generated_at",
+            "data_timestamp",
+            "data_provider",
+            "price_adjustment_policy",
+            "price_adjustment_verified",
+            "price_adjustment_verification_status",
+            "price_adjustment_verification_source",
+            "price_adjustment_verified_at",
+            "currency",
+            "score",
+            "provisional_risk_pct",
+        )
+    })
 
     if trade["status"] in {"WAITING", "OPEN"}:
         signal_time = _timestamp(signal.get("data_timestamp") or signal.get("generated_at"),
@@ -436,6 +479,7 @@ def process_signal_bar(
                                 trade.update({
                                     "status": "OPEN", "entry_fill_price": fill,
                                     "entry_timestamp": timestamp.isoformat(),
+                                    "entry_bar": dict(bar_evidence),
                                     "stop": stop, "target": target,
                                     "quantity": quantity, "notional_usd": notional,
                                     "cash_reserved_usd": cash_reserved,
@@ -464,6 +508,7 @@ def process_signal_bar(
                                     _finish_trade(
                                         state, trade, target, timestamp.isoformat(), "TARGET",
                                         economic_registry=economic_registry,
+                                        exit_bar=bar_evidence,
                                     )
             elif timestamp > expiry or signal.get("status") != "PENDING":
                 trade.update({"status": "NOT_FILLED_EXPIRED_OR_INVALID",
@@ -479,11 +524,11 @@ def process_signal_bar(
             if stop_hit:
                 # A gap through the stop is filled at the worse opening price.
                 exit_price = min(opening, stop) if opening <= stop else stop
-                _finish_trade(state, trade, exit_price, timestamp.isoformat(), "STOP", economic_registry=economic_registry)
+                _finish_trade(state, trade, exit_price, timestamp.isoformat(), "STOP", economic_registry=economic_registry, exit_bar=bar_evidence)
             elif target_hit:
                 # A favorable gap is filled at the opening price.
                 exit_price = max(opening, target) if opening >= target else target
-                _finish_trade(state, trade, exit_price, timestamp.isoformat(), "TARGET", economic_registry=economic_registry)
+                _finish_trade(state, trade, exit_price, timestamp.isoformat(), "TARGET", economic_registry=economic_registry, exit_bar=bar_evidence)
             else:
                 monitoring_expiry = signal.get("monitoring_expires_at")
                 if monitoring_expiry and timestamp >= _timestamp(
@@ -492,6 +537,7 @@ def process_signal_bar(
                     _finish_trade(
                         state, trade, close, timestamp.isoformat(), "TIME_EXIT",
                         economic_registry=economic_registry,
+                        exit_bar=bar_evidence,
                     )
 
     state["processed_bars"][signal_id] = timestamp.isoformat()
