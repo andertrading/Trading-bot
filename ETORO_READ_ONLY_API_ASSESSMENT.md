@@ -174,3 +174,33 @@ The weekly workflow requests 12 instruments and up to 1,000 daily candles per in
 
 The API path requires the documented interval enum (for example, OneDay), not the shorthand 1d. The client accepts concise internal aliases and maps them to the official API enum before making the request. The candle endpoint documents a maximum of 1,000 candles per request and a shared market-data quota of 120 requests per 60 seconds.
 
+
+## Historical candle and secondary OHLC reconciliation — 2026-11-23
+
+The first live historical capture resolved all 12 configured instruments. Seven histories passed the duplicate/structural checks; five crypto histories (BTC, ETH, SOL, XLM, XRP) remain unusable.
+
+The crypto failures are not caused by local timestamp conversion. The raw eToro response contains identical fromDate strings for multiple candles on US daylight-saving transition dates (2024-11-03, 2025-11-02 and, in the latest capture, 2026-11-01), while the OHLC values differ. The collector excludes the conflicted timestamps, retains both source values in diagnostics, and marks the affected history unusable. It does not choose a candle or synthesize a replacement.
+
+A secondary Yahoo Finance comparison was run for the seven usable eToro histories, using the same auto_adjust=False, split-aware daily OHLC policy already used by the data engine. It is a diagnostic comparison only. The current incomplete UTC date is excluded and incoherent Yahoo OHLC envelopes are rejected.
+
+Latest overlapping completed daily bars:
+- CSPX: 509
+- CNDX: 992
+- TSLA, NVDA, AAPL, MSFT and TTWO: 995 each
+
+Median absolute same-date close differences were approximately 0.13%–0.16% for six assets and 0.16% for TTWO; 95th-percentile close differences ranged from approximately 0.27% to 0.73%. Comparing the same eToro date to Yahoo's previous or next calendar date materially worsened the median close difference, so a one-day date shift is not supported by this sample.
+
+The open/high/low comparisons are materially less consistent. There are individual large discrepancies in both sources, including abnormal Yahoo ETF ranges and eToro-vs-Yahoo stock opening/range differences. These may reflect session definitions, venue/extended-hours prints or provider anomalies; the available evidence does not establish which. Consequently:
+- Same-date closes are broadly aligned at a diagnostic level, not certified.
+- Daily open/high/low price-basis parity is not validated.
+- Historical executable bid/ask parity is not validated.
+- Do not use these comparisons to approve entry, stop or target execution assumptions, or to mark transaction costs complete.
+
+The separate etoro_yahoo_reconciliation.json artifact retains per-field distributions and dated OHLC outliers for review. The collector remains market-only and performs no account, position, PnL, order or trade-history requests.
+
+## Forward spread sample collection
+
+The weekday market-evidence workflow continues to collect timestamped realtime bid/ask snapshots. A separate weekly GitHub Actions audit now reads the retained etoro-market-evidence artifacts and reports per-asset median, p90, p95 and maximum quote-derived spread after deduplicating to one latest sample per UTC date.
+
+The first aggregation found one available forward sample and zero assets with the minimum 30 distinct dates. The report remains FORWARD_SAMPLE_COLLECTION; at 30 or 60 samples it will only become ready for manual review, never automatic approval. It does not modify asset_economic_registry.json, infer round-trip fees, or access account/position/order data.
+
