@@ -86,6 +86,14 @@ class HistoricalCandleTests(unittest.TestCase):
         with self.assertRaises(EtoroAPIError):
             normalize_candles(data, 1001, count=10, now_utc=NOW)
 
+    def test_rejects_ungrouped_candles_without_instrument_identity(self):
+        data = {"candles": [{
+            "fromDate": "2026-11-22T00:00:00Z",
+            "open": "100", "high": "102", "low": "99", "close": "101",
+        }]}
+        with self.assertRaises(EtoroAPIError):
+            normalize_candles(data, 1001, count=10, now_utc=NOW)
+
     def test_rejects_duplicate_timestamps(self):
         data = history_response().data
         data["candles"][0]["candles"][1]["fromDate"] = "2026-11-22T00:00:00Z"
