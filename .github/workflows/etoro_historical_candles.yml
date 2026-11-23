@@ -6,6 +6,7 @@ on:
       - main
     paths:
       - etoro_historical_candles.py
+      - etoro_read_only.py
       - .github/workflows/etoro_historical_candles.yml
   schedule:
     - cron: "15 0 * * 0"

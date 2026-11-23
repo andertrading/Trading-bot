@@ -11,6 +11,7 @@ class EtoroHistoricalCandleWorkflowTests(unittest.TestCase):
         self.assertIn("branches:", workflow)
         self.assertIn("- main", workflow)
         self.assertIn("etoro_historical_candles.py", workflow)
+        self.assertIn("etoro_read_only.py", workflow)
         self.assertIn("ETORO_API_KEY: ${{ secrets.ETORO_API_KEY }}", workflow)
         self.assertIn("python - <<'PY'", workflow)
         self.assertIn("hashFiles('artifacts/etoro_historical_candles.json')", workflow)
