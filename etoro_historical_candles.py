@@ -267,6 +267,7 @@ def collect_historical_candles(
 
     resolved = 0
     sufficient = 0
+    research_usable_count = 0
     failures = 0
     for asset, config in symbols.items():
         record = {
@@ -274,6 +275,7 @@ def collect_historical_candles(
             "instrument": None,
             "historical_candles": None,
             "errors": [],
+            "warnings": [],
         }
         report["assets"][asset] = record
         try:
@@ -311,9 +313,12 @@ def collect_historical_candles(
             conflicts_excluded = candle_diagnostics[
                 "conflicting_duplicate_timestamps"
             ]
-            research_usable = enough and conflicts_excluded >= 0
-            if research_usable:
+            strict_usable = enough and conflicts_excluded == 0
+            research_usable = enough
+            if strict_usable:
                 sufficient += 1
+            if research_usable:
+                research_usable_count += 1
             record["historical_candles"] = {
                 "interval": interval,
                 "requested_count": count,
@@ -329,7 +334,7 @@ def collect_historical_candles(
                     "duplicate_timestamp_conflicts"
                 ],
                 "sufficient_history": enough,
-                "history_usable": conflicts_excluded == 0 and enough,
+                "history_usable": strict_usable,
                 "research_history_usable": research_usable,
                 "research_history_policy": (
                     "AMBIGUOUS_DUPLICATE_DATES_EXCLUDED"
@@ -368,6 +373,14 @@ def collect_historical_candles(
         "configured_assets": len(symbols),
         "resolved_instruments": resolved,
         "assets_with_sufficient_history": sufficient,
+        "assets_with_research_usable_history": research_usable_count,
+        "assets_with_excluded_conflict_dates": sum(
+            bool(
+                isinstance(record.get("historical_candles"), Mapping)
+                and record["historical_candles"].get("conflicting_duplicate_timestamps", 0)
+            )
+            for record in report["assets"].values()
+        ),
         "assets_with_errors": failures,
         "status": (
             "COMPLETE"
