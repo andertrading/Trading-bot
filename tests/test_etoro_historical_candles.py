@@ -127,7 +127,7 @@ class HistoricalCandleTests(unittest.TestCase):
         )
         self.assertIn("open", conflict["source_fields"])
 
-    def test_collector_marks_conflicting_daily_history_unusable(self):
+    def test_collector_keeps_conflicted_daily_history_research_only(self):
         data = history_response().data
         data["candles"][0]["candles"][1]["fromDate"] = "2026-11-22T00:00:00Z"
         data["candles"][0]["candles"].append(
