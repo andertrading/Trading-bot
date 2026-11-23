@@ -159,17 +159,18 @@ class TestAssetEconomicEligibility(unittest.TestCase):
         result = eligibility.classify_asset("CSPX")
         self.assertTrue(result["registry_source_of_truth"])
         self.assertEqual(result["status"], "COSTS_UNVERIFIED")
-        self.assertIn("instrument_identity_not_confirmed_in_instrument_ticket", result["blockers"])
+        self.assertNotIn("instrument_identity_not_confirmed_in_instrument_ticket", result["blockers"])
+        self.assertIn("round_trip_close_fee_not_confirmed", result["blockers"])
 
-    def test_default_configuration_does_not_claim_execution_is_confirmed(self):
+    def test_etoro_eligibility_confirms_real_unleveraged_long_capability(self):
         result = eligibility.classify_asset("CSPX")
         self.assertEqual(result["status"], "COSTS_UNVERIFIED")
-        self.assertIn(
+        self.assertNotIn(
             "execution_type_not_confirmed_in_instrument_ticket",
             result["blockers"],
         )
         self.assertEqual(result["configured_execution_type"], "REAL")
-        self.assertFalse(result["execution_type_confirmed"])
+        self.assertTrue(result["execution_type_confirmed"])
 
 
 if __name__ == "__main__":
