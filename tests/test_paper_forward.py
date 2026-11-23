@@ -87,6 +87,14 @@ class PaperForwardTests(unittest.TestCase):
             "price_adjustment_verification_status": "NOT_REQUIRED",
             "currency": "USD",
             "score": 82,
+            "signal_bar_evidence": {
+                "timestamp": "2026-11-22T10:00:00+00:00",
+                "open": 99.0,
+                "high": 101.0,
+                "low": 98.0,
+                "close": 100.0,
+                "data_provider": "synthetic-provider",
+            },
         })
         entry_bar = bar(
             "2026-11-22T10:15:00+00:00", 99, 101, 98, 100
@@ -104,6 +112,9 @@ class PaperForwardTests(unittest.TestCase):
         )
         self.assertEqual(
             trade["signal_evidence"]["price_adjustment_policy"], "RAW"
+        )
+        self.assertEqual(
+            trade["signal_evidence"]["signal_bar_evidence"]["close"], 100.0
         )
         self.assertEqual(
             trade["entry_bar"]["timestamp"], "2026-11-22T10:15:00+00:00"
