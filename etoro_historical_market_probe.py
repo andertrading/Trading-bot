@@ -54,8 +54,12 @@ def normalize_candle_history(response: Any, instrument_id: int, expected_interva
     if response.data.get("interval") != expected_interval:
         raise EtoroAPIError("El intervalo devuelto no coincide con el solicitado")
     groups = response.data.get("candles")
-    if not isinstance(groups, list) or len(groups) != 1:
-        raise EtoroAPIError("Respuesta incompleta, vacía o ambigua: se esperaba un grupo de instrumento")
+    if not isinstance(groups, list):
+        raise EtoroAPIError("Falta la lista de grupos de velas")
+    if not groups:
+        return []
+    if len(groups) != 1:
+        raise EtoroAPIError("Respuesta ambigua: se esperaba un único grupo de instrumento")
     group = groups[0]
     if not isinstance(group, Mapping) or group.get("instrumentId") != instrument_id:
         raise EtoroAPIError("El grupo de velas corresponde a otro instrumento")
