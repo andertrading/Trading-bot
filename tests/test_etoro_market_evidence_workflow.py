@@ -7,7 +7,7 @@ class EtoroMarketEvidenceWorkflowTests(unittest.TestCase):
         workflow = Path(".github/workflows/etoro_market_evidence.yml").read_text(
             encoding="utf-8"
         )
-        self.assertIn('cron: "0 15 * * 1-5"', workflow)
+        self.assertIn('cron: "17 15 * * 1-5"', workflow)
         self.assertIn("workflow_dispatch:", workflow)
         self.assertIn("permissions:\n  contents: read", workflow)
         self.assertIn("retention-days: 90", workflow)
