@@ -7,7 +7,7 @@ class EtoroSpreadHistoryWorkflowTests(unittest.TestCase):
         workflow = Path(".github/workflows/etoro_spread_history.yml").read_text(
             encoding="utf-8"
         )
-        self.assertIn('cron: "0 16 * * 1-5"', workflow)
+        self.assertIn('cron: "23 16 * * 1-5"', workflow)
         self.assertIn("workflow_dispatch:", workflow)
         self.assertIn("actions: read", workflow)
         self.assertIn("contents: read", workflow)
