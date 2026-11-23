@@ -1,0 +1,80 @@
+name: Coinbase chronological OOS walk-forward research
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: coinbase-walkforward-oos
+  cancel-in-progress: false
+
+jobs:
+  walkforward:
+    name: Validate Coinbase strategies out of sample
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Checkout research runner
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install project dependencies
+        run: python -m pip install --disable-pip-version-check -r requirements.txt
+
+      - name: Download retained Coinbase-only OHLCV artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: coinbase-only-ohlcv-45233527066
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          run-id: 45233527066
+          path: data/coinbase_only
+
+      - name: Run chronological validation and test folds
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p research_results
+          for asset in BTC ETH SOL XLM XRP; do
+            for timeframe in 15m 1d; do
+              python research/run_segmented_crypto_walkforward.py \
+                --csv "data/coinbase_only/$asset"_"$timeframe".csv \
+                --manifest data/coinbase_only/manifest.json \
+                --asset "$asset" \
+                --ticker "$asset-USD" \
+                --interval "$timeframe" \
+                --output "research_results/$asset"_"$timeframe".json
+            done
+          done
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          files = sorted(Path("research_results").glob("*.json"))
+          assert len(files) == 10, f"Expected 10 outputs, found {len(files)}"
+          for path in files:
+              result = json.loads(path.read_text())
+              assert result["network_requests"] == 0
+              assert result["all_trades_inside_oos_fold"] is True
+              assert result["verified_cost_adjusted_total_R"] is None
+              for fold in result["folds"]:
+                  assert fold["all_trades_inside_fold"] is True
+                  for trade in fold["trades"]:
+                      assert trade["data_source"] == "coinbase_exchange_only"
+                      assert trade["etoro_price_equivalence"] == "not_established"
+          print("PASS: ten Coinbase-only OOS outputs; fold integrity; zero network requests; costs remain unpriced")
+          PY
+
+      - name: Upload OOS walk-forward results
+        uses: actions/upload-artifact@v4
+        with:
+          name: coinbase-oos-walkforward-${{ github.run_id }}
+          path: research_results/
+          if-no-files-found: error
+          retention-days: 90
