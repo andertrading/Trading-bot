@@ -143,9 +143,22 @@ def paper_portfolio_snapshot(
         raise ValueError("paper portfolio open notional exceeds conservative capital")
     available_capital_usd = max(0.0, available_capital_usd)
 
+    reported_costs_status = state.get("costs_status")
+    if reported_costs_status not in {
+        "NOT_INCLUDED_UNVERIFIED",
+        "VERIFIED_COSTS_RESERVED_AT_STOP",
+        "VERIFIED_NET_COSTS_INCLUDED",
+        "UNRESOLVED_CLOSE_COSTS",
+    }:
+        reported_costs_status = "NOT_INCLUDED_UNVERIFIED"
+
     return {
         "execution_mode": "PAPER_ONLY",
-        "portfolio_basis": "PAPER_GROSS_CONSERVATIVE_CAPITAL",
+        "portfolio_basis": (
+            "PAPER_NET_CONSERVATIVE_CAPITAL"
+            if reported_costs_status == "VERIFIED_NET_COSTS_INCLUDED"
+            else "PAPER_GROSS_CONSERVATIVE_CAPITAL"
+        ),
         "initial_capital_usd": initial_capital,
         "equity_usd": equity,
         "capital_usd": capital_base,
@@ -156,7 +169,7 @@ def paper_portfolio_snapshot(
         "available_capital_usd": available_capital_usd,
         # The forward engine does not yet debit verified net costs.
         # Never allow a persisted flag to claim otherwise.
-        "costs_status": "NOT_INCLUDED_UNVERIFIED",
+        "costs_status": reported_costs_status,
     }
 
 
@@ -520,7 +533,7 @@ def calculate_verified_cost_aware_quantity(
     rate = float(unit["quote_to_usd"])
     fixed_cost_usd = float(unit["fixed_costs_quote"]) * rate
     variable_cost_per_unit_usd = float(unit["costs_per_unit_quote"]) * rate
-    gross_risk_per_unit = entry - stop
+    gross_risk_per_unit = (entry - stop) * rate
     total_risk_per_unit = gross_risk_per_unit + variable_cost_per_unit_usd
     if (
         not all(math.isfinite(value) for value in (
