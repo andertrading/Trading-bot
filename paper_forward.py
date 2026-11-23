@@ -1,9 +1,11 @@
 """Prospective, execution-free paper portfolio engine.
 
-This module simulates only research signals against subsequent completed OHLC
-bars. It has no broker/API integration and never places or manages real orders.
-Gross results are reported separately; transaction costs are deliberately
-unpriced until the instrument-specific eToro execution model is verified.
+This module simulates research signals against subsequent completed OHLC bars.
+It has no broker/API integration and never places or manages real orders.
+It supports an explicitly labelled gross-diagnostic mode and an optional
+verified-registry cost mode. The latter blocks entries without complete
+instrument evidence, reserves round-trip costs at the stop, and books verified
+net costs at close. Neither mode validates live execution or net profitability.
 """
 from __future__ import annotations
 
@@ -197,8 +199,8 @@ def paper_portfolio_snapshot(
         "estimated_cost_reserve_usd": max(0.0, cash_reserved_usd - invested_notional_usd),
         "cash_reserved_usd": cash_reserved_usd,
         "available_capital_usd": available_capital_usd,
-        # The forward engine does not yet debit verified net costs.
-        # Never allow a persisted flag to claim otherwise.
+        # VERIFIED_NET_COSTS_INCLUDED is set only after _finish_trade has
+        # booked complete verified close costs into paper equity.
         "costs_status": reported_costs_status,
     }
 
@@ -497,20 +499,52 @@ def paper_summary(state: dict) -> dict:
     wins = [trade for trade in closed if float(trade["gross_pnl_usd"]) > 0]
     losses = [trade for trade in closed if float(trade["gross_pnl_usd"]) < 0]
     gross = float(state["realized_gross_pnl_usd"])
+    def _drawdown_pct(equity_curve):
+        running_peak = float(state["initial_capital_usd"])
+        maximum = 0.0
+        for equity_point in equity_curve:
+            running_peak = max(running_peak, equity_point)
+            if running_peak > 0:
+                maximum = max(
+                    maximum,
+                    (running_peak - equity_point) / running_peak * 100.0,
+                )
+        return maximum
+
+    # Reconstruct gross equity from gross trade PnL, not the live paper ledger:
+    # that ledger is net of verified costs for verified-cost trades.
+    chronological_closed = sorted(
+        closed,
+        key=lambda trade: str(trade.get("exit_timestamp") or ""),
+    )
+    gross_equity_curve = [float(state["initial_capital_usd"])]
+    gross_equity = gross_equity_curve[0]
+    for trade in chronological_closed:
+        gross_equity += float(trade["gross_pnl_usd"])
+        gross_equity_curve.append(gross_equity)
+    max_drawdown_pct_gross = _drawdown_pct(gross_equity_curve)
+
     equity_points = [
         float(point["equity_usd"])
         for point in state.get("equity_history", [])
         if isinstance(point, dict) and point.get("equity_usd") is not None
     ]
-    running_peak = float(state["initial_capital_usd"])
-    max_drawdown_pct = 0.0
-    for equity_point in equity_points:
-        running_peak = max(running_peak, equity_point)
-        if running_peak > 0:
-            max_drawdown_pct = max(
-                max_drawdown_pct,
-                (running_peak - equity_point) / running_peak * 100.0,
-            )
+    max_drawdown_pct_equity = _drawdown_pct(equity_points)
+
+    net_complete = bool(closed) and all(
+        trade.get("cost_mode") == "VERIFIED_REGISTRY"
+        and trade.get("net_pnl_usd") is not None
+        for trade in closed
+    )
+    max_drawdown_pct_net = None
+    if net_complete:
+        net_equity_curve = [float(state["initial_capital_usd"])]
+        net_equity = net_equity_curve[0]
+        for trade in chronological_closed:
+            net_equity += float(trade["net_pnl_usd"])
+            net_equity_curve.append(net_equity)
+        max_drawdown_pct_net = _drawdown_pct(net_equity_curve)
+
     closed_r = [float(trade["result_r"]) for trade in closed]
     gross_wins = sum(float(t["gross_pnl_usd"]) for t in wins)
     gross_losses = abs(sum(float(t["gross_pnl_usd"]) for t in losses))
@@ -526,7 +560,9 @@ def paper_summary(state: dict) -> dict:
         "win_rate_pct_gross": len(wins) / len(closed) * 100.0 if closed else None,
         "profit_factor_gross": gross_wins / gross_losses if gross_losses > 0 else None,
         "expectancy_r_gross": sum(closed_r) / len(closed_r) if closed_r else None,
-        "max_drawdown_pct_gross": max_drawdown_pct,
+        "max_drawdown_pct_gross": max_drawdown_pct_gross,
+        "max_drawdown_pct_net": max_drawdown_pct_net,
+        "max_drawdown_pct_equity": max_drawdown_pct_equity,
         "open_risk_usd": _open_risk(state),
         "realized_costs_usd": float(state.get("realized_costs_usd", 0.0)),
         "realized_net_pnl_usd": float(state.get("realized_net_pnl_usd", 0.0)),
