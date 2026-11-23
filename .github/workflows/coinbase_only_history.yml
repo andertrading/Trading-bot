@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: coinbase-only-history-\${{ github.ref }}
+  group: coinbase-only-history-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -46,7 +46,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: coinbase-only-ohlcv-\${{ github.run_id }}
+          name: coinbase-only-ohlcv-${{ github.run_id }}
           path: artifacts/coinbase_only/
           if-no-files-found: warn
           retention-days: 90
