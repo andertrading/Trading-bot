@@ -59,7 +59,7 @@ These are descriptive gross results for accepted trades only. The daily samples 
 | XRP | M15 | 185 | −$57.04 | 31.35% | 0.8286 |
 | BTC | Daily | 1 | −$2.70 | 0.00% | 0.0000 |
 | ETH | Daily | 2 | −$8.13 | 0.00% | 0.0000 |
-| SOL | Daily | 2 | −$0.00 | 50.00% | 0.9993 |
+| SOL | Daily | 2 | −$0.004 | 50.00% | 0.9993 |
 
 XLM and XRP remain materially negative in this gross accepted-trade breakdown. BTC and ETH contribute most of the positive gross result. The daily sample has only five candidates in total and is not statistically informative.
 
