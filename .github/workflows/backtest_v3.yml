@@ -546,4 +546,4 @@ jobs:
             resultados_cartera_backtest_v3.csv
             historicos_backtest_v3/
           if-no-files-found: warn
-          retention-days: 30
+          retention-days: 90
