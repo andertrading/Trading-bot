@@ -67,6 +67,17 @@ A ±1-day shift worsens the median close difference for every asset (exact media
 
 These differences are substantially larger than Coinbase/Twelve Data daily close differences. They are consistent with meaningful venue/chart-price basis differences, but cannot establish which price is executable or which source is correct. No eToro bid/ask history is available to make that determination.
 
+
+## Backtest gap-handling code audit
+
+A separate code inspection of the current `main` branch identified an additional M15 research risk:
+- `backtest_v3.py` calculates indicators once on the full DataFrame using `add_indicators(data)`, before candidate evaluation.
+- `_validate_execution_gaps` checks signal-to-entry and entry-to-exit intervals, but does not reset rolling/EMA indicator state at a prior historical gap.
+- Therefore, a candidate whose execution path does not cross a gap can still have indicator inputs whose lookback spans candles separated by several hours. That is not a valid continuous M15 indicator sequence.
+- `data_engine.py::_has_intraday_gaps` strictly rejects any non-15-minute interval for crypto in the live data validation path; this remains an important guard and must not be weakened.
+
+Follow-up issue [#197](https://github.com/andertrading/Trading-bot/issues/197) tracks a research-only contiguous-segment builder, independent indicator warm-up per segment, no trades crossing segment boundaries, and synthetic gap regression tests. Coinbase M15 remains excluded from continuous-history research until this is implemented and validated.
+
 ## Decisions
 
 1. Coinbase-only daily crypto OHLCV is a credible **research candidate**, with valid non-zero Coinbase venue volume and low median daily close differences versus Twelve Data on exact timestamps. It is not approved as an eToro execution-price substitute.
