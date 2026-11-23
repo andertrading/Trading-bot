@@ -1,0 +1,77 @@
+{
+  "schema_version": 1,
+  "mode": "DATED_PUBLIC_FEE_SCHEDULE_EVIDENCE_ONLY",
+  "observed_date": "2026-11-23",
+  "observed_at_utc": "2026-11-23T20:42:00Z",
+  "broker": "eToro",
+  "account_or_portfolio_data_accessed": false,
+  "order_or_close_request_submitted": false,
+  "purpose": "Preserve public fee schedule statements as scoped evidence without promoting them to instrument-specific verified execution costs.",
+  "sources": [
+    {
+      "id": "etoro_spain_fees",
+      "url": "https://www.etoro.com/es/trading/fees/",
+      "scope": "Public pricing page; country/exchange selector did not expose a usable Spain-specific stock fee result during this review.",
+      "observed_date": "2026-11-23"
+    },
+    {
+      "id": "etoro_fee_help",
+      "url": "https://help.etoro.com/s/article/which-fees-and-commissions-does-etoro-have?language=en_GB",
+      "scope": "Public help article describing fee categories and conditional applicability.",
+      "observed_date": "2026-11-23"
+    },
+    {
+      "id": "etoro_what_if_cost_api",
+      "url": "https://api-portal.etoro.com/api-reference/trading--real/get-what-if-trading-cost-breakdown",
+      "scope": "Hypothetical cost endpoint; open action supported; close and buyToCover unsupported according to reference reviewed.",
+      "observed_date": "2026-11-23"
+    }
+  ],
+  "fee_classes": {
+    "stocks": {
+      "published_statement": "A USD 1 or USD 2 commission may apply per opening and closing transaction depending on residence and exchange.",
+      "applicability": "UNRESOLVED_FOR_THIS_ACCOUNT_AND_INSTRUMENT",
+      "amount_usd": null,
+      "fee_scope": "PER_TRANSACTION_PUBLIC_SCHEDULE_CONDITIONAL",
+      "instrument_specific_confirmed": false,
+      "notes": "Do not select USD 1 or USD 2 without a usable Spain/residence and exchange-specific determination."
+    },
+    "etfs": {
+      "published_statement": "Published trading commission listed as zero; market spread remains applicable.",
+      "applicability": "PUBLIC_SCOPE_ONLY",
+      "commission_usd": 0,
+      "instrument_specific_confirmed": false,
+      "notes": "Zero commission does not mean zero execution cost. Spread treatment and historical execution basis remain unverified."
+    },
+    "manual_crypto": {
+      "published_statement": "Published commission is tiered by eToro Club level and monthly volume; Bronze/Silver/Gold show 1%, with lower tiers at higher Club levels.",
+      "applicability": "UNRESOLVED_FOR_THIS_ACCOUNT",
+      "percent_notional": null,
+      "club_tier": null,
+      "monthly_volume_basis": null,
+      "instrument_specific_confirmed": false,
+      "notes": "Do not assume the user's Club tier or monthly volume. This evidence is not a round-trip cost model."
+    }
+  },
+  "cost_scope_status": {
+    "hypothetical_open_quote": "AVAILABLE_FOR_CONFIGURED_ASSETS_WHEN_RETURNED_BY_API",
+    "hypothetical_close_quote": "UNAVAILABLE_ENDPOINT_DOES_NOT_CURRENTLY_SUPPORT_CLOSE_ACTION",
+    "historical_spread": "UNPRICED",
+    "execution_price_basis": "UNCONFIRMED",
+    "verified_round_trip_cost": "UNAVAILABLE"
+  },
+  "registry_policy": {
+    "update_per_asset_fees_confirmed": false,
+    "update_per_asset_round_trip_cost_confirmed": false,
+    "public_schedule_may_be_used_as_verified_trade_cost": false,
+    "require_timestamped_instrument_or_account_specific_evidence": true,
+    "preserve_fail_closed_eligibility": true
+  },
+  "limitations": [
+    "Public schedule statements do not establish the fee applicable to every configured instrument or this account.",
+    "Current bid/ask snapshots do not establish historical spread or execution prices.",
+    "An open-only hypothetical quote cannot establish closing costs.",
+    "No real portfolio, balance, holdings, positions, PnL, orders, or trade history was accessed."
+  ],
+  "approval": "NOT_APPROVED; public fee schedule evidence only."
+}
