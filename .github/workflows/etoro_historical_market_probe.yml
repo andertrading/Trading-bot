@@ -1,0 +1,56 @@
+name: eToro Historical Market Data Probe
+
+on:
+  workflow_dispatch:
+    inputs:
+      candles_count:
+        description: "Candles per instrument and interval (maximum 1000)"
+        required: true
+        default: "1000"
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: etoro-historical-market-data-probe
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      ETORO_API_KEY: ${{ secrets.ETORO_API_KEY }}
+      ETORO_USER_KEY: ${{ secrets.ETORO_USER_KEY }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Validate credentials without exposing them
+        run: |
+          python - <<'PY'
+          import os
+          missing = [name for name in ("ETORO_API_KEY", "ETORO_USER_KEY") if not os.getenv(name)]
+          if missing:
+              raise SystemExit("Missing GitHub Actions secrets: " + ", ".join(missing))
+          print("eToro credentials present; values are not displayed.")
+          PY
+      - name: Request historical market candles only
+        run: |
+          python etoro_historical_market_probe.py --candles-count "${{ inputs.candles_count }}"
+      - name: Upload historical market evidence
+        if: always() && hashFiles('artifacts/etoro_historical_market_probe.json') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: etoro-historical-market-probe
+          path: artifacts/etoro_historical_market_probe.json
+          if-no-files-found: error
+          retention-days: 90
