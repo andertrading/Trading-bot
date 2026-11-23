@@ -76,13 +76,32 @@ def _open_risk(state: dict) -> float:
     )
 
 
+def _trade_cash_reserved(trade: dict, notional_usd: float) -> float:
+    """Return a validated cash reserve, including legacy verified-cost trades."""
+    if "cash_reserved_usd" in trade:
+        reserved = _number(trade["cash_reserved_usd"], "cash_reserved_usd")
+    elif trade.get("cost_mode") == "VERIFIED_REGISTRY":
+        if "estimated_stop_costs_usd" not in trade:
+            raise ValueError("verified open trade is missing its estimated cost reserve")
+        reserved = notional_usd + _number(
+            trade["estimated_stop_costs_usd"], "estimated_stop_costs_usd"
+        )
+    else:
+        reserved = notional_usd
+    if reserved + 1e-9 < notional_usd:
+        raise ValueError("paper trade cash reserve cannot be below its notional")
+    return reserved
+
+
 def _open_cash_reserved(state: dict) -> float:
     """Reserve entry notional plus conservative verified cost reserves."""
-    return sum(
-        float(trade.get("cash_reserved_usd", trade.get("notional_usd", 0.0)))
-        for trade in state["trades"].values()
-        if trade.get("status") == "OPEN"
-    )
+    total = 0.0
+    for trade in state["trades"].values():
+        if trade.get("status") != "OPEN":
+            continue
+        notional = _number(trade.get("notional_usd"), "notional_usd")
+        total += _trade_cash_reserved(trade, notional)
+    return total
 
 
 def paper_portfolio_snapshot(
@@ -109,8 +128,8 @@ def paper_portfolio_snapshot(
         raise ValueError("paper portfolio initial capital does not match the configured reference")
 
     equity = _number(state.get("equity_usd"), "equity_usd")
-    # Costs are not priced in the forward ledger yet. Never let gross gains
-    # enlarge the capital base; realized gross losses still reduce it.
+    # Keep the capital base conservative: gains never raise it above the
+    # reference capital, while realized net or gross losses reduce it.
     capital_base = min(equity, initial_capital)
 
     open_positions = []
@@ -130,12 +149,7 @@ def paper_portfolio_snapshot(
         )
         open_risk_usd += risk_usd
         invested_notional_usd += notional_usd
-        trade_cash_reserved = _number(
-            trade.get("cash_reserved_usd", notional_usd),
-            f"{signal_id}.cash_reserved_usd",
-        )
-        if trade_cash_reserved + 1e-9 < notional_usd:
-            raise ValueError("paper trade cash reserve cannot be below its notional")
+        trade_cash_reserved = _trade_cash_reserved(trade, notional_usd)
         cash_reserved_usd += trade_cash_reserved
         if (
             not math.isfinite(open_risk_usd)
