@@ -61,9 +61,9 @@ No changes to production strategy selection, asset routing, risk limits, sizing,
 
 ## Reproducibility
 
-- Workflow run: [45245218562](https://github.com/andertrading/Trading-bot/actions/runs/45244766224)
-- Artifact: [coinbase-oos-walkforward-45244766224](https://github.com/andertrading/Trading-bot/actions/runs/45244766224/artifacts/14852528494)
-- Artifact SHA-256: `01d097d31b547d3bc75e42da35f8f602b4b1e65315428a573e800e899f6990ae`
+- Workflow run: [45244766224](https://github.com/andertrading/Trading-bot/actions/runs/45244766224)
+- Artifact: [coinbase-oos-walkforward-45244766224](https://github.com/andertrading/Trading-bot/actions/runs/45244766224/artifacts/14852244870)
+- Artifact ZIP SHA-256 (verified against GitHub artifact digest): `9e1d33001b7359e13e9540bd88a23057c394290f1eaa75134d788c5de406ffb6`
 
 
 ## Exploratory uncertainty check — M15 test partition
@@ -78,3 +78,29 @@ A calendar-week block bootstrap was applied to the 1,247 M15 test trades. Weekly
 - In the one-week bootstrap, 55.7% of replicates had positive aggregate gross R.
 
 All mean-return intervals include zero. This reinforces that the small positive aggregate test result is not a demonstrated edge. The bootstrap is exploratory rather than a formal inferential guarantee: it uses a single historical test partition, weekly blocks, and independently resamples each segment; it does not model cross-asset dependence, execution costs, or portfolio capital constraints. No daily bootstrap is reported because the daily test sample has only five trades.
+
+## Cross-asset synchronized block bootstrap — 2026-11-23
+
+The earlier exploratory bootstrap resampled each asset/contiguous-segment sample independently. That preserves within-series weekly dependence but does not preserve observed cross-asset co-movement. I therefore downloaded the exact OOS artifact above and ran an additional synchronized sensitivity analysis using all five Coinbase M15 assets together.
+
+- Input: the five *_15m.json files from the verified OOS artifact; only trades tagged oos_fold=test were included.
+- Integrity: all five files identify Coinbase Exchange-only data, mark eToro price equivalence as not established, and pass their fold-boundary assertions.
+- Sample: 1,247 test trades, 16 test folds, 26 active UTC calendar weeks across four disjoint test windows.
+- Observed result: +6.8635 gross R, or +0.00550 gross R per trade.
+- Each week's R and trade count were aggregated across all assets before resampling. The same sampled calendar-week indices were therefore applied to the joint cross-asset panel, preserving observed co-movement in overlapping test weeks.
+- Circular blocks of 1, 2 and 4 weeks were sampled independently within each disjoint union window; blocks did not bridge the long gaps between test windows.
+- Replicates: 20,000 per block length; fixed seed 20261123.
+
+| Block length | 95% interval: total gross R | 95% interval: mean gross R/trade | Positive total-R replicates |
+|---|---:|---:|---:|
+| 1 week | −80.58 to +96.84 | −0.06873 to +0.07356 | 55.74% |
+| 2 weeks | −56.58 to +68.75 | −0.04942 to +0.05301 | 58.59% |
+| 4 weeks | −44.86 to +57.53 | −0.03790 to +0.04364 | 60.64% |
+
+All three mean-return intervals include zero. Synchronizing the assets does not change the conclusion: the small positive observed M15 result is not evidence of a robust edge.
+
+The reproducible implementation is research/coinbase_joint_block_bootstrap.py; its unit tests are in tests/test_coinbase_joint_block_bootstrap.py. Run it against the extracted OOS artifact with:
+
+    python research/coinbase_joint_block_bootstrap.py --input-dir /path/to/extracted-artifact --output joint_bootstrap.json
+
+This remains a gross trade-R uncertainty diagnostic, not a portfolio backtest. It does not model verified eToro prices or costs, position sizing, simultaneous capital constraints, or live execution. Only cross-asset dependence observed in overlapping test weeks is retained. No production, strategy, risk, sizing, alert, or automation settings were changed, and no provider/network requests were made.
