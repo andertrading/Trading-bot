@@ -23,6 +23,33 @@ class AssetEconomicRegistryTests(unittest.TestCase):
         self.assertEqual(report["summary"]["COSTS_UNVERIFIED"], 12)
         self.assertFalse(report["account_portfolio_data_accessed"])
 
+
+    def test_etoro_symbol_mapping_does_not_overwrite_data_provider_listing(self):
+        item = self.registry["assets"]["CSPX"]["instrument"]
+        self.assertEqual(item["listing"], "CSPX.LSE")
+        self.assertEqual(item["etoro_symbol"], "CSPX.L")
+        self.assertEqual(item["etoro_instrument_id"], 3434)
+
+
+    def test_all_12_assets_retain_partial_timestamped_etoro_evidence(self):
+        for symbol, item in self.registry["assets"].items():
+            self.assertTrue(item["instrument"]["confirmed"], symbol)
+            self.assertTrue(item["execution"]["confirmed"], symbol)
+            self.assertEqual(item["execution"]["type"], "REAL", symbol)
+            self.assertTrue(item["minimum_order"]["confirmed"], symbol)
+            self.assertTrue(item["spread"]["confirmed"], symbol)
+            self.assertEqual(item["spread"]["evidence_scope"], "CURRENT_SNAPSHOT_ONLY", symbol)
+            self.assertEqual(
+                item["opening_cost_snapshot"]["scope"],
+                "HYPOTHETICAL_OPEN_ONLY",
+                symbol,
+            )
+            self.assertFalse(item["opening_cost_snapshot"]["round_trip_cost_confirmed"], symbol)
+        self.assertNotIn(
+            "marketSpread",
+            self.registry["assets"]["BTC"]["opening_cost_snapshot"]["cost_components_usd"],
+        )
+
     def test_unknown_asset_is_ineligible(self):
         result = classify_registry_asset("NOT_CONFIGURED", self.registry)
         self.assertEqual(result["status"], "INELIGIBLE")
@@ -30,13 +57,17 @@ class AssetEconomicRegistryTests(unittest.TestCase):
     def test_missing_evidence_fails_closed(self):
         result = classify_registry_asset("CSPX", self.registry)
         self.assertEqual(result["status"], "COSTS_UNVERIFIED")
-        self.assertIn("instrument_identity_evidence_missing", result["blockers"])
-        self.assertIn("execution_type_evidence_missing", result["blockers"])
+        self.assertNotIn("instrument_identity_evidence_missing", result["blockers"])
+        self.assertNotIn("execution_type_evidence_missing", result["blockers"])
         self.assertIn("round_trip_fee_evidence_missing", result["blockers"])
-        self.assertIn("observed_bid_ask_spread_evidence_missing", result["blockers"])
+        self.assertNotIn("observed_bid_ask_spread_evidence_missing", result["blockers"])
         self.assertIn("spread_treatment_unverified", result["blockers"])
         self.assertIn("historical_spread_model_not_validated", result["blockers"])
-        self.assertIn("minimum_order_rules_evidence_missing", result["blockers"])
+        self.assertNotIn("minimum_order_rules_evidence_missing", result["blockers"])
+        self.assertEqual(
+            self.registry["assets"]["CSPX"]["opening_cost_snapshot"]["scope"],
+            "HYPOTHETICAL_OPEN_ONLY",
+        )
 
     def test_confirmed_cfd_is_excluded_from_real_only_mvp(self):
         item = self.registry["assets"]["CSPX"]

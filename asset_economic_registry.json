@@ -5,21 +5,23 @@
   "assets": {
     "CSPX": {
       "instrument": {
-        "name": "iShares Core S&P 500",
+        "name": "iShares Core S&P 500 UCITS ETF",
         "type": "ETF",
         "listing": "CSPX.LSE",
         "currency": "USD",
         "calendar": "XLON",
         "isin": null,
-        "confirmed": false,
-        "source": null,
-        "observed_at": null
+        "confirmed": true,
+        "source": "eToro Public API: exact instrument metadata; market-evidence run 45195086845",
+        "observed_at": "2026-11-23T14:31:42.571854+00:00",
+        "etoro_instrument_id": 3434,
+        "etoro_symbol": "CSPX.L"
       },
       "execution": {
-        "type": null,
-        "confirmed": false,
-        "source": null,
-        "observed_at": null
+        "type": "REAL",
+        "confirmed": true,
+        "source": "eToro account-specific eligibility: supports REAL unleveraged LONG and leverage 1x; market-evidence run 45195086845",
+        "observed_at": "2026-11-23T14:31:42.571854+00:00"
       },
       "fees": {
         "entry": {
@@ -37,12 +39,12 @@
         "observed_at": null
       },
       "spread": {
-        "bid_ask_bps": null,
+        "bid_ask_bps": 7.29455276073227,
         "treatment": null,
-        "evidence_scope": null,
-        "confirmed": false,
-        "source": null,
-        "observed_at": null
+        "evidence_scope": "CURRENT_SNAPSHOT_ONLY",
+        "confirmed": true,
+        "source": "eToro realtime bid/ask quote; market-evidence run 45195086845",
+        "observed_at": "2026-11-23T14:31:49.037517+00:00"
       },
       "price_basis": {
         "historical_basis": null,
@@ -53,11 +55,11 @@
         "observed_at": null
       },
       "minimum_order": {
-        "minimum_notional": null,
-        "fractional_allowed": null,
-        "confirmed": false,
-        "source": null,
-        "observed_at": null
+        "minimum_notional": 10,
+        "fractional_allowed": true,
+        "confirmed": true,
+        "source": "eToro account-specific eligibility: minimum real order USD 10 and fractional quantity; market-evidence run 45195086845",
+        "observed_at": "2026-11-23T14:31:42.571854+00:00"
       },
       "fx": {
         "required": false,
@@ -67,25 +69,39 @@
         "source": "USD quote and USD account currency; FX trade conversion not required",
         "observed_at": null,
         "conversion_fee_unit": "PERCENT"
+      },
+      "opening_cost_snapshot": {
+        "scope": "HYPOTHETICAL_OPEN_ONLY",
+        "sample_amount_usd": 100,
+        "cost_components_usd": {
+          "marketSpread": "0.07",
+          "markup": "0.0",
+          "overnightFee": "0.0"
+        },
+        "source": "eToro Public API: hypothetical opening-cost what-if; market-evidence run 45195086845",
+        "observed_at": "2026-11-23T14:31:49.037517+00:00",
+        "round_trip_cost_confirmed": false
       }
     },
     "CNDX": {
       "instrument": {
-        "name": "iShares Nasdaq 100",
+        "name": "iShares NASDAQ 100 UCITS ETF usd",
         "type": "ETF",
         "listing": "CNDX.LSE",
         "currency": "USD",
         "calendar": "XLON",
         "isin": null,
-        "confirmed": false,
-        "source": null,
-        "observed_at": null
+        "confirmed": true,
+        "source": "eToro Public API: exact instrument metadata; market-evidence run 45195086845",
+        "observed_at": "2026-11-23T14:31:42.571854+00:00",
+        "etoro_instrument_id": 8015,
+        "etoro_symbol": "CNDX.L"
       },
       "execution": {
-        "type": null,
-        "confirmed": false,
-        "source": null,
-        "observed_at": null
+        "type": "REAL",
+        "confirmed": true,
+        "source": "eToro account-specific eligibility: supports REAL unleveraged LONG and leverage 1x; market-evidence run 45195086845",
+        "observed_at": "2026-11-23T14:31:42.571854+00:00"
       },
       "fees": {
         "entry": {
@@ -103,12 +119,12 @@
         "observed_at": null
       },
       "spread": {
-        "bid_ask_bps": null,
+        "bid_ask_bps": 44.11001556824079,
         "treatment": null,
-        "evidence_scope": null,
-        "confirmed": false,
-        "source": null,
-        "observed_at": null
+        "evidence_scope": "CURRENT_SNAPSHOT_ONLY",
+        "confirmed": true,
+        "source": "eToro realtime bid/ask quote; market-evidence run 45195086845",
+        "observed_at": "2026-11-23T14:31:27.202525+00:00"
       },
       "price_basis": {
         "historical_basis": null,
@@ -119,11 +135,11 @@
         "observed_at": null
       },
       "minimum_order": {
-        "minimum_notional": null,
-        "fractional_allowed": null,
-        "confirmed": false,
-        "source": null,
-        "observed_at": null
+        "minimum_notional": 10,
+        "fractional_allowed": true,
+        "confirmed": true,
+        "source": "eToro account-specific eligibility: minimum real order USD 10 and fractional quantity; market-evidence run 45195086845",
+        "observed_at": "2026-11-23T14:31:42.571854+00:00"
       },
       "fx": {
         "required": false,
@@ -133,25 +149,39 @@
         "source": "USD quote and USD account currency; FX trade conversion not required",
         "observed_at": null,
         "conversion_fee_unit": "PERCENT"
+      },
+      "opening_cost_snapshot": {
+        "scope": "HYPOTHETICAL_OPEN_ONLY",
+        "sample_amount_usd": 100,
+        "cost_components_usd": {
+          "marketSpread": "0.08",
+          "markup": "0.0",
+          "overnightFee": "0.0"
+        },
+        "source": "eToro Public API: hypothetical opening-cost what-if; market-evidence run 45195086845",
+        "observed_at": "2026-11-23T14:31:27.202525+00:00",
+        "round_trip_cost_confirmed": false
       }
     },
     "TSLA": {
       "instrument": {
-        "name": "Tesla",
+        "name": "Tesla Motors, Inc.",
         "type": "STOCK",
         "listing": "TSLA",
         "currency": "USD",
         "calendar": "XNYS",
         "isin": null,
-        "confirmed": false,
-        "source": null,
-        "observed_at": null
+        "confirmed": true,
+        "source": "eToro Public API: exact instrument metadata; market-evidence run 45195086845",
+        "observed_at": "2026-11-23T14:31:42.571854+00:00",
+        "etoro_instrument_id": 1111,
+        "etoro_symbol": "TSLA"
       },
       "execution": {
-        "type": null,
-        "confirmed": false,
-        "source": null,
-        "observed_at": null
+        "type": "REAL",
+        "confirmed": true,
+        "source": "eToro account-specific eligibility: supports REAL unleveraged LONG and leverage 1x; market-evidence run 45195086845",
+        "observed_at": "2026-11-23T14:31:42.571854+00:00"
       },
       "fees": {
         "entry": {
@@ -169,12 +199,12 @@
         "observed_at": null
       },
       "spread": {
-        "bid_ask_bps": null,
+        "bid_ask_bps": 7.137287037893707,
         "treatment": null,
-        "evidence_scope": null,
-        "confirmed": false,
-        "source": null,
-        "observed_at": null
+        "evidence_scope": "CURRENT_SNAPSHOT_ONLY",
+        "confirmed": true,
+        "source": "eToro realtime bid/ask quote; market-evidence run 45195086845",
+        "observed_at": "2026-11-23T14:31:49.763179+00:00"
       },
       "price_basis": {
         "historical_basis": null,
@@ -185,11 +215,11 @@
         "observed_at": null
       },
       "minimum_order": {
-        "minimum_notional": null,
-        "fractional_allowed": null,
-        "confirmed": false,
-        "source": null,
-        "observed_at": null
+        "minimum_notional": 10,
+        "fractional_allowed": true,
+        "confirmed": true,
+        "source": "eToro account-specific eligibility: minimum real order USD 10 and fractional quantity; market-evidence run 45195086845",
+        "observed_at": "2026-11-23T14:31:42.571854+00:00"
       },
       "fx": {
         "required": false,
@@ -199,25 +229,40 @@
         "source": "USD quote and USD account currency; FX trade conversion not required",
         "observed_at": null,
         "conversion_fee_unit": "PERCENT"
+      },
+      "opening_cost_snapshot": {
+        "scope": "HYPOTHETICAL_OPEN_ONLY",
+        "sample_amount_usd": 100,
+        "cost_components_usd": {
+          "marketSpread": "0.07",
+          "markup": "0.0",
+          "overnightFee": "0.0",
+          "transactionFee": "1.0"
+        },
+        "source": "eToro Public API: hypothetical opening-cost what-if; market-evidence run 45195086845",
+        "observed_at": "2026-11-23T14:31:49.763179+00:00",
+        "round_trip_cost_confirmed": false
       }
     },
     "NVDA": {
       "instrument": {
-        "name": "Nvidia",
+        "name": "NVIDIA Corporation",
         "type": "STOCK",
         "listing": "NVDA",
         "currency": "USD",
         "calendar": "XNYS",
         "isin": null,
-        "confirmed": false,
-        "source": null,
-        "observed_at": null
+        "confirmed": true,
+        "source": "eToro Public API: exact instrument metadata; market-evidence run 45195086845",
+        "observed_at": "2026-11-23T14:31:42.571854+00:00",
+        "etoro_instrument_id": 1137,
+        "etoro_symbol": "NVDA"
       },
       "execution": {
-        "type": null,
-        "confirmed": false,
-        "source": null,
-        "observed_at": null
+        "type": "REAL",
+        "confirmed": true,
+        "source": "eToro account-specific eligibility: supports REAL unleveraged LONG and leverage 1x; market-evidence run 45195086845",
+        "observed_at": "2026-11-23T14:31:42.571854+00:00"
       },
       "fees": {
         "entry": {
@@ -235,12 +280,12 @@
         "observed_at": null
       },
       "spread": {
-        "bid_ask_bps": null,
+        "bid_ask_bps": 4.296719148021975,
         "treatment": null,
-        "evidence_scope": null,
-        "confirmed": false,
-        "source": null,
-        "observed_at": null
+        "evidence_scope": "CURRENT_SNAPSHOT_ONLY",
+        "confirmed": true,
+        "source": "eToro realtime bid/ask quote; market-evidence run 45195086845",
+        "observed_at": "2026-11-23T14:31:50.669642+00:00"
       },
       "price_basis": {
         "historical_basis": null,
@@ -251,11 +296,11 @@
         "observed_at": null
       },
       "minimum_order": {
-        "minimum_notional": null,
-        "fractional_allowed": null,
-        "confirmed": false,
-        "source": null,
-        "observed_at": null
+        "minimum_notional": 10,
+        "fractional_allowed": true,
+        "confirmed": true,
+        "source": "eToro account-specific eligibility: minimum real order USD 10 and fractional quantity; market-evidence run 45195086845",
+        "observed_at": "2026-11-23T14:31:42.571854+00:00"
       },
       "fx": {
         "required": false,
@@ -265,6 +310,19 @@
         "source": "USD quote and USD account currency; FX trade conversion not required",
         "observed_at": null,
         "conversion_fee_unit": "PERCENT"
+      },
+      "opening_cost_snapshot": {
+        "scope": "HYPOTHETICAL_OPEN_ONLY",
+        "sample_amount_usd": 100,
+        "cost_components_usd": {
+          "marketSpread": "0.04",
+          "markup": "0.0",
+          "overnightFee": "0.0",
+          "transactionFee": "1.0"
+        },
+        "source": "eToro Public API: hypothetical opening-cost what-if; market-evidence run 45195086845",
+        "observed_at": "2026-11-23T14:31:50.669642+00:00",
+        "round_trip_cost_confirmed": false
       }
     },
     "AAPL": {
@@ -275,15 +333,17 @@
         "currency": "USD",
         "calendar": "XNYS",
         "isin": null,
-        "confirmed": false,
-        "source": null,
-        "observed_at": null
+        "confirmed": true,
+        "source": "eToro Public API: exact instrument metadata; market-evidence run 45195086845",
+        "observed_at": "2026-11-23T14:31:42.571854+00:00",
+        "etoro_instrument_id": 1001,
+        "etoro_symbol": "AAPL"
       },
       "execution": {
-        "type": null,
-        "confirmed": false,
-        "source": null,
-        "observed_at": null
+        "type": "REAL",
+        "confirmed": true,
+        "source": "eToro account-specific eligibility: supports REAL unleveraged LONG and leverage 1x; market-evidence run 45195086845",
+        "observed_at": "2026-11-23T14:31:42.571854+00:00"
       },
       "fees": {
         "entry": {
@@ -301,12 +361,12 @@
         "observed_at": null
       },
       "spread": {
-        "bid_ask_bps": null,
+        "bid_ask_bps": 5.740692901633227,
         "treatment": null,
-        "evidence_scope": null,
-        "confirmed": false,
-        "source": null,
-        "observed_at": null
+        "evidence_scope": "CURRENT_SNAPSHOT_ONLY",
+        "confirmed": true,
+        "source": "eToro realtime bid/ask quote; market-evidence run 45195086845",
+        "observed_at": "2026-11-23T14:31:50.687985+00:00"
       },
       "price_basis": {
         "historical_basis": null,
@@ -317,11 +377,11 @@
         "observed_at": null
       },
       "minimum_order": {
-        "minimum_notional": null,
-        "fractional_allowed": null,
-        "confirmed": false,
-        "source": null,
-        "observed_at": null
+        "minimum_notional": 10,
+        "fractional_allowed": true,
+        "confirmed": true,
+        "source": "eToro account-specific eligibility: minimum real order USD 10 and fractional quantity; market-evidence run 45195086845",
+        "observed_at": "2026-11-23T14:31:42.571854+00:00"
       },
       "fx": {
         "required": false,
@@ -331,6 +391,19 @@
         "source": "USD quote and USD account currency; FX trade conversion not required",
         "observed_at": null,
         "conversion_fee_unit": "PERCENT"
+      },
+      "opening_cost_snapshot": {
+        "scope": "HYPOTHETICAL_OPEN_ONLY",
+        "sample_amount_usd": 100,
+        "cost_components_usd": {
+          "marketSpread": "0.06",
+          "markup": "0.0",
+          "overnightFee": "0.0",
+          "transactionFee": "1.0"
+        },
+        "source": "eToro Public API: hypothetical opening-cost what-if; market-evidence run 45195086845",
+        "observed_at": "2026-11-23T14:31:50.687985+00:00",
+        "round_trip_cost_confirmed": false
       }
     },
     "MSFT": {
@@ -341,15 +414,17 @@
         "currency": "USD",
         "calendar": "XNYS",
         "isin": null,
-        "confirmed": false,
-        "source": null,
-        "observed_at": null
+        "confirmed": true,
+        "source": "eToro Public API: exact instrument metadata; market-evidence run 45195086845",
+        "observed_at": "2026-11-23T14:31:42.571854+00:00",
+        "etoro_instrument_id": 1004,
+        "etoro_symbol": "MSFT"
       },
       "execution": {
-        "type": null,
-        "confirmed": false,
-        "source": null,
-        "observed_at": null
+        "type": "REAL",
+        "confirmed": true,
+        "source": "eToro account-specific eligibility: supports REAL unleveraged LONG and leverage 1x; market-evidence run 45195086845",
+        "observed_at": "2026-11-23T14:31:42.571854+00:00"
       },
       "fees": {
         "entry": {
@@ -367,12 +442,12 @@
         "observed_at": null
       },
       "spread": {
-        "bid_ask_bps": null,
+        "bid_ask_bps": 5.736950909504545,
         "treatment": null,
-        "evidence_scope": null,
-        "confirmed": false,
-        "source": null,
-        "observed_at": null
+        "evidence_scope": "CURRENT_SNAPSHOT_ONLY",
+        "confirmed": true,
+        "source": "eToro realtime bid/ask quote; market-evidence run 45195086845",
+        "observed_at": "2026-11-23T14:31:51.742042+00:00"
       },
       "price_basis": {
         "historical_basis": null,
@@ -383,11 +458,11 @@
         "observed_at": null
       },
       "minimum_order": {
-        "minimum_notional": null,
-        "fractional_allowed": null,
-        "confirmed": false,
-        "source": null,
-        "observed_at": null
+        "minimum_notional": 10,
+        "fractional_allowed": true,
+        "confirmed": true,
+        "source": "eToro account-specific eligibility: minimum real order USD 10 and fractional quantity; market-evidence run 45195086845",
+        "observed_at": "2026-11-23T14:31:42.571854+00:00"
       },
       "fx": {
         "required": false,
@@ -397,25 +472,40 @@
         "source": "USD quote and USD account currency; FX trade conversion not required",
         "observed_at": null,
         "conversion_fee_unit": "PERCENT"
+      },
+      "opening_cost_snapshot": {
+        "scope": "HYPOTHETICAL_OPEN_ONLY",
+        "sample_amount_usd": 100,
+        "cost_components_usd": {
+          "marketSpread": "0.06",
+          "markup": "0.0",
+          "overnightFee": "0.0",
+          "transactionFee": "1.0"
+        },
+        "source": "eToro Public API: hypothetical opening-cost what-if; market-evidence run 45195086845",
+        "observed_at": "2026-11-23T14:31:51.742042+00:00",
+        "round_trip_cost_confirmed": false
       }
     },
     "TTWO": {
       "instrument": {
-        "name": "Take-Two Interactive",
+        "name": "Take Two Interactive Software Inc",
         "type": "STOCK",
         "listing": "TTWO",
         "currency": "USD",
         "calendar": "XNYS",
         "isin": null,
-        "confirmed": false,
-        "source": null,
-        "observed_at": null
+        "confirmed": true,
+        "source": "eToro Public API: exact instrument metadata; market-evidence run 45195086845",
+        "observed_at": "2026-11-23T14:31:42.571854+00:00",
+        "etoro_instrument_id": 1388,
+        "etoro_symbol": "TTWO"
       },
       "execution": {
-        "type": null,
-        "confirmed": false,
-        "source": null,
-        "observed_at": null
+        "type": "REAL",
+        "confirmed": true,
+        "source": "eToro account-specific eligibility: supports REAL unleveraged LONG and leverage 1x; market-evidence run 45195086845",
+        "observed_at": "2026-11-23T14:31:42.571854+00:00"
       },
       "fees": {
         "entry": {
@@ -433,12 +523,12 @@
         "observed_at": null
       },
       "spread": {
-        "bid_ask_bps": null,
+        "bid_ask_bps": 65.16218676632649,
         "treatment": null,
-        "evidence_scope": null,
-        "confirmed": false,
-        "source": null,
-        "observed_at": null
+        "evidence_scope": "CURRENT_SNAPSHOT_ONLY",
+        "confirmed": true,
+        "source": "eToro realtime bid/ask quote; market-evidence run 45195086845",
+        "observed_at": "2026-11-23T14:31:51.934758+00:00"
       },
       "price_basis": {
         "historical_basis": null,
@@ -449,11 +539,11 @@
         "observed_at": null
       },
       "minimum_order": {
-        "minimum_notional": null,
-        "fractional_allowed": null,
-        "confirmed": false,
-        "source": null,
-        "observed_at": null
+        "minimum_notional": 10,
+        "fractional_allowed": true,
+        "confirmed": true,
+        "source": "eToro account-specific eligibility: minimum real order USD 10 and fractional quantity; market-evidence run 45195086845",
+        "observed_at": "2026-11-23T14:31:42.571854+00:00"
       },
       "fx": {
         "required": false,
@@ -463,6 +553,19 @@
         "source": "USD quote and USD account currency; FX trade conversion not required",
         "observed_at": null,
         "conversion_fee_unit": "PERCENT"
+      },
+      "opening_cost_snapshot": {
+        "scope": "HYPOTHETICAL_OPEN_ONLY",
+        "sample_amount_usd": 100,
+        "cost_components_usd": {
+          "marketSpread": "0.64",
+          "markup": "0.0",
+          "overnightFee": "0.0",
+          "transactionFee": "1.0"
+        },
+        "source": "eToro Public API: hypothetical opening-cost what-if; market-evidence run 45195086845",
+        "observed_at": "2026-11-23T14:31:51.934758+00:00",
+        "round_trip_cost_confirmed": false
       }
     },
     "BTC": {
@@ -473,15 +576,17 @@
         "currency": "USD",
         "calendar": "24/7",
         "isin": null,
-        "confirmed": false,
-        "source": null,
-        "observed_at": null
+        "confirmed": true,
+        "source": "eToro Public API: exact instrument metadata; market-evidence run 45195086845",
+        "observed_at": "2026-11-23T14:31:42.571854+00:00",
+        "etoro_instrument_id": 100000,
+        "etoro_symbol": "BTC"
       },
       "execution": {
-        "type": null,
-        "confirmed": false,
-        "source": null,
-        "observed_at": null
+        "type": "REAL",
+        "confirmed": true,
+        "source": "eToro account-specific eligibility: supports REAL unleveraged LONG and leverage 1x; market-evidence run 45195086845",
+        "observed_at": "2026-11-23T14:31:42.571854+00:00"
       },
       "fees": {
         "entry": {
@@ -499,12 +604,12 @@
         "observed_at": null
       },
       "spread": {
-        "bid_ask_bps": null,
+        "bid_ask_bps": 0.17385868625015086,
         "treatment": null,
-        "evidence_scope": null,
-        "confirmed": false,
-        "source": null,
-        "observed_at": null
+        "evidence_scope": "CURRENT_SNAPSHOT_ONLY",
+        "confirmed": true,
+        "source": "eToro realtime bid/ask quote; market-evidence run 45195086845",
+        "observed_at": "2026-11-23T14:31:52.737654+00:00"
       },
       "price_basis": {
         "historical_basis": null,
@@ -515,11 +620,11 @@
         "observed_at": null
       },
       "minimum_order": {
-        "minimum_notional": null,
-        "fractional_allowed": null,
-        "confirmed": false,
-        "source": null,
-        "observed_at": null
+        "minimum_notional": 10,
+        "fractional_allowed": true,
+        "confirmed": true,
+        "source": "eToro account-specific eligibility: minimum real order USD 10 and fractional quantity; market-evidence run 45195086845",
+        "observed_at": "2026-11-23T14:31:42.571854+00:00"
       },
       "fx": {
         "required": false,
@@ -529,6 +634,18 @@
         "source": "USD quote and USD account currency; FX trade conversion not required",
         "observed_at": null,
         "conversion_fee_unit": "PERCENT"
+      },
+      "opening_cost_snapshot": {
+        "scope": "HYPOTHETICAL_OPEN_ONLY",
+        "sample_amount_usd": 100,
+        "cost_components_usd": {
+          "markup": "0.0",
+          "overnightFee": "0.0",
+          "transactionFee": "0.99"
+        },
+        "source": "eToro Public API: hypothetical opening-cost what-if; market-evidence run 45195086845",
+        "observed_at": "2026-11-23T14:31:52.737654+00:00",
+        "round_trip_cost_confirmed": false
       }
     },
     "ETH": {
@@ -539,15 +656,17 @@
         "currency": "USD",
         "calendar": "24/7",
         "isin": null,
-        "confirmed": false,
-        "source": null,
-        "observed_at": null
+        "confirmed": true,
+        "source": "eToro Public API: exact instrument metadata; market-evidence run 45195086845",
+        "observed_at": "2026-11-23T14:31:42.571854+00:00",
+        "etoro_instrument_id": 100001,
+        "etoro_symbol": "ETH"
       },
       "execution": {
-        "type": null,
-        "confirmed": false,
-        "source": null,
-        "observed_at": null
+        "type": "REAL",
+        "confirmed": true,
+        "source": "eToro account-specific eligibility: supports REAL unleveraged LONG and leverage 1x; market-evidence run 45195086845",
+        "observed_at": "2026-11-23T14:31:42.571854+00:00"
       },
       "fees": {
         "entry": {
@@ -565,12 +684,12 @@
         "observed_at": null
       },
       "spread": {
-        "bid_ask_bps": null,
+        "bid_ask_bps": 2.194053019291211,
         "treatment": null,
-        "evidence_scope": null,
-        "confirmed": false,
-        "source": null,
-        "observed_at": null
+        "evidence_scope": "CURRENT_SNAPSHOT_ONLY",
+        "confirmed": true,
+        "source": "eToro realtime bid/ask quote; market-evidence run 45195086845",
+        "observed_at": "2026-11-23T14:31:53.288836+00:00"
       },
       "price_basis": {
         "historical_basis": null,
@@ -581,11 +700,11 @@
         "observed_at": null
       },
       "minimum_order": {
-        "minimum_notional": null,
-        "fractional_allowed": null,
-        "confirmed": false,
-        "source": null,
-        "observed_at": null
+        "minimum_notional": 10,
+        "fractional_allowed": true,
+        "confirmed": true,
+        "source": "eToro account-specific eligibility: minimum real order USD 10 and fractional quantity; market-evidence run 45195086845",
+        "observed_at": "2026-11-23T14:31:42.571854+00:00"
       },
       "fx": {
         "required": false,
@@ -595,6 +714,19 @@
         "source": "USD quote and USD account currency; FX trade conversion not required",
         "observed_at": null,
         "conversion_fee_unit": "PERCENT"
+      },
+      "opening_cost_snapshot": {
+        "scope": "HYPOTHETICAL_OPEN_ONLY",
+        "sample_amount_usd": 100,
+        "cost_components_usd": {
+          "marketSpread": "0.02",
+          "markup": "0.0",
+          "overnightFee": "0.0",
+          "transactionFee": "0.99"
+        },
+        "source": "eToro Public API: hypothetical opening-cost what-if; market-evidence run 45195086845",
+        "observed_at": "2026-11-23T14:31:53.288836+00:00",
+        "round_trip_cost_confirmed": false
       }
     },
     "SOL": {
@@ -605,15 +737,17 @@
         "currency": "USD",
         "calendar": "24/7",
         "isin": null,
-        "confirmed": false,
-        "source": null,
-        "observed_at": null
+        "confirmed": true,
+        "source": "eToro Public API: exact instrument metadata; market-evidence run 45195086845",
+        "observed_at": "2026-11-23T14:31:42.571854+00:00",
+        "etoro_instrument_id": 100063,
+        "etoro_symbol": "SOL"
       },
       "execution": {
-        "type": null,
-        "confirmed": false,
-        "source": null,
-        "observed_at": null
+        "type": "REAL",
+        "confirmed": true,
+        "source": "eToro account-specific eligibility: supports REAL unleveraged LONG and leverage 1x; market-evidence run 45195086845",
+        "observed_at": "2026-11-23T14:31:42.571854+00:00"
       },
       "fees": {
         "entry": {
@@ -631,12 +765,12 @@
         "observed_at": null
       },
       "spread": {
-        "bid_ask_bps": null,
+        "bid_ask_bps": 4.938533359017154,
         "treatment": null,
-        "evidence_scope": null,
-        "confirmed": false,
-        "source": null,
-        "observed_at": null
+        "evidence_scope": "CURRENT_SNAPSHOT_ONLY",
+        "confirmed": true,
+        "source": "eToro realtime bid/ask quote; market-evidence run 45195086845",
+        "observed_at": "2026-11-23T14:31:30.543328+00:00"
       },
       "price_basis": {
         "historical_basis": null,
@@ -647,11 +781,11 @@
         "observed_at": null
       },
       "minimum_order": {
-        "minimum_notional": null,
-        "fractional_allowed": null,
-        "confirmed": false,
-        "source": null,
-        "observed_at": null
+        "minimum_notional": 10,
+        "fractional_allowed": true,
+        "confirmed": true,
+        "source": "eToro account-specific eligibility: minimum real order USD 10 and fractional quantity; market-evidence run 45195086845",
+        "observed_at": "2026-11-23T14:31:42.571854+00:00"
       },
       "fx": {
         "required": false,
@@ -661,6 +795,19 @@
         "source": "USD quote and USD account currency; FX trade conversion not required",
         "observed_at": null,
         "conversion_fee_unit": "PERCENT"
+      },
+      "opening_cost_snapshot": {
+        "scope": "HYPOTHETICAL_OPEN_ONLY",
+        "sample_amount_usd": 100,
+        "cost_components_usd": {
+          "marketSpread": "0.04",
+          "markup": "0.0",
+          "overnightFee": "0.0",
+          "transactionFee": "0.99"
+        },
+        "source": "eToro Public API: hypothetical opening-cost what-if; market-evidence run 45195086845",
+        "observed_at": "2026-11-23T14:31:30.543328+00:00",
+        "round_trip_cost_confirmed": false
       }
     },
     "XLM": {
@@ -671,15 +818,17 @@
         "currency": "USD",
         "calendar": "24/7",
         "isin": null,
-        "confirmed": false,
-        "source": null,
-        "observed_at": null
+        "confirmed": true,
+        "source": "eToro Public API: exact instrument metadata; market-evidence run 45195086845",
+        "observed_at": "2026-11-23T14:31:42.571854+00:00",
+        "etoro_instrument_id": 100020,
+        "etoro_symbol": "XLM"
       },
       "execution": {
-        "type": null,
-        "confirmed": false,
-        "source": null,
-        "observed_at": null
+        "type": "REAL",
+        "confirmed": true,
+        "source": "eToro account-specific eligibility: supports REAL unleveraged LONG and leverage 1x; market-evidence run 45195086845",
+        "observed_at": "2026-11-23T14:31:42.571854+00:00"
       },
       "fees": {
         "entry": {
@@ -697,12 +846,12 @@
         "observed_at": null
       },
       "spread": {
-        "bid_ask_bps": null,
+        "bid_ask_bps": 0.7309140079669627,
         "treatment": null,
-        "evidence_scope": null,
-        "confirmed": false,
-        "source": null,
-        "observed_at": null
+        "evidence_scope": "CURRENT_SNAPSHOT_ONLY",
+        "confirmed": true,
+        "source": "eToro realtime bid/ask quote; market-evidence run 45195086845",
+        "observed_at": "2026-11-23T14:31:53.783081+00:00"
       },
       "price_basis": {
         "historical_basis": null,
@@ -713,11 +862,11 @@
         "observed_at": null
       },
       "minimum_order": {
-        "minimum_notional": null,
-        "fractional_allowed": null,
-        "confirmed": false,
-        "source": null,
-        "observed_at": null
+        "minimum_notional": 10,
+        "fractional_allowed": true,
+        "confirmed": true,
+        "source": "eToro account-specific eligibility: minimum real order USD 10 and fractional quantity; market-evidence run 45195086845",
+        "observed_at": "2026-11-23T14:31:42.571854+00:00"
       },
       "fx": {
         "required": false,
@@ -727,6 +876,19 @@
         "source": "USD quote and USD account currency; FX trade conversion not required",
         "observed_at": null,
         "conversion_fee_unit": "PERCENT"
+      },
+      "opening_cost_snapshot": {
+        "scope": "HYPOTHETICAL_OPEN_ONLY",
+        "sample_amount_usd": 100,
+        "cost_components_usd": {
+          "marketSpread": "0.09",
+          "markup": "0.0",
+          "overnightFee": "0.0",
+          "transactionFee": "0.99"
+        },
+        "source": "eToro Public API: hypothetical opening-cost what-if; market-evidence run 45195086845",
+        "observed_at": "2026-11-23T14:31:53.783081+00:00",
+        "round_trip_cost_confirmed": false
       }
     },
     "XRP": {
@@ -737,15 +899,17 @@
         "currency": "USD",
         "calendar": "24/7",
         "isin": null,
-        "confirmed": false,
-        "source": null,
-        "observed_at": null
+        "confirmed": true,
+        "source": "eToro Public API: exact instrument metadata; market-evidence run 45195086845",
+        "observed_at": "2026-11-23T14:31:42.571854+00:00",
+        "etoro_instrument_id": 100003,
+        "etoro_symbol": "XRP"
       },
       "execution": {
-        "type": null,
-        "confirmed": false,
-        "source": null,
-        "observed_at": null
+        "type": "REAL",
+        "confirmed": true,
+        "source": "eToro account-specific eligibility: supports REAL unleveraged LONG and leverage 1x; market-evidence run 45195086845",
+        "observed_at": "2026-11-23T14:31:42.571854+00:00"
       },
       "fees": {
         "entry": {
@@ -763,12 +927,12 @@
         "observed_at": null
       },
       "spread": {
-        "bid_ask_bps": null,
+        "bid_ask_bps": 6.246808426250477,
         "treatment": null,
-        "evidence_scope": null,
-        "confirmed": false,
-        "source": null,
-        "observed_at": null
+        "evidence_scope": "CURRENT_SNAPSHOT_ONLY",
+        "confirmed": true,
+        "source": "eToro realtime bid/ask quote; market-evidence run 45195086845",
+        "observed_at": "2026-11-23T14:31:54.471459+00:00"
       },
       "price_basis": {
         "historical_basis": null,
@@ -779,11 +943,11 @@
         "observed_at": null
       },
       "minimum_order": {
-        "minimum_notional": null,
-        "fractional_allowed": null,
-        "confirmed": false,
-        "source": null,
-        "observed_at": null
+        "minimum_notional": 10,
+        "fractional_allowed": true,
+        "confirmed": true,
+        "source": "eToro account-specific eligibility: minimum real order USD 10 and fractional quantity; market-evidence run 45195086845",
+        "observed_at": "2026-11-23T14:31:42.571854+00:00"
       },
       "fx": {
         "required": false,
@@ -793,6 +957,19 @@
         "source": "USD quote and USD account currency; FX trade conversion not required",
         "observed_at": null,
         "conversion_fee_unit": "PERCENT"
+      },
+      "opening_cost_snapshot": {
+        "scope": "HYPOTHETICAL_OPEN_ONLY",
+        "sample_amount_usd": 100,
+        "cost_components_usd": {
+          "marketSpread": "0.06",
+          "markup": "0.0",
+          "overnightFee": "0.0",
+          "transactionFee": "0.99"
+        },
+        "source": "eToro Public API: hypothetical opening-cost what-if; market-evidence run 45195086845",
+        "observed_at": "2026-11-23T14:31:54.471459+00:00",
+        "round_trip_cost_confirmed": false
       }
     }
   }
