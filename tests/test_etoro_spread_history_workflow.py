@@ -3,11 +3,11 @@ from pathlib import Path
 
 
 class EtoroSpreadHistoryWorkflowTests(unittest.TestCase):
-    def test_weekly_aggregator_is_github_artifact_read_only(self):
+    def test_weekday_aggregator_is_github_artifact_read_only(self):
         workflow = Path(".github/workflows/etoro_spread_history.yml").read_text(
             encoding="utf-8"
         )
-        self.assertIn('cron: "0 16 * * 1"', workflow)
+        self.assertIn('cron: "0 16 * * 1-5"', workflow)
         self.assertIn("workflow_dispatch:", workflow)
         self.assertIn("actions: read", workflow)
         self.assertIn("contents: read", workflow)
