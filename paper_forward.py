@@ -647,6 +647,109 @@ def paper_summary(state: dict) -> dict:
             / initial_capital * 100.0
         )
 
+    # Keep intraday and daily evidence separate. Their trade counts and
+    # descriptive performance must not be hidden inside one blended figure.
+    timeframe_groups = {}
+    for trade in closed:
+        timeframe = str(trade.get("timeframe") or "UNKNOWN")
+        timeframe_groups.setdefault(timeframe, []).append(trade)
+
+    by_timeframe = {}
+    for timeframe, timeframe_trades in sorted(timeframe_groups.items()):
+        timeframe_wins = [
+            trade for trade in timeframe_trades
+            if float(trade["gross_pnl_usd"]) > 0
+        ]
+        timeframe_losses = [
+            trade for trade in timeframe_trades
+            if float(trade["gross_pnl_usd"]) < 0
+        ]
+        timeframe_gross_wins = sum(
+            float(trade["gross_pnl_usd"]) for trade in timeframe_wins
+        )
+        timeframe_gross_losses = abs(sum(
+            float(trade["gross_pnl_usd"]) for trade in timeframe_losses
+        ))
+        timeframe_net_complete = all(
+            trade.get("cost_mode") == "VERIFIED_REGISTRY"
+            and trade.get("costs_usd") is not None
+            and trade.get("net_pnl_usd") is not None
+            and (
+                trade.get("result_r_net") is not None
+                or trade.get("risk_budget_usd") is not None
+            )
+            for trade in timeframe_trades
+        )
+        timeframe_net = None
+        timeframe_net_win_rate = None
+        timeframe_net_pf = None
+        timeframe_net_expectancy_r = None
+        if timeframe_net_complete:
+            timeframe_net_wins = [
+                trade for trade in timeframe_trades
+                if float(trade["net_pnl_usd"]) > 0
+            ]
+            timeframe_net_losses = [
+                trade for trade in timeframe_trades
+                if float(trade["net_pnl_usd"]) < 0
+            ]
+            net_winning_pnl = sum(
+                float(trade["net_pnl_usd"]) for trade in timeframe_net_wins
+            )
+            net_losing_pnl = abs(sum(
+                float(trade["net_pnl_usd"]) for trade in timeframe_net_losses
+            ))
+            net_r_values = [
+                float(
+                    trade["result_r_net"]
+                    if trade.get("result_r_net") is not None
+                    else float(trade["net_pnl_usd"]) / float(trade["risk_budget_usd"])
+                )
+                for trade in timeframe_trades
+            ]
+            if not all(math.isfinite(value) for value in net_r_values):
+                raise ValueError("timeframe net trade R-multiples must be finite")
+            timeframe_net = sum(
+                float(trade["net_pnl_usd"]) for trade in timeframe_trades
+            )
+            timeframe_net_win_rate = (
+                len(timeframe_net_wins) / len(timeframe_trades) * 100.0
+            )
+            timeframe_net_pf = (
+                net_winning_pnl / net_losing_pnl
+                if net_losing_pnl > 0 else None
+            )
+            timeframe_net_expectancy_r = (
+                sum(net_r_values) / len(net_r_values)
+            )
+
+        timeframe_gross_pnl = sum(
+            float(trade["gross_pnl_usd"]) for trade in timeframe_trades
+        )
+        timeframe_gross_r = [
+            float(trade["result_r"]) for trade in timeframe_trades
+        ]
+        by_timeframe[timeframe] = {
+            "closed_trades": len(timeframe_trades),
+            "gross_pnl_usd": timeframe_gross_pnl,
+            "win_rate_pct_gross": (
+                len(timeframe_wins) / len(timeframe_trades) * 100.0
+            ),
+            "profit_factor_gross": (
+                timeframe_gross_wins / timeframe_gross_losses
+                if timeframe_gross_losses > 0 else None
+            ),
+            "expectancy_r_gross": (
+                sum(timeframe_gross_r) / len(timeframe_gross_r)
+            ),
+            "costs_included": timeframe_net_complete,
+            "net_pnl_usd": timeframe_net,
+            "win_rate_pct_net": timeframe_net_win_rate,
+            "profit_factor_net": timeframe_net_pf,
+            "expectancy_r_net": timeframe_net_expectancy_r,
+            "performance_status": "DESCRIPTIVE_ONLY_NOT_VALIDATED",
+        }
+
     closed_r = [float(trade["result_r"]) for trade in closed]
     gross_wins = sum(float(trade["gross_pnl_usd"]) for trade in wins)
     gross_losses = abs(sum(float(trade["gross_pnl_usd"]) for trade in losses))
@@ -662,6 +765,7 @@ def paper_summary(state: dict) -> dict:
         "win_rate_pct_gross": len(wins) / len(closed) * 100.0 if closed else None,
         "profit_factor_gross": gross_wins / gross_losses if gross_losses > 0 else None,
         "expectancy_r_gross": sum(closed_r) / len(closed_r) if closed_r else None,
+        "by_timeframe": by_timeframe,
         "net_closed_trades": len(closed) if net_complete else 0,
         "return_pct_net": return_pct_net,
         "win_rate_pct_net": net_win_rate_pct,
