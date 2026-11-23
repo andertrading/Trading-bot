@@ -48,6 +48,8 @@ def new_paper_state(initial_capital_usd: float = DEFAULT_INITIAL_CAPITAL_USD) ->
         "equity_usd": capital,
         "peak_equity_usd": capital,
         "realized_gross_pnl_usd": 0.0,
+        "realized_costs_usd": 0.0,
+        "realized_net_pnl_usd": 0.0,
         "equity_history": [{"timestamp": None, "equity_usd": capital}],
         "open_risk_usd": 0.0,
         "trades": {},
@@ -181,10 +183,45 @@ def _levels(signal: dict) -> tuple[float, float, float]:
     return entry, stop, target
 
 
-def _finish_trade(state: dict, trade: dict, exit_price: float,
-                  exit_timestamp: str, reason: str) -> None:
+def _finish_trade(
+    state: dict,
+    trade: dict,
+    exit_price: float,
+    exit_timestamp: str,
+    reason: str,
+    *,
+    economic_registry: dict | None = None,
+) -> None:
     quantity = float(trade["quantity"])
     pnl = (exit_price - float(trade["entry_fill_price"])) * quantity
+    costs = None
+    net_pnl = None
+    if trade.get("cost_mode") == "VERIFIED_REGISTRY":
+        from transaction_costs import estimate_verified_registry_trade_costs
+
+        estimate = estimate_verified_registry_trade_costs(
+            str(trade.get("asset") or ""),
+            float(trade["entry_fill_price"]),
+            exit_price,
+            quantity,
+            registry=economic_registry,
+        )
+        if estimate.get("complete"):
+            costs = float(estimate["known_costs_total"])
+            net_pnl = pnl - costs
+            state["realized_costs_usd"] = float(state.get("realized_costs_usd", 0.0)) + costs
+            state["realized_net_pnl_usd"] = float(state.get("realized_net_pnl_usd", 0.0)) + net_pnl
+            state["costs_status"] = "VERIFIED_NET_COSTS_INCLUDED"
+            state["equity_usd"] += net_pnl
+        else:
+            trade["costs_blockers"] = list(estimate.get("unpriced_costs", []))
+            state["costs_status"] = "UNRESOLVED_CLOSE_COSTS"
+            # Do not book a gross gain as spendable equity when close costs
+            # unexpectedly become unavailable. Gross losses remain conservative.
+            state["equity_usd"] += min(pnl, 0.0)
+    else:
+        state["equity_usd"] += pnl
+
     trade.update({
         "status": "CLOSED",
         "exit_fill_price": exit_price,
@@ -193,11 +230,14 @@ def _finish_trade(state: dict, trade: dict, exit_price: float,
         "gross_pnl_usd": pnl,
         "result_r": pnl / float(trade["risk_budget_usd"]),
         "risk_reserved_usd": 0.0,
-        "costs_usd": None,
-        "net_pnl_usd": None,
+        "costs_usd": costs,
+        "net_pnl_usd": net_pnl,
+        "result_r_net": (
+            net_pnl / float(trade["risk_budget_usd"])
+            if net_pnl is not None else None
+        ),
     })
     state["realized_gross_pnl_usd"] += pnl
-    state["equity_usd"] += pnl
     state["peak_equity_usd"] = max(state["peak_equity_usd"], state["equity_usd"])
     state.setdefault("equity_history", []).append({
         "timestamp": exit_timestamp,
@@ -213,6 +253,8 @@ def process_signal_bar(
     risk_fraction: float = DEFAULT_RISK_PER_TRADE,
     max_risk_per_trade: float = MAX_RISK_PER_TRADE,
     max_portfolio_risk: float = MAX_PORTFOLIO_RISK,
+    require_verified_costs: bool = False,
+    economic_registry: dict | None = None,
 ) -> dict:
     """Advance one signal by one *new completed* bar; mutate and return state.
 
@@ -286,14 +328,38 @@ def process_signal_bar(
                             float(state["initial_capital_usd"]),
                         )
                         risk_budget = capital_base * risk_fraction
-                        reserved = _open_risk(state)
-                        if reserved + risk_budget > capital_base * max_portfolio_risk + 1e-9:
-                            trade.update({"status": "REJECTED_PORTFOLIO_RISK",
-                                          "completed_at": timestamp.isoformat()})
-                        else:
-                            quantity = risk_budget / (fill - stop)
-                            notional = quantity * fill
-                            if _open_notional(state) + notional > capital_base + 1e-9:
+                        cost_sizing = None
+                        if require_verified_costs:
+                            cost_sizing = calculate_verified_cost_aware_quantity(
+                                str(signal.get("asset") or ""),
+                                fill,
+                                stop,
+                                risk_budget,
+                                registry=economic_registry,
+                            )
+                            if not cost_sizing.get("valid"):
+                                trade.update({
+                                    "status": "REJECTED_COSTS_UNVERIFIED",
+                                    "costs_blockers": list(cost_sizing.get("unpriced_costs", [])),
+                                    "completed_at": timestamp.isoformat(),
+                                })
+                        if not require_verified_costs or (cost_sizing and cost_sizing.get("valid")):
+                            quantity = (
+                                float(cost_sizing["quantity"])
+                                if cost_sizing else risk_budget / (fill - stop)
+                            )
+                            risk_to_reserve = (
+                                float(cost_sizing["reserved_stop_risk_usd"])
+                                if cost_sizing else risk_budget
+                            )
+                            notional = (
+                                float(cost_sizing["notional_usd"])
+                                if cost_sizing else quantity * fill
+                            )
+                            if reserved + risk_to_reserve > capital_base * max_portfolio_risk + 1e-9:
+                                trade.update({"status": "REJECTED_PORTFOLIO_RISK",
+                                              "completed_at": timestamp.isoformat()})
+                            elif _open_notional(state) + notional > capital_base + 1e-9:
                                 trade.update({"status": "REJECTED_NO_LEVERAGE_CASH",
                                               "completed_at": timestamp.isoformat()})
                             else:
@@ -303,15 +369,27 @@ def process_signal_bar(
                                     "stop": stop, "target": target,
                                     "quantity": quantity, "notional_usd": notional,
                                     "risk_budget_usd": risk_budget,
-                                    "risk_reserved_usd": risk_budget,
+                                    "risk_reserved_usd": risk_to_reserve,
                                     "risk_fraction": risk_fraction,
                                     "risk_capital_base_usd": capital_base,
                                     "costs_usd": None, "net_pnl_usd": None,
+                                    "cost_mode": (
+                                        "VERIFIED_REGISTRY" if cost_sizing else "GROSS_DIAGNOSTIC"
+                                    ),
+                                    "estimated_stop_costs_usd": (
+                                        float(cost_sizing["estimated_round_trip_costs_usd"])
+                                        if cost_sizing else None
+                                    ),
                                 })
+                                if cost_sizing:
+                                    state["costs_status"] = "VERIFIED_COSTS_RESERVED_AT_STOP"
                                 # If target is touched after entry and stop is not,
                                 # the same candle can close at the target.
                                 if target_touched:
-                                    _finish_trade(state, trade, target, timestamp.isoformat(), "TARGET")
+                                    _finish_trade(
+                                        state, trade, target, timestamp.isoformat(), "TARGET",
+                                        economic_registry=economic_registry,
+                                    )
             elif timestamp > expiry or signal.get("status") != "PENDING":
                 trade.update({"status": "NOT_FILLED_EXPIRED_OR_INVALID",
                               "completed_at": timestamp.isoformat()})
@@ -326,18 +404,19 @@ def process_signal_bar(
             if stop_hit:
                 # A gap through the stop is filled at the worse opening price.
                 exit_price = min(opening, stop) if opening <= stop else stop
-                _finish_trade(state, trade, exit_price, timestamp.isoformat(), "STOP")
+                _finish_trade(state, trade, exit_price, timestamp.isoformat(), "STOP", economic_registry=economic_registry)
             elif target_hit:
                 # A favorable gap is filled at the opening price.
                 exit_price = max(opening, target) if opening >= target else target
-                _finish_trade(state, trade, exit_price, timestamp.isoformat(), "TARGET")
+                _finish_trade(state, trade, exit_price, timestamp.isoformat(), "TARGET", economic_registry=economic_registry)
             else:
                 monitoring_expiry = signal.get("monitoring_expires_at")
                 if monitoring_expiry and timestamp >= _timestamp(
                     monitoring_expiry, "signal.monitoring_expires_at"
                 ):
                     _finish_trade(
-                        state, trade, close, timestamp.isoformat(), "TIME_EXIT"
+                        state, trade, close, timestamp.isoformat(), "TIME_EXIT",
+                        economic_registry=economic_registry,
                     )
 
     state["processed_bars"][signal_id] = timestamp.isoformat()
@@ -384,7 +463,14 @@ def paper_summary(state: dict) -> dict:
         "expectancy_r_gross": sum(closed_r) / len(closed_r) if closed_r else None,
         "max_drawdown_pct_gross": max_drawdown_pct,
         "open_risk_usd": _open_risk(state),
-        "costs_included": False,
+        "realized_costs_usd": float(state.get("realized_costs_usd", 0.0)),
+        "realized_net_pnl_usd": float(state.get("realized_net_pnl_usd", 0.0)),
+        "costs_included": bool(closed) and all(
+            trade.get("cost_mode") == "VERIFIED_REGISTRY"
+            and trade.get("costs_usd") is not None
+            and trade.get("net_pnl_usd") is not None
+            for trade in closed
+        ),
         "net_performance_validated": False,
     }
 
