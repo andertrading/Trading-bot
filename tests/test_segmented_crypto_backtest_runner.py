@@ -93,7 +93,16 @@ class TestSegmentedCryptoBacktestRunner(unittest.TestCase):
         self.assertEqual(result["coverage"]["missing_bar_count"], 3)
         self.assertEqual(result["metrics"]["trades"], 2)
         self.assertEqual([trade["segment_id"] for trade in result["trades"]], [0, 1])
+        self.assertTrue(
+            all(
+                trade["data_source"] == "coinbase_exchange_only"
+                and trade["source_venue"] == "Coinbase Exchange"
+                and trade["etoro_price_equivalence"] == "not_established"
+                for trade in result["trades"]
+            )
+        )
         self.assertEqual(result["network_requests"], 0)
+        self.assertIn("not eToro executable bid/ask", result["execution_price_basis"])
         self.assertTrue(result["trade_segment_integrity"])
         self.assertTrue(result["all_segments_completed"])
 
