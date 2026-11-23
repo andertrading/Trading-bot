@@ -25,11 +25,10 @@ concurrency:
 
 jobs:
   scan:
-    # Explicit opt-in prevents API usage until credentials and storage are ready.
-    # Scheduled runs require repository opt-in. A deliberate manual
-    # dispatch is also allowed for paper-only validation without enabling
-    # recurring automation; alert and strategy gates remain independent.
-    if: ${{ github.event_name == 'workflow_dispatch' || (vars.SIGNAL_AUTOMATION_ENABLED == 'true' && vars.MARKET_DATA_CREDITS_AUTHORIZED == 'true') }}
+    # All runs require explicit market-data credit authorization.
+    # Scheduled runs additionally require recurring automation opt-in.
+    # Manual dispatch does not bypass the credit-consent gate.
+    if: ${{ vars.MARKET_DATA_CREDITS_AUTHORIZED == 'true' && (github.event_name == 'workflow_dispatch' || vars.SIGNAL_AUTOMATION_ENABLED == 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
