@@ -126,14 +126,21 @@ def _extract_candle_items(data: Any, instrument_id: int) -> list[Mapping[str, An
     return items
 
 
-def normalize_candles(data: Any, instrument_id: int, *, count: int,
-                      now_utc: datetime) -> list[dict[str, Any]]:
+def normalize_candles(
+    data: Any,
+    instrument_id: int,
+    *,
+    count: int,
+    now_utc: datetime,
+    diagnostics: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
     items = _extract_candle_items(data, instrument_id)
     if len(items) > count:
         raise EtoroAPIError("eToro devolvió más velas que las solicitadas")
 
-    normalized = []
-    seen = set()
+    diagnostics = diagnostics if diagnostics is not None else {}
+    diagnostics.setdefault("identical_duplicate_rows_removed", 0)
+    by_timestamp: dict[str, dict[str, Any]] = {}
     for index, item in enumerate(items):
         candle_id = item.get("instrumentID", item.get("instrumentId"))
         if candle_id is not None and candle_id != instrument_id:
@@ -141,9 +148,6 @@ def normalize_candles(data: Any, instrument_id: int, *, count: int,
         timestamp = _as_utc_timestamp(item.get("fromDate"))
         if timestamp > now_utc:
             raise EtoroAPIError(f"La vela {index} tiene una fecha futura")
-        if timestamp in seen:
-            raise EtoroAPIError(f"Fecha de vela duplicada: {timestamp.isoformat()}")
-        seen.add(timestamp)
 
         prices = {
             key: _as_decimal(item.get(key), f"candles[{index}].{key}")
@@ -165,15 +169,26 @@ def normalize_candles(data: Any, instrument_id: int, *, count: int,
                 raise EtoroAPIError(f"La vela {index} contiene volumen negativo")
             volume = format(volume_value, "f")
 
-        normalized.append({
+        normalized_item = {
             "timestamp": timestamp.isoformat(),
             "open": format(prices["open"], "f"),
             "high": format(prices["high"], "f"),
             "low": format(prices["low"], "f"),
             "close": format(prices["close"], "f"),
             "volume": volume,
-        })
+        }
+        key = normalized_item["timestamp"]
+        previous = by_timestamp.get(key)
+        if previous is not None:
+            if previous != normalized_item:
+                raise EtoroAPIError(
+                    f"Fecha de vela duplicada con valores distintos: {key}"
+                )
+            diagnostics["identical_duplicate_rows_removed"] += 1
+            continue
+        by_timestamp[key] = normalized_item
 
+    normalized = list(by_timestamp.values())
     normalized.sort(key=lambda item: item["timestamp"])
     return normalized
 
@@ -247,8 +262,13 @@ def collect_historical_candles(
             )
             if getattr(response, "status_code", None) != 200:
                 raise EtoroAPIError("La descarga de velas no devolvió HTTP 200")
+            candle_diagnostics: dict[str, Any] = {}
             candles = normalize_candles(
-                response.data, instrument_id, count=count, now_utc=now_utc
+                response.data,
+                instrument_id,
+                count=count,
+                now_utc=now_utc,
+                diagnostics=candle_diagnostics,
             )
             enough = len(candles) >= min_candles
             if enough:
@@ -257,6 +277,9 @@ def collect_historical_candles(
                 "interval": interval,
                 "requested_count": count,
                 "returned_count": len(candles),
+                "identical_duplicate_rows_removed": candle_diagnostics[
+                    "identical_duplicate_rows_removed"
+                ],
                 "sufficient_history": enough,
                 "first_timestamp": candles[0]["timestamp"] if candles else None,
                 "last_timestamp": candles[-1]["timestamp"] if candles else None,

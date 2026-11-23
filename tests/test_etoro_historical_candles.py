@@ -94,6 +94,19 @@ class HistoricalCandleTests(unittest.TestCase):
         with self.assertRaises(EtoroAPIError):
             normalize_candles(data, 1001, count=10, now_utc=NOW)
 
+    def test_removes_only_exact_duplicate_candle_rows(self):
+        duplicate = candle("2026-11-22T00:00:00Z")
+        data = {"candles": [{
+            "instrumentId": 1001,
+            "candles": [duplicate, dict(duplicate)],
+        }]}
+        diagnostics = {}
+        normalized = normalize_candles(
+            data, 1001, count=10, now_utc=NOW, diagnostics=diagnostics
+        )
+        self.assertEqual(len(normalized), 1)
+        self.assertEqual(diagnostics["identical_duplicate_rows_removed"], 1)
+
     def test_rejects_duplicate_timestamps(self):
         data = history_response().data
         data["candles"][0]["candles"][1]["fromDate"] = "2026-11-22T00:00:00Z"
