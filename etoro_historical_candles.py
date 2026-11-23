@@ -307,11 +307,12 @@ def collect_historical_candles(
                 diagnostics=candle_diagnostics,
                 allow_conflicts=True,
             )
-            enough = (
-                len(candles) >= min_candles
-                and candle_diagnostics["conflicting_duplicate_timestamps"] == 0
-            )
-            if enough:
+            enough = len(candles) >= min_candles
+            conflicts_excluded = candle_diagnostics[
+                "conflicting_duplicate_timestamps"
+            ]
+            research_usable = enough and conflicts_excluded >= 0
+            if research_usable:
                 sufficient += 1
             record["historical_candles"] = {
                 "interval": interval,
@@ -328,7 +329,17 @@ def collect_historical_candles(
                     "duplicate_timestamp_conflicts"
                 ],
                 "sufficient_history": enough,
-                "history_usable": enough,
+                "history_usable": conflicts_excluded == 0 and enough,
+                "research_history_usable": research_usable,
+                "research_history_policy": (
+                    "AMBIGUOUS_DUPLICATE_DATES_EXCLUDED"
+                    if conflicts_excluded else "NO_CONFLICTS"
+                ),
+                "excluded_conflict_timestamps": [
+                    item["timestamp"]
+                    for item in candle_diagnostics["duplicate_timestamp_conflicts"]
+                    if isinstance(item, Mapping) and item.get("timestamp")
+                ],
                 "first_timestamp": candles[0]["timestamp"] if candles else None,
                 "last_timestamp": candles[-1]["timestamp"] if candles else None,
                 "source": "eToro historical chart candles",
@@ -338,11 +349,11 @@ def collect_historical_candles(
                 "candles": candles,
             }
             if candle_diagnostics["conflicting_duplicate_timestamps"]:
-                record["errors"].append(
-                    "conflicting_duplicate_timestamps: "
+                record["warnings"] = [
+                    "ambiguous_daily_candles_excluded_from_research: "
                     + str(candle_diagnostics["conflicting_duplicate_timestamps"])
-                )
-            elif not enough:
+                ]
+            if not enough:
                 record["errors"].append(
                     f"insufficient_history: returned {len(candles)}; minimum {min_candles}"
                 )
