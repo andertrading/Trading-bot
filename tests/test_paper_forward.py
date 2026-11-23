@@ -78,6 +78,59 @@ class PaperForwardTests(unittest.TestCase):
         self.assertEqual(trade["entry_fill_price"], 100.0)
         self.assertEqual(trade["exit_fill_price"], 110.0)
 
+    def test_trade_persists_signal_and_entry_exit_bar_provenance(self):
+        item = signal("provenance")
+        item.update({
+            "data_provider": "synthetic-provider",
+            "price_adjustment_policy": "RAW",
+            "price_adjustment_verified": False,
+            "price_adjustment_verification_status": "NOT_REQUIRED",
+            "currency": "USD",
+            "score": 82,
+        })
+        entry_bar = bar(
+            "2026-11-22T10:15:00+00:00", 99, 101, 98, 100
+        )
+        entry_bar.update({
+            "data_provider": "synthetic-provider",
+            "price_adjustment_policy": "RAW",
+            "price_adjustment_verified": False,
+            "price_adjustment_verification_status": "NOT_REQUIRED",
+        })
+        process_signal_bar(self.state, item, entry_bar)
+        trade = self.state["trades"]["provenance"]
+        self.assertEqual(
+            trade["signal_evidence"]["data_provider"], "synthetic-provider"
+        )
+        self.assertEqual(
+            trade["signal_evidence"]["price_adjustment_policy"], "RAW"
+        )
+        self.assertEqual(
+            trade["entry_bar"]["timestamp"], "2026-11-22T10:15:00+00:00"
+        )
+        self.assertEqual(
+            trade["entry_bar"]["price_adjustment_verification_status"],
+            "NOT_REQUIRED",
+        )
+
+        exit_bar = bar(
+            "2026-11-22T10:30:00+00:00", 95, 96, 94, 95
+        )
+        exit_bar.update({
+            "data_provider": "synthetic-provider",
+            "price_adjustment_policy": "RAW",
+            "price_adjustment_verified": False,
+            "price_adjustment_verification_status": "NOT_REQUIRED",
+        })
+        process_signal_bar(self.state, item, exit_bar)
+        self.assertEqual(trade["status"], "CLOSED")
+        self.assertEqual(
+            trade["exit_bar"]["timestamp"], "2026-11-22T10:30:00+00:00"
+        )
+        self.assertEqual(
+            trade["exit_bar"]["data_provider"], "synthetic-provider"
+        )
+
     def test_same_bar_entry_and_stop_is_conservatively_not_filled(self):
         process_signal_bar(self.state, signal(), bar(
             "2026-11-22T10:15:00+00:00", 99, 101, 94, 99

@@ -1597,6 +1597,25 @@ def analyze_asset(asset, timeframe, include_paper_bars=False):
         result["last_low"] = float(df["Low"].iloc[-1])
         if include_paper_bars:
             paper_bars = []
+            bar_provenance = {
+                "data_provider": df.attrs.get("data_provider", "unknown"),
+                "price_adjustment_policy": df.attrs.get(
+                    "price_adjustment_policy", "unknown"
+                ),
+                "price_adjustment_verified": (
+                    df.attrs.get("price_adjustment_verified") is True
+                ),
+                "price_adjustment_verification_status": df.attrs.get(
+                    "price_adjustment_verification_status", "NOT_RECORDED"
+                ),
+                "price_adjustment_verification_source": df.attrs.get(
+                    "price_adjustment_verification_source"
+                ),
+                "price_adjustment_verified_at": df.attrs.get(
+                    "price_adjustment_verified_at"
+                ),
+                "currency": df.attrs.get("currency", ACCOUNT_CURRENCY),
+            }
             for bar_timestamp, bar_row in df.tail(120).iterrows():
                 bar_time = pd.Timestamp(bar_timestamp)
                 if bar_time.tzinfo is None:
@@ -1609,6 +1628,7 @@ def analyze_asset(asset, timeframe, include_paper_bars=False):
                     "high": float(bar_row["High"]),
                     "low": float(bar_row["Low"]),
                     "close": float(bar_row["Close"]),
+                    **bar_provenance,
                 })
             result["paper_bars"] = paper_bars
         result["data_provider"] = df.attrs.get("data_provider", "unknown")
