@@ -186,6 +186,31 @@ def compare_asset_history(
             ),
         })
 
+    date_shift_sensitivity = {}
+    for shift in (-1, 0, 1):
+        shifted_differences = []
+        for day, candle in by_day.items():
+            row = yahoo_by_day.get(day + timedelta(days=shift))
+            if row is None:
+                continue
+            etoro_close = _finite_positive(candle.get("close"))
+            yahoo_close = _finite_positive(row.get("Close"))
+            if etoro_close is None or yahoo_close is None:
+                continue
+            shifted_differences.append(
+                abs((etoro_close - yahoo_close) / yahoo_close * 100.0)
+            )
+        date_shift_sensitivity[str(shift)] = {
+            "yahoo_date_offset_days": shift,
+            "overlap_bars": len(shifted_differences),
+            "median_absolute_close_difference_pct": _percentile(
+                shifted_differences, 0.50
+            ),
+            "p95_absolute_close_difference_pct": _percentile(
+                shifted_differences, 0.95
+            ),
+        }
+
     metrics = {}
     for field, values in differences.items():
         absolute = [abs(value) for value in values]
@@ -220,6 +245,7 @@ def compare_asset_history(
         "last_overlap_date": max(set(by_day) & set(yahoo_by_day)).isoformat()
         if set(by_day) & set(yahoo_by_day) else None,
         "difference_metrics_pct": metrics,
+        "date_shift_sensitivity": date_shift_sensitivity,
         "interpretation": (
             "Yahoo is a secondary historical OHLC reference only. Differences may reflect "
             "corporate-action adjustment, venue, session boundaries, or provider revisions. "
