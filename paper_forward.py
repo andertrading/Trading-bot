@@ -354,6 +354,7 @@ def process_signal_bar(
         for field in (
             "generated_at",
             "data_timestamp",
+            "signal_bar_evidence",
             "data_provider",
             "price_adjustment_policy",
             "price_adjustment_verified",

@@ -126,6 +126,36 @@ def build_signal_record(result: dict, generated_at: datetime | str,
         maximum=1.0,
     )
 
+    signal_bar_fields = {
+        "open": result.get("last_open"),
+        "high": result.get("last_high"),
+        "low": result.get("last_low"),
+        "close": result.get("last_price"),
+    }
+    signal_bar_evidence = None
+    if all(value is not None for value in signal_bar_fields.values()):
+        signal_bar_evidence = {
+            "timestamp": _as_utc(candle_timestamp).isoformat(),
+            **signal_bar_fields,
+            "data_provider": result.get("data_provider", "unknown"),
+            "price_adjustment_policy": result.get(
+                "price_adjustment_policy", "unknown"
+            ),
+            "price_adjustment_verified": (
+                result.get("price_adjustment_verified") is True
+            ),
+            "price_adjustment_verification_status": result.get(
+                "price_adjustment_verification_status", "NOT_RECORDED"
+            ),
+            "price_adjustment_verification_source": result.get(
+                "price_adjustment_verification_source"
+            ),
+            "price_adjustment_verified_at": result.get(
+                "price_adjustment_verified_at"
+            ),
+            "currency": result.get("currency", "USD"),
+        }
+
     record = {
         "schema_version": SCHEMA_VERSION,
         "signal_id": signal_id,
@@ -147,6 +177,7 @@ def build_signal_record(result: dict, generated_at: datetime | str,
         "minimum_risk_reward": minimum_rr,
         "minimum_remaining_risk_fraction": minimum_remaining,
         "data_timestamp": _as_utc(candle_timestamp).isoformat(),
+        "signal_bar_evidence": signal_bar_evidence,
         "entry_reference": entry,
         "stop": stop,
         "target": target,
