@@ -507,8 +507,10 @@ def paper_summary(state: dict) -> dict:
     wins = [trade for trade in closed if float(trade["gross_pnl_usd"]) > 0]
     losses = [trade for trade in closed if float(trade["gross_pnl_usd"]) < 0]
     gross = float(state["realized_gross_pnl_usd"])
+    initial_capital = float(state["initial_capital_usd"])
+
     def _drawdown_pct(equity_curve):
-        running_peak = float(state["initial_capital_usd"])
+        running_peak = initial_capital
         maximum = 0.0
         for equity_point in equity_curve:
             running_peak = max(running_peak, equity_point)
@@ -519,25 +521,76 @@ def paper_summary(state: dict) -> dict:
                 )
         return maximum
 
-    # Reconstruct gross equity from gross trade PnL, not the live paper ledger:
-    # that ledger is net of verified costs for verified-cost trades.
-    chronological_closed = sorted(
-        closed,
-        key=lambda trade: str(trade.get("exit_timestamp") or ""),
-    )
-    gross_equity_curve = [float(state["initial_capital_usd"])]
-    gross_equity = gross_equity_curve[0]
-    for trade in chronological_closed:
-        gross_equity += float(trade["gross_pnl_usd"])
-        gross_equity_curve.append(gross_equity)
-    max_drawdown_pct_gross = _drawdown_pct(gross_equity_curve)
+    def _group_trade_pnl(trade_list, pnl_field):
+        grouped = {}
+        for trade in trade_list:
+            exit_time = _timestamp(
+                trade.get("exit_timestamp"),
+                "closed_trade.exit_timestamp",
+            )
+            pnl = float(trade[pnl_field])
+            if not math.isfinite(pnl):
+                raise ValueError(f"closed trade {pnl_field} must be finite")
+            grouped.setdefault(exit_time, []).append(pnl)
+        return grouped
 
-    equity_points = [
-        float(point["equity_usd"])
-        for point in state.get("equity_history", [])
-        if isinstance(point, dict) and point.get("equity_usd") is not None
+    def _close_to_close_drawdown(grouped_pnl):
+        # Trades closed on the same bar are one portfolio observation.
+        # Their arbitrary dictionary/insertion order must not create a fake
+        # intermediate equity peak or trough.
+        equity_curve = [initial_capital]
+        equity = initial_capital
+        for timestamp in sorted(grouped_pnl):
+            equity += sum(grouped_pnl[timestamp])
+            equity_curve.append(equity)
+        return _drawdown_pct(equity_curve)
+
+    def _worst_case_intrabar_drawdown(grouped_pnl):
+        # OHLC bars do not reveal the ordering of different instruments'
+        # exits within the same timestamp. Bound drawdown conservatively by
+        # applying all losses before gains within each timestamp bucket.
+        equity = initial_capital
+        running_peak = initial_capital
+        maximum = 0.0
+        for timestamp in sorted(grouped_pnl):
+            outcomes = grouped_pnl[timestamp]
+            losses_at_timestamp = sum(value for value in outcomes if value < 0)
+            gains_at_timestamp = sum(value for value in outcomes if value > 0)
+            equity += losses_at_timestamp
+            if running_peak > 0:
+                maximum = max(
+                    maximum,
+                    (running_peak - equity) / running_peak * 100.0,
+                )
+            equity += gains_at_timestamp
+            running_peak = max(running_peak, equity)
+        return maximum
+
+    gross_grouped = _group_trade_pnl(closed, "gross_pnl_usd")
+    max_drawdown_pct_gross = _worst_case_intrabar_drawdown(gross_grouped)
+    max_drawdown_pct_gross_close_to_close = _close_to_close_drawdown(
+        gross_grouped
+    )
+
+    # The persisted equity history can contain multiple closes at the same
+    # timestamp. Retain only the final portfolio equity for each timestamp.
+    equity_by_timestamp = {}
+    for point in state.get("equity_history", []):
+        if not isinstance(point, dict) or point.get("equity_usd") is None:
+            continue
+        timestamp_value = point.get("timestamp")
+        if timestamp_value is None:
+            continue
+        timestamp = _timestamp(timestamp_value, "equity_history.timestamp")
+        equity_value = float(point["equity_usd"])
+        if not math.isfinite(equity_value):
+            raise ValueError("equity history values must be finite")
+        equity_by_timestamp[timestamp] = equity_value
+    equity_curve = [initial_capital] + [
+        equity_by_timestamp[timestamp]
+        for timestamp in sorted(equity_by_timestamp)
     ]
-    max_drawdown_pct_equity = _drawdown_pct(equity_points)
+    max_drawdown_pct_equity = _drawdown_pct(equity_curve)
 
     net_complete = bool(closed) and all(
         trade.get("cost_mode") == "VERIFIED_REGISTRY"
@@ -545,17 +598,17 @@ def paper_summary(state: dict) -> dict:
         for trade in closed
     )
     max_drawdown_pct_net = None
+    max_drawdown_pct_net_close_to_close = None
     if net_complete:
-        net_equity_curve = [float(state["initial_capital_usd"])]
-        net_equity = net_equity_curve[0]
-        for trade in chronological_closed:
-            net_equity += float(trade["net_pnl_usd"])
-            net_equity_curve.append(net_equity)
-        max_drawdown_pct_net = _drawdown_pct(net_equity_curve)
+        net_grouped = _group_trade_pnl(closed, "net_pnl_usd")
+        max_drawdown_pct_net = _worst_case_intrabar_drawdown(net_grouped)
+        max_drawdown_pct_net_close_to_close = _close_to_close_drawdown(
+            net_grouped
+        )
 
     closed_r = [float(trade["result_r"]) for trade in closed]
-    gross_wins = sum(float(t["gross_pnl_usd"]) for t in wins)
-    gross_losses = abs(sum(float(t["gross_pnl_usd"]) for t in losses))
+    gross_wins = sum(float(trade["gross_pnl_usd"]) for trade in wins)
+    gross_losses = abs(sum(float(trade["gross_pnl_usd"]) for trade in losses))
     return {
         "mode": "PAPER_ONLY",
         "initial_capital_usd": state["initial_capital_usd"],
@@ -569,8 +622,11 @@ def paper_summary(state: dict) -> dict:
         "profit_factor_gross": gross_wins / gross_losses if gross_losses > 0 else None,
         "expectancy_r_gross": sum(closed_r) / len(closed_r) if closed_r else None,
         "max_drawdown_pct_gross": max_drawdown_pct_gross,
+        "max_drawdown_pct_gross_close_to_close": max_drawdown_pct_gross_close_to_close,
         "max_drawdown_pct_net": max_drawdown_pct_net,
+        "max_drawdown_pct_net_close_to_close": max_drawdown_pct_net_close_to_close,
         "max_drawdown_pct_equity": max_drawdown_pct_equity,
+        "max_drawdown_pct_equity_close_to_close": max_drawdown_pct_equity,
         "open_risk_usd": _open_risk(state),
         "realized_costs_usd": float(state.get("realized_costs_usd", 0.0)),
         "realized_net_pnl_usd": float(state.get("realized_net_pnl_usd", 0.0)),
