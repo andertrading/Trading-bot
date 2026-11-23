@@ -23,6 +23,13 @@ class AssetEconomicRegistryTests(unittest.TestCase):
         self.assertEqual(report["summary"]["COSTS_UNVERIFIED"], 12)
         self.assertFalse(report["account_portfolio_data_accessed"])
 
+
+    def test_etoro_symbol_mapping_does_not_overwrite_data_provider_listing(self):
+        item = self.registry["assets"]["CSPX"]["instrument"]
+        self.assertEqual(item["listing"], "CSPX.LSE")
+        self.assertEqual(item["etoro_symbol"], "CSPX.L")
+        self.assertEqual(item["etoro_instrument_id"], 3434)
+
     def test_unknown_asset_is_ineligible(self):
         result = classify_registry_asset("NOT_CONFIGURED", self.registry)
         self.assertEqual(result["status"], "INELIGIBLE")
