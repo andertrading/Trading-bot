@@ -594,16 +594,57 @@ def paper_summary(state: dict) -> dict:
 
     net_complete = bool(closed) and all(
         trade.get("cost_mode") == "VERIFIED_REGISTRY"
+        and trade.get("costs_usd") is not None
         and trade.get("net_pnl_usd") is not None
+        and (
+            trade.get("result_r_net") is not None
+            or trade.get("risk_budget_usd") is not None
+        )
         for trade in closed
     )
     max_drawdown_pct_net = None
     max_drawdown_pct_net_close_to_close = None
+    net_win_rate_pct = None
+    profit_factor_net = None
+    expectancy_r_net = None
+    return_pct_net = None
+    net_wins = []
+    net_losses = []
     if net_complete:
         net_grouped = _group_trade_pnl(closed, "net_pnl_usd")
         max_drawdown_pct_net = _worst_case_intrabar_drawdown(net_grouped)
         max_drawdown_pct_net_close_to_close = _close_to_close_drawdown(
             net_grouped
+        )
+        net_wins = [
+            trade for trade in closed if float(trade["net_pnl_usd"]) > 0
+        ]
+        net_losses = [
+            trade for trade in closed if float(trade["net_pnl_usd"]) < 0
+        ]
+        net_winning_pnl = sum(float(trade["net_pnl_usd"]) for trade in net_wins)
+        net_losing_pnl = abs(
+            sum(float(trade["net_pnl_usd"]) for trade in net_losses)
+        )
+        net_win_rate_pct = len(net_wins) / len(closed) * 100.0
+        profit_factor_net = (
+            net_winning_pnl / net_losing_pnl
+            if net_losing_pnl > 0 else None
+        )
+        net_r_values = [
+            float(
+                trade["result_r_net"]
+                if trade.get("result_r_net") is not None
+                else float(trade["net_pnl_usd"]) / float(trade["risk_budget_usd"])
+            )
+            for trade in closed
+        ]
+        if not all(math.isfinite(value) for value in net_r_values):
+            raise ValueError("net trade R-multiples must be finite")
+        expectancy_r_net = sum(net_r_values) / len(net_r_values)
+        return_pct_net = (
+            float(state.get("realized_net_pnl_usd", 0.0))
+            / initial_capital * 100.0
         )
 
     closed_r = [float(trade["result_r"]) for trade in closed]
@@ -621,6 +662,11 @@ def paper_summary(state: dict) -> dict:
         "win_rate_pct_gross": len(wins) / len(closed) * 100.0 if closed else None,
         "profit_factor_gross": gross_wins / gross_losses if gross_losses > 0 else None,
         "expectancy_r_gross": sum(closed_r) / len(closed_r) if closed_r else None,
+        "net_closed_trades": len(closed) if net_complete else 0,
+        "return_pct_net": return_pct_net,
+        "win_rate_pct_net": net_win_rate_pct,
+        "profit_factor_net": profit_factor_net,
+        "expectancy_r_net": expectancy_r_net,
         "max_drawdown_pct_gross": max_drawdown_pct_gross,
         "max_drawdown_pct_gross_close_to_close": max_drawdown_pct_gross_close_to_close,
         "max_drawdown_pct_net": max_drawdown_pct_net,
@@ -630,12 +676,7 @@ def paper_summary(state: dict) -> dict:
         "open_risk_usd": _open_risk(state),
         "realized_costs_usd": float(state.get("realized_costs_usd", 0.0)),
         "realized_net_pnl_usd": float(state.get("realized_net_pnl_usd", 0.0)),
-        "costs_included": bool(closed) and all(
-            trade.get("cost_mode") == "VERIFIED_REGISTRY"
-            and trade.get("costs_usd") is not None
-            and trade.get("net_pnl_usd") is not None
-            for trade in closed
-        ),
+        "costs_included": net_complete,
         "net_performance_validated": False,
     }
 
