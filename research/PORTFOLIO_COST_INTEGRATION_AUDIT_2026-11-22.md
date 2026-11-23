@@ -279,3 +279,11 @@ The portfolio allocator portfolio_backtest.simulate_portfolio() remains gross-on
 
 The production-alert and automatic-execution gates remain unchanged. The separate verified ledger is a research/paper control, not authorization to place orders. The portfolio-level historical backtest remains gross-only until it can be integrated using actual allocated quantity, actual simulated exit price, and complete time-aligned round-trip cost evidence.
 
+
+
+### eToro historical OHLC source discovered — 2026-11-23
+
+The eToro Market Data API exposes historical chart candles (up to 1,000 per instrument per request). PR #160 adds a weekly read-only collector for all configured instruments. This creates a second comparison source for historical OHLC and may help investigate provider mapping, session differences, and adjustment discrepancies.
+
+Do not overstate this evidence: the endpoint returns chart OHLC/volume, not historical bid/ask. The API does not confirm whether those bars are split/dividend adjusted or directly executable. The new report deliberately leaves those fields unspecified. Use it to compare price series and diagnose data mapping; do not use it to mark the registry's execution price basis or round-trip costs as verified.
+
