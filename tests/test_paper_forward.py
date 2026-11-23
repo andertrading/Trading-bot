@@ -485,6 +485,15 @@ class PaperForwardVerifiedCostTests(unittest.TestCase):
         self.assertEqual(self.state["costs_status"], "VERIFIED_NET_COSTS_INCLUDED")
         summary = paper_summary(self.state)
         self.assertTrue(summary["costs_included"])
+        self.assertIsNotNone(summary["max_drawdown_pct_net"])
+        self.assertGreater(
+            summary["max_drawdown_pct_net"],
+            summary["max_drawdown_pct_gross"],
+        )
+        self.assertAlmostEqual(
+            summary["max_drawdown_pct_equity"],
+            summary["max_drawdown_pct_net"],
+        )
         self.assertFalse(summary["net_performance_validated"])
 
 
