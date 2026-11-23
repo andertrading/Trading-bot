@@ -17,7 +17,7 @@ class BacktestSnapshotArtifactRetentionTests(unittest.TestCase):
 
         self.assertIn("uses: actions/upload-artifact@v4", upload_step)
         self.assertIn("historicos_backtest_v3/", upload_step)
-        self.assertIn("retention-days: 30", upload_step)
+        self.assertIn("retention-days: 90", upload_step)
 
 
 if __name__ == "__main__":
