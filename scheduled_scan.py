@@ -262,18 +262,20 @@ def run_scheduled_scan(timeframe: str) -> dict:
     store.prune(now=now, retention_days=180, max_terminal_records=10000)
     state = store.load()
     paper_state = state.get("paper_forward")
+    verified_paper_state = state.get("paper_forward_verified")
     paper_assets = {
         str(signal.get("asset", "")).upper()
         for signal in state.get("signals", {}).values()
         if signal.get("timeframe") == timeframe
         and signal.get("monitor_status", "ACTIVE") == "ACTIVE"
     }
-    if isinstance(paper_state, dict):
-        paper_assets.update(
-            str(trade.get("asset", "")).upper()
-            for trade in paper_state.get("trades", {}).values()
-            if trade.get("status") == "OPEN" and trade.get("asset")
-        )
+    for ledger in (paper_state, verified_paper_state):
+        if isinstance(ledger, dict):
+            paper_assets.update(
+                str(trade.get("asset", "")).upper()
+                for trade in ledger.get("trades", {}).values()
+                if trade.get("status") == "OPEN" and trade.get("asset")
+            )
     paper_assets.discard("")
     if paper_state is None:
         paper_state = new_paper_state()
@@ -281,6 +283,13 @@ def run_scheduled_scan(timeframe: str) -> dict:
         # Never silently reset a malformed persisted paper ledger.
         paper_portfolio_snapshot(
             paper_state,
+            expected_initial_capital_usd=Bot.INITIAL_CAPITAL_USD,
+        )
+    if verified_paper_state is None:
+        verified_paper_state = new_paper_state()
+    else:
+        paper_portfolio_snapshot(
+            verified_paper_state,
             expected_initial_capital_usd=Bot.INITIAL_CAPITAL_USD,
         )
 
@@ -298,6 +307,7 @@ def run_scheduled_scan(timeframe: str) -> dict:
     }
 
     paper_bars_processed = 0
+    verified_paper_bars_processed = 0
 
     # Process the latest completed OHLC bar for each existing signal before
     # lifecycle monitoring can invalidate it. The signal's own creation candle
@@ -345,7 +355,26 @@ def run_scheduled_scan(timeframe: str) -> dict:
             ) != previous_bar:
                 paper_bars_processed += 1
 
+            previous_verified_bar = verified_paper_state.get("processed_bars", {}).get(
+                stored_signal.get("signal_id")
+            )
+            process_signal_bar(
+                verified_paper_state,
+                stored_signal,
+                completed_bar,
+                risk_fraction=paper_risk,
+                require_verified_costs=True,
+            )
+            if verified_paper_state.get("processed_bars", {}).get(
+                stored_signal.get("signal_id")
+            ) != previous_verified_bar:
+                verified_paper_bars_processed += 1
+
     store.update_paper_state(paper_state)
+    store.update_paper_state(
+        verified_paper_state,
+        ledger_key="paper_forward_verified",
+    )
     transitions = 0
     retried_alerts = 0
 
@@ -488,7 +517,9 @@ def run_scheduled_scan(timeframe: str) -> dict:
         "lifecycle_notifications_retried": lifecycle_notifications_retried,
         "stale_candidates_skipped": stale_candidates_skipped,
         "paper_bars_processed": paper_bars_processed,
+        "verified_paper_bars_processed": verified_paper_bars_processed,
         "paper_forward": paper_summary(paper_state),
+        "paper_forward_verified": paper_summary(verified_paper_state),
         "alerts_enabled": alerts_enabled,
         "automatic_execution": False,
         "real_trading_authorized": False,
