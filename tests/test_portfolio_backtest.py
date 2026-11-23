@@ -311,7 +311,7 @@ class TestPortfolioBacktest(unittest.TestCase):
         row = result["trades"][0]
         self.assertAlmostEqual(row["quantity"], 0.5)
         self.assertAlmostEqual(row["verified_costs_total_usd"], 2.0525)
-        self.assertAlmostEqual(row["verified_net_pnl_on_gross_allocations_usd"], 2.9475)
+        self.assertAlmostEqual(row["verified_net_pnl_on_gross_allocation_usd"], 2.9475)
         self.assertAlmostEqual(result["summary"]["verified_net_pnl_on_gross_allocations_usd"], 2.9475)
         self.assertIsNone(result["summary"]["net_pnl_usd"])
         self.assertFalse(result["summary"]["verified_net_costs_included_in_allocation"])
