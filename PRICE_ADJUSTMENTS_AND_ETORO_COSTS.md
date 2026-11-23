@@ -58,3 +58,16 @@ The eToro public fee schedule says stock commissions vary by country and exchang
 - eToro SDRT help page (explicitly exempts ETFs): https://help.etoro.com/s/article/What-is-the-Stamp-Duty-Reserve-Tax-on-UK-listed-stocks?language=en_GB
 - eToro overnight CFD fees: https://www.etoro.com/es/trading/fees/cfd-overnight-fees/
 - eToro stock CFD borrow-fee calculation: https://help.etoro.com/s/article/how-are-the-overnight-fees-on-stocks-calculated?language=en_GB
+
+## Verified-cost forward paper ledger
+
+The prospective paper engine keeps two isolated ledgers:
+- The gross-only research ledger continues to measure strategy behavior while costs are unknown. Its gains do not increase the conservative capital base.
+- The verified-cost ledger is called with require_verified_costs enabled by the scheduled scanner. It admits an entry only when that asset is ELIGIBLE in asset_economic_registry.json; missing fees, historical spread treatment or execution-price basis block the entry.
+
+For an admitted hypothetical trade, quantity is sized so gross loss at the stop plus verified round-trip costs (fixed and variable fees, spread and FX) fit inside the risk budget. The engine reserves that stop-risk amount against the 3% aggregate portfolio cap. It also reserves virtual cash for entry notional plus the estimated round-trip costs, so no-leverage capacity cannot be exhausted by fees. At close, actual simulated exit price is passed through the same verified registry cost model and net PnL is booked once. If close-cost evidence is unexpectedly unavailable, the ledger marks the close unresolved and does not book a gross gain as spendable equity.
+
+The scanner persists this verified ledger separately as paper_forward_verified; it is not the user's eToro portfolio and never reads real positions, balances, orders or PnL. Gross-only and verified-cost results are not merged.
+
+As of the 2026-11-23 evidence review, the economic registry has **0/12 eligible assets**. This is intentional: the existing market snapshots confirm REAL LONG 1x eligibility and current spread observations, but do not yet establish complete round-trip fees, a historical conservative spread model, or historical-to-execution price-basis parity. The verified ledger therefore blocks all new entries. Synthetic registry fixtures in unit tests validate the sizing arithmetic and fail-closed behavior; they are not market evidence and do not approve any instrument.
+
