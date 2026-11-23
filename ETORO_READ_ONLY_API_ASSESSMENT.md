@@ -107,3 +107,44 @@ Historical research has not established a robust positive net edge after realist
 - eToro authentication guide: https://api-portal.etoro.com/core/getting-started/authentication
 - eToro market-order guide (includes the documented instrument-search example and market-rate guidance): https://api-portal.etoro.com/guides/market-orders
 - `exchange_calendars` calendar aliases: https://github.com/gerrymanoim/exchange_calendars/blob/master/exchange_calendars/calendar_utils.py
+
+
+## Additional eToro evidence collector — 2026-11-23
+
+The separate workflow .github/workflows/etoro_market_evidence.yml now performs a broader **read-only instrument and hypothetical-cost capture** than the original market-data audit described above. Its allowlisted requests are:
+
+- GET /api/v1/market-data/search
+- GET /api/v2/market-data/instruments
+- GET /api/v1/market-data/instruments/rates
+- POST /api/v2/trading/info/eligibility
+- POST /api/v2/trading/info/costs
+
+The POST requests are informational what-if queries only. The collector explicitly blocks all endpoints outside this allowlist. It does not request account balances, PnL, holdings, open positions, pending orders, order history, or submit/modify/cancel orders.
+
+### Latest captured result
+
+Workflow run 45195086845 completed on 2026-11-23:
+
+- 12/12 configured instruments resolved.
+- 12/12 validated as supporting REAL, unleveraged LONG (1x) for the account-specific eligibility response.
+- 12/12 realtime quotes captured.
+- 12/12 hypothetical opening-cost estimates captured.
+- 0 instrument-level errors.
+- account_data_accessed: false and order_actions_performed: false.
+- Overall collector status COMPLETE; net_performance_validation remains NOT_VALIDATED.
+
+The eligibility response is useful for instrument admission and order constraints (including minimum amount and fractional quantity support). It is not a substitute for a completed execution ticket or a guarantee of future fills.
+
+### Cost and spread interpretation
+
+The eToro what-if-cost response is explicitly scoped to a **hypothetical $100 opening only**. It must not be doubled to invent a closing fee, nor treated as a verified round-trip cost. In the captured sample:
+
+- US stocks reported a $1 opening transaction-fee component per hypothetical order.
+- Crypto reported a $0.99 opening transaction-fee component.
+- ETFs reported no transaction-fee component in that opening sample.
+- The reported opening market-spread component is retained separately from the quote-derived bid/ask spread.
+
+The quote-derived spread is a current snapshot, not a historical spread model. The reconciliation found material differences for CNDX, TTWO and XLM, and the API omitted the market-spread component for BTC. Preserve both raw observations; do not sum them or select one as authoritative without further evidence.
+
+Consequently, this capture materially improves instrument eligibility and opening-cost knowledge, but it does not by itself complete historical OHLC-to-execution price parity, closing costs, historical spread, or all-in net performance. The economic registry remains the admission-grade source for verified round-trip costing. Unknown close costs remain unknown.
+
