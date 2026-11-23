@@ -394,8 +394,20 @@ def process_signal_bar(
                                 trade.update({"status": "REJECTED_PORTFOLIO_RISK",
                                               "completed_at": timestamp.isoformat()})
                             elif _open_cash_reserved(state) + cash_reserved > capital_base + 1e-9:
-                                trade.update({"status": "REJECTED_NO_LEVERAGE_CASH",
-                                              "completed_at": timestamp.isoformat()})
+                                available_cash = max(
+                                    0.0, capital_base - _open_cash_reserved(state)
+                                )
+                                trade.update({
+                                    "status": "REJECTED_NO_LEVERAGE_CASH",
+                                    "notional_usd": notional,
+                                    "estimated_stop_costs_usd": (
+                                        float(cost_sizing["estimated_round_trip_costs_usd"])
+                                        if cost_sizing else 0.0
+                                    ),
+                                    "cash_reservation_required_usd": cash_reserved,
+                                    "available_cash_before_entry_usd": available_cash,
+                                    "completed_at": timestamp.isoformat(),
+                                })
                             else:
                                 trade.update({
                                     "status": "OPEN", "entry_fill_price": fill,
