@@ -135,7 +135,7 @@ class HistoricalCandleTests(unittest.TestCase):
         ))
         report = collect_historical_candles(
             client, symbols={"AAPL": {"etoro_symbol": "AAPL", "type": "STOCK"}},
-            now_utc=NOW, count=10, min_candles=2,
+            now_utc=NOW, count=10, min_candles=1,
         )
         history = report["assets"]["AAPL"]["historical_candles"]
         self.assertFalse(history["history_usable"])
