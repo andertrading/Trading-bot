@@ -46,6 +46,12 @@ class EtoroYahooReconciliationTests(unittest.TestCase):
             "largest_absolute_differences"
         ][0]
         self.assertEqual(worst["date"], "2026-11-20")
+        self.assertEqual(
+            result["date_shift_sensitivity"]["0"]["overlap_bars"], 2
+        )
+        self.assertEqual(
+            result["date_shift_sensitivity"]["0"]["yahoo_date_offset_days"], 0
+        )
         self.assertIn("yahoo_ohlc", result["largest_daily_outlier_rows"][0])
         self.assertIn("etoro_range_pct", result["largest_daily_outlier_rows"][0])
         ticker.history.assert_called_once()
