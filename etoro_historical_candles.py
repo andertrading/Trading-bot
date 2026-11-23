@@ -236,6 +236,8 @@ def collect_historical_candles(
             response = client.get_candles(
                 instrument_id, "desc", interval, count
             )
+            if getattr(response, "status_code", None) != 200:
+                raise EtoroAPIError("La descarga de velas no devolvió HTTP 200")
             candles = normalize_candles(
                 response.data, instrument_id, count=count, now_utc=now_utc
             )
