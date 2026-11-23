@@ -1,6 +1,9 @@
 name: Coinbase chronological OOS walk-forward research
 
 on:
+  push:
+    branches:
+      - research/coinbase-walkforward-oos-2026-11-23
   workflow_dispatch:
 
 permissions:
@@ -21,9 +24,8 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
+      with:
+        python-version: "3.13"
 
       - name: Install project dependencies
         run: python -m pip install --disable-pip-version-check -r requirements.txt
