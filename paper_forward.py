@@ -346,6 +346,14 @@ def process_signal_bar(
                 elif opening >= target:
                     trade.update({"status": "NO_FILL_GAP_PAST_TARGET",
                                   "completed_at": timestamp.isoformat()})
+                elif entry_touched and target_touched and opening < entry:
+                    # The candle opened below entry and later touched both
+                    # entry and target. OHLC cannot establish their order;
+                    # do not assume the entry preceded the target.
+                    trade.update({
+                        "status": "NO_FILL_AMBIGUOUS_ENTRY_TARGET",
+                        "completed_at": timestamp.isoformat(),
+                    })
                 elif entry_touched:
                     fill = max(entry, opening)
                     if (

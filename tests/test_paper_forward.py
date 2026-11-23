@@ -54,6 +54,30 @@ class PaperForwardTests(unittest.TestCase):
         self.assertAlmostEqual(trade["risk_budget_usd"], 2.5)
         self.assertAlmostEqual(trade["quantity"], 0.5)
 
+    def test_entry_and_target_same_bar_from_below_entry_is_ambiguous_no_fill(self):
+        # The bar opens below entry, then reaches both entry and target.
+        # OHLC does not prove that entry happened before target.
+        process_signal_bar(self.state, signal(), bar(
+            "2026-11-22T10:15:00+00:00", 99, 111, 98, 109
+        ))
+        self.assertEqual(
+            self.state["trades"]["s1"]["status"],
+            "NO_FILL_AMBIGUOUS_ENTRY_TARGET",
+        )
+        self.assertEqual(self.state["open_risk_usd"], 0.0)
+
+    def test_entry_at_bar_open_then_target_in_same_bar_is_valid_fill_and_exit(self):
+        # Opening at entry establishes that the entry is available before
+        # subsequent intrabar movement to the target.
+        process_signal_bar(self.state, signal(), bar(
+            "2026-11-22T10:15:00+00:00", 100, 111, 99, 109
+        ))
+        trade = self.state["trades"]["s1"]
+        self.assertEqual(trade["status"], "CLOSED")
+        self.assertEqual(trade["exit_reason"], "TARGET")
+        self.assertEqual(trade["entry_fill_price"], 100.0)
+        self.assertEqual(trade["exit_fill_price"], 110.0)
+
     def test_same_bar_entry_and_stop_is_conservatively_not_filled(self):
         process_signal_bar(self.state, signal(), bar(
             "2026-11-22T10:15:00+00:00", 99, 101, 94, 99
