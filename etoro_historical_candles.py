@@ -30,7 +30,7 @@ class EtoroHistoricalCandleClient(EtoroReadOnlyClient):
     HISTORY_PATH = re.compile(
         r"^/api/v1/market-data/instruments/[1-9][0-9]*/history/"
         r"candles/(?:asc|desc)/(?:1m|5m|10m|15m|30m|1h|4h|1d|1w)/"
-        r"(?:[1-9][0-9]{0,3})$"
+        r"(?:[1-9][0-9]{0,2}|1000)$"
     )
 
     def _request(self, method: str, path: str, **kwargs: Any):
