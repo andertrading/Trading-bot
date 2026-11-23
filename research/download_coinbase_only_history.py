@@ -106,6 +106,8 @@ def download_series(asset: str, timeframe: str, start: datetime, end: datetime, 
     chunk_requests = 0
     malformed_items = 0
     raw_items = 0
+    out_of_window_items = 0
+    duplicate_timestamps = 0
 
     while cursor <= end:
         chunk_end = min(
@@ -135,8 +137,11 @@ def download_series(asset: str, timeframe: str, start: datetime, end: datetime, 
                 malformed_items += 1
                 continue
             if stamp < int(cursor.timestamp()) or stamp > int(chunk_end.timestamp()):
+                out_of_window_items += 1
                 continue
 
+            if stamp in rows_by_timestamp:
+                duplicate_timestamps += 1
             low, high, open_, close, volume = [numeric(x) for x in item[1:6]]
             rows_by_timestamp[stamp] = {
                 "timestamp": datetime.fromtimestamp(stamp, tz=timezone.utc).isoformat(),
@@ -206,7 +211,8 @@ def download_series(asset: str, timeframe: str, start: datetime, end: datetime, 
         "malformed_response_items": malformed_items,
         "raw_response_items": raw_items,
         "unique_timestamps": len(rows_by_timestamp),
-        "duplicate_timestamps_collapsed": max(0, raw_items - malformed_items - len(rows_by_timestamp)),
+        "duplicate_timestamps_collapsed": duplicate_timestamps,
+        "out_of_window_response_items": out_of_window_items,
         "volume_units": f"{asset} base-asset units, as reported by Coinbase Exchange",
         "provider": "coinbase_exchange_only",
         "gap_repair": False,
