@@ -6,6 +6,7 @@ on:
       - main
     paths:
       - etoro_historical_candles.py
+      - etoro_yahoo_reconciliation.py
       - etoro_read_only.py
       - .github/workflows/etoro_historical_candles.yml
   schedule:
@@ -55,5 +56,20 @@ jobs:
         with:
           name: etoro-historical-market-candles
           path: artifacts/etoro_historical_candles.json
+          if-no-files-found: error
+          retention-days: 90
+      - name: Compare usable eToro OHLC with secondary Yahoo history
+        if: always() && hashFiles('artifacts/etoro_historical_candles.json') != ''
+        continue-on-error: true
+        run: |
+          python etoro_yahoo_reconciliation.py \
+            --input artifacts/etoro_historical_candles.json \
+            --output artifacts/etoro_yahoo_reconciliation.json
+      - name: Upload secondary price comparison
+        if: always() && hashFiles('artifacts/etoro_yahoo_reconciliation.json') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: etoro-yahoo-price-comparison
+          path: artifacts/etoro_yahoo_reconciliation.json
           if-no-files-found: error
           retention-days: 90
