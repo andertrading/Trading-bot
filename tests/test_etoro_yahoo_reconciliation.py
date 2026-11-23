@@ -42,6 +42,10 @@ class EtoroYahooReconciliationTests(unittest.TestCase):
             result["difference_metrics_pct"]["close"]["median_absolute_pct"],
             (1 / 101 + 0) / 2 * 100,
         )
+        worst = result["difference_metrics_pct"]["close"][
+            "largest_absolute_differences"
+        ][0]
+        self.assertEqual(worst["date"], "2026-11-20")
         ticker.history.assert_called_once()
         self.assertFalse(ticker.history.call_args.kwargs["auto_adjust"])
 
