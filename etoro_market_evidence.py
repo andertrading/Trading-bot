@@ -77,6 +77,34 @@ def _real_unleveraged_long_config(item: EtoroInstrumentEligibility) -> Mapping[s
     return matches[0] if len(matches) == 1 else None
 
 
+def _market_spread_crosscheck(quote: Mapping[str, Any] | None,
+                             open_cost: Mapping[str, Any] | None) -> dict[str, Any] | None:
+    """Compare quote-derived spread with eToro's open-cost component (diagnostic only)."""
+    if not isinstance(quote, Mapping) or not isinstance(open_cost, Mapping):
+        return None
+    if open_cost.get("scope") != "HYPOTHETICAL_OPEN_ONLY":
+        return None
+    spread_bps = quote.get("spread_bps")
+    amount = open_cost.get("sample_amount_usd")
+    components = open_cost.get("cost_components_usd")
+    if spread_bps is None or amount is None or not isinstance(components, Mapping):
+        return None
+    quote_reference = Decimal(str(amount)) * Decimal(str(spread_bps)) / Decimal("10000")
+    api_market_spread = components.get("marketSpread")
+    result = {
+        "reference_method": "sample_notional_usd * quote_spread_bps / 10000",
+        "reference_scope": "DIAGNOSTIC_ONLY_NOT_A_CONFIRMED_EXECUTION_COST",
+        "quote_full_spread_reference_usd": format(quote_reference, "f"),
+        "api_market_spread_usd": str(api_market_spread) if api_market_spread is not None else None,
+        "difference_api_minus_quote_reference_usd": None,
+        "status": "API_COMPONENT_OMITTED",
+    }
+    if api_market_spread is not None:
+        difference = Decimal(str(api_market_spread)) - quote_reference
+        result["difference_api_minus_quote_reference_usd"] = format(difference, "f")
+        result["status"] = "WITHIN_ONE_CENT" if abs(difference) <= Decimal("0.01") else "DIVERGENCE"
+    return result
+
 def collect_market_evidence(client: Any, *, symbols: Mapping[str, Mapping[str, Any]] | None = None,
                             now_utc: datetime | None = None,
                             sample_amount_usd: Decimal = Decimal("100")) -> dict[str, Any]:
@@ -291,6 +319,10 @@ def collect_market_evidence(client: Any, *, symbols: Mapping[str, Mapping[str, A
         except Exception as exc:
             record["errors"].append(f"hypothetical_open_cost: {type(exc).__name__}: {exc}")
 
+        record["market_spread_crosscheck"] = _market_spread_crosscheck(
+            record.get("quote"), record.get("hypothetical_open_cost")
+        )
+
     failures = sum(bool(item["errors"]) for item in report["assets"].values())
     closed_market_skips = sum(
         (item.get("hypothetical_open_cost") or {}).get("status") == "SKIPPED_MARKET_CLOSED"
@@ -300,6 +332,9 @@ def collect_market_evidence(client: Any, *, symbols: Mapping[str, Mapping[str, A
         (item.get("hypothetical_open_cost") or {}).get("scope") == "HYPOTHETICAL_OPEN_ONLY"
         for item in report["assets"].values()
     )
+    spread_crosschecks = [item.get("market_spread_crosscheck") or {} for item in report["assets"].values()]
+    spread_cost_divergences = sum(item.get("status") == "DIVERGENCE" for item in spread_crosschecks)
+    spread_cost_component_omissions = sum(item.get("status") == "API_COMPONENT_OMITTED" for item in spread_crosschecks)
     last_session_quotes = sum(
         (item.get("quote") or {}).get("quote_type") == "last_session"
         for item in report["assets"].values()
@@ -327,6 +362,8 @@ def collect_market_evidence(client: Any, *, symbols: Mapping[str, Mapping[str, A
         "assets_without_real_unleveraged_long": without_real_unleveraged_long,
         "assets_with_missing_eligibility": missing_eligibility,
         "assets_with_validated_open_costs": validated_open_costs,
+        "assets_with_market_spread_cost_divergence": spread_cost_divergences,
+        "assets_with_omitted_market_spread_cost_component": spread_cost_component_omissions,
         "status": (
             "COMPLETE"
             if failures == 0
