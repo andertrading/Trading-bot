@@ -2,8 +2,10 @@
 
 This module combines independently simulated trade outcomes in chronological
 order. It is deliberately a conservative *risk/cash allocation layer*, not
-a tick-level portfolio execution engine. Costs remain excluded from P&L because
-the current cost model has unpriced components.
+a tick-level portfolio execution engine. Portfolio equity and allocation remain
+gross. When actual exit prices are supplied, verified costs are recomputed at
+the portfolio-allocated quantity as a separate diagnostic; they are not included
+in equity or treated as validated net portfolio performance.
 """
 import math
 
@@ -87,6 +89,8 @@ def simulate_portfolio(
 ):
     """Allocate simultaneous long trades under shared risk and cash limits.
 
+    Verified cost diagnostics use actual exit prices and allocated quantities,
+    but never change gross allocation, equity or drawdown in this function.
     Drawdown is measured only from realized equity after grouped exit events.
     Intratrade mark-to-market losses and unrealized P&L are not available here.
 
@@ -426,10 +430,10 @@ def simulate_portfolio(
             "verified_costs_total_usd": (
                 round(verified_costs_total, 8) if verified_costs_total is not None else None
             ),
-            "verified_net_pnl_usd": (
+            "verified_net_pnl_on_gross_allocation_usd": (
                 round(verified_net_pnl, 8) if verified_net_pnl is not None else None
             ),
-            "verified_result_R": (
+            "verified_net_R_on_gross_allocation": (
                 round(verified_result_r, 8) if verified_result_r is not None else None
             ),
             "verified_unpriced_costs": ";".join(str(x) for x in unpriced_costs),
@@ -447,8 +451,8 @@ def simulate_portfolio(
         sum(row["verified_costs_total_usd"] for row in accepted_rows)
         if verified_costs_complete else None
     )
-    verified_net_pnl_usd = (
-        sum(row["verified_net_pnl_usd"] for row in accepted_rows)
+    verified_net_pnl_on_gross_allocations_usd = (
+        sum(row["verified_net_pnl_on_gross_allocation_usd"] for row in accepted_rows)
         if verified_costs_complete else None
     )
     summary.update({
@@ -462,13 +466,13 @@ def simulate_portfolio(
             round(verified_costs_total_usd, 8)
             if verified_costs_total_usd is not None else None
         ),
-        "verified_net_pnl_usd": (
-            round(verified_net_pnl_usd, 8)
-            if verified_net_pnl_usd is not None else None
+        "verified_net_pnl_on_gross_allocations_usd": (
+            round(verified_net_pnl_on_gross_allocations_usd, 8)
+            if verified_net_pnl_on_gross_allocations_usd is not None else None
         ),
-        "verified_net_return_pct": (
-            round(verified_net_pnl_usd / capital * 100, 6)
-            if verified_net_pnl_usd is not None else None
+        "verified_net_return_on_gross_allocations_pct": (
+            round(verified_net_pnl_on_gross_allocations_usd / capital * 100, 6)
+            if verified_net_pnl_on_gross_allocations_usd is not None else None
         ),
         "verified_net_costs_included_in_allocation": False,
         "verified_net_performance_validated": False,
