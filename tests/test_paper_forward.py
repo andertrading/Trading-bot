@@ -532,6 +532,9 @@ class PaperForwardTests(unittest.TestCase):
         self.assertEqual(summary["closed_trades"], 1)
         self.assertFalse(summary["costs_included"])
         self.assertFalse(summary["net_performance_validated"])
+        self.assertEqual(summary["drawdown_scope"], "REALIZED_CLOSED_TRADES_ONLY")
+        self.assertFalse(summary["open_trade_unrealized_pnl_included"])
+        self.assertIn("unrealized", summary["drawdown_scope_note"])
         self.assertAlmostEqual(summary["realized_gross_pnl_usd"], 5.0)
 
 
