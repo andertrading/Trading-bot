@@ -16,7 +16,10 @@ class EtoroHistoricalCandleWorkflowTests(unittest.TestCase):
         self.assertIn("etoro-yahoo-price-comparison", workflow)
         self.assertIn("etoro_read_only.py", workflow)
         self.assertIn("ETORO_API_KEY: ${{ secrets.ETORO_API_KEY }}", workflow)
-        self.assertIn("continue-on-error: true", workflow)
+        self.assertIn(
+            "Capture historical market candles only\\n        continue-on-error: true",
+            workflow,
+        )
         self.assertIn("Evaluate historical capture status", workflow)
         self.assertIn('status == "PARTIAL"', workflow)
         self.assertIn("::warning::", workflow)
