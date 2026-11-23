@@ -30,6 +30,26 @@ class AssetEconomicRegistryTests(unittest.TestCase):
         self.assertEqual(item["etoro_symbol"], "CSPX.L")
         self.assertEqual(item["etoro_instrument_id"], 3434)
 
+
+    def test_all_12_assets_retain_partial_timestamped_etoro_evidence(self):
+        for symbol, item in self.registry["assets"].items():
+            self.assertTrue(item["instrument"]["confirmed"], symbol)
+            self.assertTrue(item["execution"]["confirmed"], symbol)
+            self.assertEqual(item["execution"]["type"], "REAL", symbol)
+            self.assertTrue(item["minimum_order"]["confirmed"], symbol)
+            self.assertTrue(item["spread"]["confirmed"], symbol)
+            self.assertEqual(item["spread"]["evidence_scope"], "CURRENT_SNAPSHOT_ONLY", symbol)
+            self.assertEqual(
+                item["opening_cost_snapshot"]["scope"],
+                "HYPOTHETICAL_OPEN_ONLY",
+                symbol,
+            )
+            self.assertFalse(item["opening_cost_snapshot"]["round_trip_cost_confirmed"], symbol)
+        self.assertNotIn(
+            "marketSpread",
+            self.registry["assets"]["BTC"]["opening_cost_snapshot"]["cost_components_usd"],
+        )
+
     def test_unknown_asset_is_ineligible(self):
         result = classify_registry_asset("NOT_CONFIGURED", self.registry)
         self.assertEqual(result["status"], "INELIGIBLE")
