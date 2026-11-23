@@ -422,7 +422,7 @@ class PaperForwardVerifiedCostTests(unittest.TestCase):
             economic_registry=self.registry,
         )
         self.assertEqual(trade["status"], "CLOSED")
-        self.assertAlmostEqual(trade["gross_pnl_usd"], -trade["gross_stop_risk_usd"])
+        self.assertAlmostEqual(trade["gross_pnl_usd"], -(trade["risk_reserved_usd"] - trade["estimated_stop_costs_usd"]))
         self.assertAlmostEqual(
             trade["net_pnl_usd"],
             trade["gross_pnl_usd"] - trade["costs_usd"],
