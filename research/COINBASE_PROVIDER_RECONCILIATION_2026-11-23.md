@@ -24,7 +24,7 @@ Five assets, 728 exact common UTC daily timestamps per asset.
 | XLM | 0.04516% | 0.17193% | 1.36885% |
 | XRP | 0.03753% | 0.14408% | 0.23148% |
 
-For all five assets, the median close difference is small on exact timestamp matches. However, non-close OHLC tails can be materially larger: examples include daily low outliers around 4.9% for BTC, 5.0% for ETH, 4.8% for SOL and 41.2% for XRP. These tails need investigation before any OHLC source substitution or combined-source backtest.
+For all five assets, the median close difference is small on exact timestamp matches. However, non-close OHLC tails can be materially larger: examples include daily low outliers around 4.9% for BTC, 5.0% for ETH, 4.8% for SOL, 75.0% for XLM and 41.2% for XRP. These tails need investigation before any OHLC source substitution or combined-source backtest.
 
 A ±1-calendar-day shift worsens the median close difference for every asset (exactly aligned medians 0.0375–0.0452%; shifted medians approximately 1.14–2.20%). This supports exact UTC date alignment for this comparison; it does not establish equal candle construction or venue prices.
 
