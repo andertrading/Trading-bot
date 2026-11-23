@@ -387,3 +387,97 @@ def paper_summary(state: dict) -> dict:
         "costs_included": False,
         "net_performance_validated": False,
     }
+
+
+def calculate_verified_cost_aware_quantity(
+    asset: str,
+    entry_price: float,
+    stop_price: float,
+    risk_budget_usd: float,
+    *,
+    registry: dict | None = None,
+) -> dict:
+    """Size a long position so gross stop loss plus verified round-trip costs
+    do not exceed the USD risk budget. Fixed fees are reserved once; variable
+    fees, spread and FX are charged per unit. Unknown evidence never means zero.
+    """
+    from transaction_costs import estimate_verified_registry_unit_costs
+
+    result = {
+        "valid": False, "complete": False, "asset": asset,
+        "quantity": None, "risk_budget_usd": None,
+        "gross_stop_risk_usd": None,
+        "estimated_round_trip_costs_usd": None,
+        "reserved_stop_risk_usd": None, "notional_usd": None,
+        "unpriced_costs": [],
+    }
+    try:
+        entry = _number(entry_price, "entry_price")
+        stop = _number(stop_price, "stop_price")
+        budget = _number(risk_budget_usd, "risk_budget_usd")
+    except ValueError as error:
+        result["unpriced_costs"].append(str(error))
+        return result
+    if stop >= entry:
+        result["unpriced_costs"].append("stop_must_be_below_entry")
+        return result
+
+    unit = estimate_verified_registry_unit_costs(
+        asset, entry, stop, registry=registry
+    )
+    result["registry_status"] = unit.get("registry_status")
+    result["unpriced_costs"].extend(unit.get("unpriced_costs", []))
+    if not unit.get("complete"):
+        return result
+
+    rate = float(unit["quote_to_usd"])
+    fixed_cost_usd = float(unit["fixed_costs_quote"]) * rate
+    variable_cost_per_unit_usd = float(unit["costs_per_unit_quote"]) * rate
+    gross_risk_per_unit = entry - stop
+    total_risk_per_unit = gross_risk_per_unit + variable_cost_per_unit_usd
+    if (
+        not all(math.isfinite(value) for value in (
+            rate, fixed_cost_usd, variable_cost_per_unit_usd, total_risk_per_unit
+        ))
+        or rate <= 0 or fixed_cost_usd < 0
+        or variable_cost_per_unit_usd < 0 or total_risk_per_unit <= 0
+    ):
+        result["unpriced_costs"].append("verified_cost_values_invalid")
+        return result
+
+    remaining_budget = budget - fixed_cost_usd
+    if remaining_budget <= 0:
+        result["unpriced_costs"].append("fixed_costs_exceed_risk_budget")
+        return result
+    quantity = remaining_budget / total_risk_per_unit
+    if not unit["fractional_allowed"]:
+        quantity = math.floor(quantity)
+    if not math.isfinite(quantity) or quantity <= 0:
+        result["unpriced_costs"].append("risk_budget_below_minimum_executable_quantity")
+        return result
+
+    notional_usd = quantity * entry * rate
+    if notional_usd + 1e-9 < float(unit["minimum_order_notional_usd"]):
+        result["unpriced_costs"].append("position_below_verified_minimum_order")
+        return result
+
+    gross_stop_risk = quantity * gross_risk_per_unit
+    estimated_costs = fixed_cost_usd + quantity * variable_cost_per_unit_usd
+    reserved = gross_stop_risk + estimated_costs
+    if reserved > budget + 1e-8:
+        result["unpriced_costs"].append("calculated_stop_risk_exceeds_budget")
+        return result
+
+    result.update({
+        "valid": True, "complete": True, "quantity": quantity,
+        "risk_budget_usd": budget, "gross_stop_risk_usd": gross_stop_risk,
+        "estimated_round_trip_costs_usd": estimated_costs,
+        "reserved_stop_risk_usd": reserved, "notional_usd": notional_usd,
+        "fixed_costs_usd": fixed_cost_usd,
+        "variable_cost_per_unit_usd": variable_cost_per_unit_usd,
+        "minimum_order_notional_usd": float(unit["minimum_order_notional_usd"]),
+        "fractional_allowed": bool(unit["fractional_allowed"]),
+        "cost_source": "VERIFIED_ASSET_ECONOMIC_REGISTRY",
+        "cost_estimation_exit_price": stop,
+    })
+    return result
