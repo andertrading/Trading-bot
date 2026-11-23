@@ -63,6 +63,35 @@ class SignalLifecycleTests(unittest.TestCase):
         )
         self.assertEqual(signal["risk_reward"], 2.0)
 
+    def test_build_signal_preserves_price_adjustment_verification_provenance(self):
+        signal = build_signal_record(
+            candidate(
+                data_provider="synthetic-provider",
+                price_adjustment_policy="RAW",
+                price_adjustment_verified=True,
+                price_adjustment_verification_status="INDEPENDENTLY_VERIFIED",
+                price_adjustment_verification_source="synthetic test evidence",
+                price_adjustment_verified_at="2026-11-21T11:50:00+00:00",
+            ),
+            NOW,
+            30,
+        )
+        self.assertEqual(signal["data_provider"], "synthetic-provider")
+        self.assertEqual(signal["price_adjustment_policy"], "RAW")
+        self.assertTrue(signal["price_adjustment_verified"])
+        self.assertEqual(
+            signal["price_adjustment_verification_status"],
+            "INDEPENDENTLY_VERIFIED",
+        )
+        self.assertEqual(
+            signal["price_adjustment_verification_source"],
+            "synthetic test evidence",
+        )
+        self.assertEqual(
+            signal["price_adjustment_verified_at"],
+            "2026-11-21T11:50:00+00:00",
+        )
+
     def test_build_signal_calculates_potential_and_expiry(self):
         signal = build_signal_record(candidate(), NOW, 30)
         self.assertEqual(signal["status"], "PENDING")
