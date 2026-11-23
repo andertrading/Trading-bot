@@ -223,7 +223,7 @@ class TestDataNormalisation(unittest.TestCase):
 
         self.assertIsNone(result)
 
-    def test_replaces_missing_volume_with_zero(self):
+    def test_replaces_missing_volume_with_zero_and_marks_provenance(self):
         df = self.df.drop(columns=["volume"])
 
         result = engine._normalise_dataframe(df)
@@ -231,6 +231,64 @@ class TestDataNormalisation(unittest.TestCase):
         self.assertIsNotNone(result)
         self.assertIn("Volume", result.columns)
         self.assertTrue((result["Volume"] == 0).all())
+        self.assertEqual(result.attrs["volume_quality"], "missing_column")
+        self.assertFalse(result.attrs["volume_column_present"])
+        self.assertEqual(
+            result.attrs["volume_zero_count_before_normalization"],
+            len(df),
+        )
+
+    def test_marks_all_zero_volume_as_unusable_for_volume_research(self):
+        df = self.df.copy()
+        df["volume"] = 0
+
+        result = engine._normalise_dataframe(df)
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result.attrs["volume_quality"], "all_zero")
+        self.assertEqual(
+            result.attrs["volume_positive_count_before_normalization"],
+            0,
+        )
+
+    def test_marks_partial_zero_volume(self):
+        df = self.df.copy()
+        df.loc[self.index[0], "volume"] = 0
+
+        result = engine._normalise_dataframe(df)
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result.attrs["volume_quality"], "contains_zero_bars")
+        self.assertEqual(
+            result.attrs["volume_zero_count_before_normalization"],
+            1,
+        )
+
+    def test_marks_invalid_volume_before_zero_fill(self):
+        df = self.df.copy()
+        df.loc[self.index[1], "volume"] = np.inf
+
+        result = engine._normalise_dataframe(df)
+
+        self.assertIsNotNone(result)
+        self.assertEqual(
+            result.attrs["volume_quality"],
+            "invalid_or_missing_values",
+        )
+        self.assertEqual(
+            result.attrs["volume_invalid_count_before_normalization"],
+            1,
+        )
+
+    def test_marks_valid_positive_volume(self):
+        result = engine._normalise_dataframe(self.df)
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result.attrs["volume_quality"], "available")
+        self.assertEqual(
+            result.attrs["volume_positive_count_before_normalization"],
+            len(self.df),
+        )
 
     def test_replaces_infinite_volume_with_zero(self):
         df = self.df.copy()
