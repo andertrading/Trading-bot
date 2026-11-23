@@ -321,6 +321,55 @@ class PaperForwardTests(unittest.TestCase):
                 expected_initial_capital_usd=1000,
             )
 
+    def test_drawdown_is_independent_of_order_for_same_timestamp_closes(self):
+        timestamp = "2026-11-22T10:30:00+00:00"
+        outcomes = [
+            {
+                "status": "CLOSED",
+                "gross_pnl_usd": -50.0,
+                "result_r": -1.0,
+                "exit_timestamp": timestamp,
+                "cost_mode": "GROSS_DIAGNOSTIC",
+            },
+            {
+                "status": "CLOSED",
+                "gross_pnl_usd": 60.0,
+                "result_r": 1.2,
+                "exit_timestamp": timestamp,
+                "cost_mode": "GROSS_DIAGNOSTIC",
+            },
+        ]
+
+        summaries = []
+        for ordered in (outcomes, list(reversed(outcomes))):
+            state = new_paper_state()
+            state["trades"] = {
+                f"trade-{index}": copy.deepcopy(trade)
+                for index, trade in enumerate(ordered)
+            }
+            state["realized_gross_pnl_usd"] = 10.0
+            state["equity_usd"] = 1010.0
+            state["equity_history"] = [
+                {"timestamp": None, "equity_usd": 1000.0},
+                {"timestamp": timestamp, "equity_usd": 950.0},
+                {"timestamp": timestamp, "equity_usd": 1010.0},
+            ]
+            summaries.append(paper_summary(state))
+
+        self.assertEqual(
+            summaries[0]["max_drawdown_pct_gross"],
+            summaries[1]["max_drawdown_pct_gross"],
+        )
+        self.assertAlmostEqual(
+            summaries[0]["max_drawdown_pct_gross"], 5.0
+        )
+        self.assertAlmostEqual(
+            summaries[0]["max_drawdown_pct_gross_close_to_close"], 0.0
+        )
+        self.assertAlmostEqual(
+            summaries[0]["max_drawdown_pct_equity_close_to_close"], 0.0
+        )
+
     def test_summary_reports_gross_only_and_never_claims_net_validation(self):
         process_signal_bar(self.state, signal(), bar(
             "2026-11-22T10:15:00+00:00", 99, 101, 98, 100
