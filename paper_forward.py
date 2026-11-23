@@ -76,7 +76,7 @@ def _open_risk(state: dict) -> float:
     )
 
 
-def _open_notional(state: dict) -> float:
+def _open_cash_reserved(state: dict) -> float:
     """Reserve entry notional plus conservative verified cost reserves."""
     return sum(
         float(trade.get("cash_reserved_usd", trade.get("notional_usd", 0.0)))
@@ -154,7 +154,7 @@ def paper_portfolio_snapshot(
 
     available_capital_usd = capital_base - cash_reserved_usd
     if available_capital_usd < -1e-8:
-        raise ValueError("paper portfolio open notional exceeds conservative capital")
+        raise ValueError("paper portfolio open cash reserve exceeds conservative capital")
     available_capital_usd = max(0.0, available_capital_usd)
 
     reported_costs_status = state.get("costs_status")
@@ -393,7 +393,7 @@ def process_signal_bar(
                             if reserved + risk_to_reserve > capital_base * max_portfolio_risk + 1e-9:
                                 trade.update({"status": "REJECTED_PORTFOLIO_RISK",
                                               "completed_at": timestamp.isoformat()})
-                            elif _open_notional(state) + cash_reserved > capital_base + 1e-9:
+                            elif _open_cash_reserved(state) + cash_reserved > capital_base + 1e-9:
                                 trade.update({"status": "REJECTED_NO_LEVERAGE_CASH",
                                               "completed_at": timestamp.isoformat()})
                             else:
