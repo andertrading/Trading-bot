@@ -77,9 +77,9 @@ def _open_risk(state: dict) -> float:
 
 
 def _open_notional(state: dict) -> float:
-    """Reserve aggregate cash for all open long positions; no leverage assumed."""
+    """Reserve entry notional plus conservative verified cost reserves."""
     return sum(
-        float(trade.get("notional_usd", 0.0))
+        float(trade.get("cash_reserved_usd", trade.get("notional_usd", 0.0)))
         for trade in state["trades"].values()
         if trade.get("status") == "OPEN"
     )
@@ -116,6 +116,7 @@ def paper_portfolio_snapshot(
     open_positions = []
     open_risk_usd = 0.0
     invested_notional_usd = 0.0
+    cash_reserved_usd = 0.0
     for signal_id, trade in state["trades"].items():
         if not isinstance(trade, dict):
             raise ValueError("paper trade record is invalid")
@@ -129,7 +130,18 @@ def paper_portfolio_snapshot(
         )
         open_risk_usd += risk_usd
         invested_notional_usd += notional_usd
-        if not math.isfinite(open_risk_usd) or not math.isfinite(invested_notional_usd):
+        trade_cash_reserved = _number(
+            trade.get("cash_reserved_usd", notional_usd),
+            f"{signal_id}.cash_reserved_usd",
+        )
+        if trade_cash_reserved + 1e-9 < notional_usd:
+            raise ValueError("paper trade cash reserve cannot be below its notional")
+        cash_reserved_usd += trade_cash_reserved
+        if (
+            not math.isfinite(open_risk_usd)
+            or not math.isfinite(invested_notional_usd)
+            or not math.isfinite(cash_reserved_usd)
+        ):
             raise ValueError("paper portfolio open-position totals are invalid")
         open_positions.append({
             "signal_id": str(signal_id),
@@ -138,7 +150,7 @@ def paper_portfolio_snapshot(
             "notional_usd": notional_usd,
         })
 
-    available_capital_usd = capital_base - invested_notional_usd
+    available_capital_usd = capital_base - cash_reserved_usd
     if available_capital_usd < -1e-8:
         raise ValueError("paper portfolio open notional exceeds conservative capital")
     available_capital_usd = max(0.0, available_capital_usd)
@@ -166,6 +178,8 @@ def paper_portfolio_snapshot(
         "positions_confirmed": True,
         "current_portfolio_risk_usd": open_risk_usd,
         "invested_notional_usd": invested_notional_usd,
+        "estimated_cost_reserve_usd": max(0.0, cash_reserved_usd - invested_notional_usd),
+        "cash_reserved_usd": cash_reserved_usd,
         "available_capital_usd": available_capital_usd,
         # The forward engine does not yet debit verified net costs.
         # Never allow a persisted flag to claim otherwise.
@@ -370,10 +384,14 @@ def process_signal_bar(
                                 float(cost_sizing["notional_usd"])
                                 if cost_sizing else quantity * fill
                             )
+                            cash_reserved = notional + (
+                                float(cost_sizing["estimated_round_trip_costs_usd"])
+                                if cost_sizing else 0.0
+                            )
                             if reserved + risk_to_reserve > capital_base * max_portfolio_risk + 1e-9:
                                 trade.update({"status": "REJECTED_PORTFOLIO_RISK",
                                               "completed_at": timestamp.isoformat()})
-                            elif _open_notional(state) + notional > capital_base + 1e-9:
+                            elif _open_notional(state) + cash_reserved > capital_base + 1e-9:
                                 trade.update({"status": "REJECTED_NO_LEVERAGE_CASH",
                                               "completed_at": timestamp.isoformat()})
                             else:
@@ -382,6 +400,7 @@ def process_signal_bar(
                                     "entry_timestamp": timestamp.isoformat(),
                                     "stop": stop, "target": target,
                                     "quantity": quantity, "notional_usd": notional,
+                                    "cash_reserved_usd": cash_reserved,
                                     "risk_budget_usd": risk_budget,
                                     "risk_reserved_usd": risk_to_reserve,
                                     "risk_fraction": risk_fraction,
