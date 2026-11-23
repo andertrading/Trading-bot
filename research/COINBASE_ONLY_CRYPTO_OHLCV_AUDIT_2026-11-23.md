@@ -61,7 +61,7 @@ Coinbase candle volume is reported in the base-asset units for the Coinbase prod
 
 ## Run integrity / artifact note
 
-Two push-triggered workflow runs were created while the workflow still used a branch push trigger. Both completed the Coinbase download (1,145 requests each). Run 45233513739 failed only at artifact upload because its artifact name contained a literal backslash; run 45233527066 uploaded the complete artifact successfully. The workflow is now manual-dispatch-only to prevent commits from starting another full capture.
+Three push-triggered workflow runs were created while the workflow still used a branch push trigger: 45231405231, 45233513739 and 45233527066. Each completed the full Coinbase download (1,145 requests each), for 3,435 public Coinbase requests across the three runs. The first two runs failed only at artifact upload because the artifact name contained a literal backslash; run 45233527066 uploaded the complete artifact successfully. These were public Coinbase API requests only; no Twelve Data or EODHD paid credits were used. The workflow is now manual-dispatch-only to prevent commits from starting another full capture.
 
 ## Reproducibility
 
