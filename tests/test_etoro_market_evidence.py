@@ -77,6 +77,39 @@ class MarketEvidenceTests(unittest.TestCase):
         self.assertEqual(client.cost_payloads[0]["settlementType"], "real")
         self.assertEqual(client.cost_payloads[0]["leverage"], 1)
 
+    def test_market_spread_crosscheck_flags_divergence_without_changing_capture_status(self):
+        client = FakeMarketEvidenceClient()
+        report = collect_market_evidence(
+            client,
+            symbols={"AAPL": {"market_calendar": "XNYS", "type": "STOCK"}},
+            now_utc=datetime(2026, 11, 22, 12, 0, tzinfo=timezone.utc),
+        )
+        crosscheck = report["assets"]["AAPL"]["market_spread_crosscheck"]
+        self.assertEqual(crosscheck["status"], "DIVERGENCE")
+        self.assertEqual(crosscheck["quote_full_spread_reference_usd"], "2")
+        self.assertEqual(crosscheck["api_market_spread_usd"], "0.20")
+        self.assertEqual(crosscheck["difference_api_minus_quote_reference_usd"], "-1.80")
+        self.assertEqual(report["summary"]["assets_with_market_spread_cost_divergence"], 1)
+        self.assertEqual(report["summary"]["status"], "COMPLETE")
+
+    def test_market_spread_crosscheck_flags_omitted_api_component(self):
+        class MissingMarketSpreadClient(FakeMarketEvidenceClient):
+            def get_validated_what_if_costs(self, payload, now):
+                self.cost_payloads.append(payload)
+                return EtoroCostEstimate(payload["instrumentId"], "AAPL",
+                    {"transactionFee": Decimal("1")}, now)
+
+        client = MissingMarketSpreadClient()
+        report = collect_market_evidence(
+            client,
+            symbols={"AAPL": {"market_calendar": "XNYS", "type": "STOCK"}},
+            now_utc=datetime(2026, 11, 22, 12, 0, tzinfo=timezone.utc),
+        )
+        crosscheck = report["assets"]["AAPL"]["market_spread_crosscheck"]
+        self.assertEqual(crosscheck["status"], "API_COMPONENT_OMITTED")
+        self.assertIsNone(crosscheck["api_market_spread_usd"])
+        self.assertEqual(report["summary"]["assets_with_omitted_market_spread_cost_component"], 1)
+
     def test_closed_market_quote_skips_stale_hypothetical_cost_request(self):
         class ClosedMarketClient(FakeMarketEvidenceClient):
             def get_realtime_quotes(self, ids, now, asset_calendars=None):
