@@ -8,7 +8,8 @@ on:
       - etoro_spread_history.py
       - .github/workflows/etoro_spread_history.yml
   schedule:
-    - cron: "0 16 * * 1-5"
+    # Run after the market snapshot window, away from the top of the hour.
+    - cron: "23 16 * * 1-5"
   workflow_dispatch:
 
 permissions:
