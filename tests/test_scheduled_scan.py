@@ -4,6 +4,7 @@ from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
 import scheduled_scan
+from paper_forward import new_paper_state
 
 
 class MemoryStore:
@@ -678,6 +679,41 @@ class ScheduledScanTests(unittest.TestCase):
         self.assertLessEqual(len(caption), 1024)
         self.assertIn("informe completo se ha enviado", caption)
         self.assertNotEqual(caption, "X" * 1800)
+
+
+    def test_scan_portfolio_status_uses_verified_ledger_not_gross_diagnostics(self):
+        store = MemoryStore("url", "token")
+        store.state["paper_forward"] = new_paper_state()
+        verified = new_paper_state()
+        verified["trades"]["verified-open"] = {
+            "status": "OPEN",
+            "asset": "BTC",
+            "risk_reserved_usd": 2.5,
+            "notional_usd": 50.0,
+        }
+        store.state["paper_forward_verified"] = verified
+        scan = {
+            "timeframes": ["15m"],
+            "analyses_completed": 0,
+            "technical_candidates_found": 0,
+            "candidates_blocked": 0,
+            "validated_candidates": 0,
+            "no_trade_count": 0,
+            "results": [],
+        }
+        with patch.object(
+            scheduled_scan, "UpstashSignalStateStore", return_value=store
+        ), patch.object(
+            scheduled_scan.Bot, "run_scan", return_value=scan
+        ) as run_scan, patch.object(
+            scheduled_scan, "SIGNAL_ALERTS_ENABLED", False
+        ):
+            scheduled_scan.run_scheduled_scan("15m")
+
+        portfolio_state = run_scan.call_args.kwargs["paper_portfolio_state"]
+        self.assertIn("verified-open", portfolio_state["trades"])
+        self.assertNotIn("verified-open", store.state["paper_forward"]["trades"])
+        self.assertEqual(run_scan.call_args.kwargs["paper_assets"], ["BTC"])
 
     def test_invalid_timeframe_is_rejected_before_network_access(self):
         with self.assertRaises(ValueError):
