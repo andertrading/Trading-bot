@@ -346,6 +346,32 @@ class TestBacktestV3(unittest.TestCase):
             backtest_v3.DOWNLOAD_ERRORS[("AAPL", "1d")],
         )
 
+    def test_snapshot_replay_restores_volume_quality_provenance(self):
+        data = self.make_data()
+        data.attrs.update({
+            "volume_quality": "all_zero",
+            "volume_column_present": True,
+            "volume_zero_count_before_normalization": len(data),
+            "volume_positive_count_before_normalization": 0,
+            "volume_invalid_count_before_normalization": 0,
+        })
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.object(backtest_v3, "SNAPSHOT_DIR", backtest_v3.Path(tmpdir)):
+                backtest_v3._save_snapshot("AAPL", "AAPL", "15m", data)
+                replayed = backtest_v3._load_snapshot("AAPL", "AAPL", "15m")
+
+        self.assertEqual(replayed.attrs["volume_quality"], "all_zero")
+        self.assertTrue(replayed.attrs["volume_column_present"])
+        self.assertEqual(
+            replayed.attrs["volume_zero_count_before_normalization"],
+            len(data),
+        )
+        self.assertEqual(
+            replayed.attrs["volume_positive_count_before_normalization"],
+            0,
+        )
+
     def test_snapshot_metadata_persists_volume_quality_provenance(self):
         data = self.make_data()
         data.attrs.update({

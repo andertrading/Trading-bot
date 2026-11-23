@@ -635,6 +635,23 @@ def _load_snapshot(asset, ticker, interval):
             f"Snapshot insuficiente: {len(data)} velas"
         )
 
+    # Restore persisted diagnostic provenance for downstream research.
+    # Legacy manifests remain explicitly unrecorded; never infer provenance
+    # from the normalized CSV values alone.
+    data.attrs.update({
+        "volume_quality": metadata.get("volume_quality", "not_recorded"),
+        "volume_column_present": metadata.get("volume_column_present"),
+        "volume_zero_count_before_normalization": metadata.get(
+            "volume_zero_count_before_normalization"
+        ),
+        "volume_positive_count_before_normalization": metadata.get(
+            "volume_positive_count_before_normalization"
+        ),
+        "volume_invalid_count_before_normalization": metadata.get(
+            "volume_invalid_count_before_normalization"
+        ),
+    })
+
     SNAPSHOT_MANIFEST.append(metadata)
 
     print(
