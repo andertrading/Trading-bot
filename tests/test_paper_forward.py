@@ -424,6 +424,31 @@ class PaperForwardVerifiedCostTests(unittest.TestCase):
         self.assertEqual(trade["available_cash_before_entry_usd"], 1000.0)
         self.assertEqual(self.state["open_risk_usd"], 0.0)
 
+    def test_legacy_verified_open_trade_backfills_cost_cash_reserve(self):
+        self.state["trades"]["legacy-verified"] = {
+            "status": "OPEN",
+            "asset": "AAPL",
+            "risk_reserved_usd": 5.0,
+            "notional_usd": 100.0,
+            "cost_mode": "VERIFIED_REGISTRY",
+            "estimated_stop_costs_usd": 2.0,
+        }
+        snapshot = paper_portfolio_snapshot(self.state)
+        self.assertAlmostEqual(snapshot["cash_reserved_usd"], 102.0)
+        self.assertAlmostEqual(snapshot["estimated_cost_reserve_usd"], 2.0)
+        self.assertAlmostEqual(snapshot["available_capital_usd"], 898.0)
+
+    def test_legacy_verified_open_trade_without_cost_reserve_fails_closed(self):
+        self.state["trades"]["legacy-verified"] = {
+            "status": "OPEN",
+            "asset": "AAPL",
+            "risk_reserved_usd": 5.0,
+            "notional_usd": 100.0,
+            "cost_mode": "VERIFIED_REGISTRY",
+        }
+        with self.assertRaisesRegex(ValueError, "missing its estimated cost reserve"):
+            paper_portfolio_snapshot(self.state)
+
     def test_verified_cost_stop_close_books_net_pnl_once(self):
         item = signal("verified-cost-stop")
         item["asset"] = "AAPL"
