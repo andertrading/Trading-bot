@@ -2677,6 +2677,22 @@ def main():
         f"PnL bruto: {portfolio_metrics['gross_pnl_usd']:.2f} USD | "
         f"DD realizado máximo: {portfolio_metrics['max_drawdown_usd']:.2f} USD"
     )
+    verified_net_on_gross_allocations = portfolio_metrics.get(
+        "verified_net_pnl_on_gross_allocations_usd"
+    )
+    if verified_net_on_gross_allocations is None:
+        print(
+            "Diagnóstico neto a cantidades asignadas: NO DISPONIBLE | "
+            f"costes completos={portfolio_metrics.get('verified_costs_complete_trades', 0)} | "
+            f"costes sin verificar={portfolio_metrics.get('verified_costs_unpriced_trades', 0)}"
+        )
+    else:
+        print(
+            "Diagnóstico neto a cantidades asignadas (no incluido en la "
+            "asignación ni en el equity): "
+            f"{verified_net_on_gross_allocations:.2f} USD"
+        )
+
     print(
         "Límite de riesgo conjunto: "
         f"{portfolio_metrics['portfolio_risk_limit_pct']:.2f}% | "
