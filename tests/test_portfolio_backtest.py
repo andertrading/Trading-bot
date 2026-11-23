@@ -311,8 +311,8 @@ class TestPortfolioBacktest(unittest.TestCase):
         row = result["trades"][0]
         self.assertAlmostEqual(row["quantity"], 0.5)
         self.assertAlmostEqual(row["verified_costs_total_usd"], 2.0525)
-        self.assertAlmostEqual(row["verified_net_pnl_usd"], 2.9475)
-        self.assertAlmostEqual(result["summary"]["verified_net_pnl_usd"], 2.9475)
+        self.assertAlmostEqual(row["verified_net_pnl_on_gross_allocations_usd"], 2.9475)
+        self.assertAlmostEqual(result["summary"]["verified_net_pnl_on_gross_allocations_usd"], 2.9475)
         self.assertIsNone(result["summary"]["net_pnl_usd"])
         self.assertFalse(result["summary"]["verified_net_costs_included_in_allocation"])
         self.assertFalse(result["summary"]["verified_net_performance_validated"])
@@ -326,8 +326,8 @@ class TestPortfolioBacktest(unittest.TestCase):
         result = simulate_portfolio([trade], capital_usd=1000.0)
         row = result["trades"][0]
         self.assertEqual(row["verified_costs_status"], "COSTS_UNVERIFIED")
-        self.assertIsNone(row["verified_net_pnl_usd"])
-        self.assertIsNone(result["summary"]["verified_net_pnl_usd"])
+        self.assertIsNone(row["verified_net_pnl_on_gross_allocations_usd"])
+        self.assertIsNone(result["summary"]["verified_net_pnl_on_gross_allocations_usd"])
         self.assertFalse(result["summary"]["costs_included"])
 
     def test_exit_price_must_match_backtest_result_r_for_cost_diagnostics(self):
@@ -342,7 +342,7 @@ class TestPortfolioBacktest(unittest.TestCase):
         row = result["trades"][0]
         self.assertEqual(row["verified_costs_status"], "EXIT_PRICE_RESULT_R_MISMATCH")
         self.assertIsNone(row["verified_costs_total_usd"])
-        self.assertIsNone(result["summary"]["verified_net_pnl_usd"])
+        self.assertIsNone(result["summary"]["verified_net_pnl_on_gross_allocations_usd"])
 
     def test_empty_portfolio_does_not_claim_net_performance(self):
         result = simulate_portfolio([], capital_usd=1000.0)
