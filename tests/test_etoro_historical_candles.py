@@ -6,6 +6,7 @@ from etoro_historical_candles import (
     EtoroHistoricalCandleClient,
     collect_historical_candles,
     normalize_candles,
+    find_missing_expected_session_dates,
 )
 from etoro_read_only import EtoroAPIError, EtoroResponse
 
@@ -172,6 +173,73 @@ class HistoricalCandleTests(unittest.TestCase):
             with self.subTest(timestamp=timestamp):
                 with self.assertRaises(EtoroAPIError):
                     normalize_candles(data, 1001, count=10, now_utc=NOW)
+
+    def test_detects_missing_us_market_session_between_daily_candles(self):
+        candles = [
+            {"timestamp": "2024-11-27T00:00:00+00:00"},
+            {"timestamp": "2024-12-02T00:00:00+00:00"},
+        ]
+        self.assertEqual(
+            find_missing_expected_session_dates(candles, "XNYS"),
+            ["2024-11-29"],
+        )
+
+    def test_does_not_count_exchange_holidays_as_missing_sessions(self):
+        candles = [
+            {"timestamp": "2024-11-27T00:00:00+00:00"},
+            {"timestamp": "2024-12-02T00:00:00+00:00"},
+        ]
+        # Thanksgiving (Nov 28) is closed; Friday (Nov 29) was an open session.
+        self.assertEqual(
+            find_missing_expected_session_dates(candles, "XNYS"),
+            ["2024-11-29"],
+        )
+
+    def test_detects_missing_calendar_days_for_crypto(self):
+        candles = [
+            {"timestamp": "2026-11-20T00:00:00+00:00"},
+            {"timestamp": "2026-11-23T00:00:00+00:00"},
+        ]
+        self.assertEqual(
+            find_missing_expected_session_dates(candles, "24/7"),
+            ["2026-11-21", "2026-11-22"],
+        )
+
+    def test_collector_marks_history_with_missing_sessions_non_continuous(self):
+        data = {
+            "interval": "OneDay",
+            "candles": [{
+                "instrumentId": 1001,
+                "candles": [
+                    candle("2024-12-02T00:00:00Z"),
+                    candle("2024-11-27T00:00:00Z"),
+                ],
+            }],
+        }
+        client = FakeClient(response=EtoroResponse(
+            data=data, status_code=200, headers={}
+        ))
+        report = collect_historical_candles(
+            client,
+            symbols={"AAPL": {"etoro_symbol": "AAPL", "type": "STOCK"}},
+            now_utc=NOW,
+            count=10,
+            min_candles=2,
+        )
+        history = report["assets"]["AAPL"]["historical_candles"]
+        self.assertTrue(history["history_usable"])
+        self.assertFalse(history["continuous_history_usable"])
+        self.assertEqual(history["missing_expected_session_dates"], ["2024-11-29"])
+        self.assertEqual(
+            history["session_coverage_status"],
+            "EXPECTED_SESSIONS_MISSING",
+        )
+        self.assertEqual(
+            report["summary"]["assets_with_missing_expected_sessions"],
+            1,
+        )
+        self.assertEqual(report["summary"]["assets_with_continuous_history"], 0)
+        self.assertEqual(report["summary"]["status"], "PARTIAL")
 
     def test_collects_history_and_labels_execution_basis_unconfirmed(self):
         client = FakeClient()
