@@ -10,7 +10,7 @@ permissions:
   actions: read
 
 concurrency:
-  group: coinbase-segmented-research-\${{ github.ref }}
+  group: coinbase-segmented-research-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -34,8 +34,8 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: coinbase-only-ohlcv-45233527066
-          github-token: \${{ secrets.GITHUB_TOKEN }}
-          repository: \${{ github.repository }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
           run-id: 45233527066
           path: data/coinbase_only
 
@@ -68,7 +68,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: coinbase-segmented-backtests-\${{ github.run_id }}
+          name: coinbase-segmented-backtests-${{ github.run_id }}
           path: research_results/
           if-no-files-found: warn
           retention-days: 90
