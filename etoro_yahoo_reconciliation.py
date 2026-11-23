@@ -98,6 +98,7 @@ def compare_asset_history(
         yahoo_by_day[day] = row
 
     differences = {field: [] for field in PRICE_FIELDS}
+    observations = {field: [] for field in PRICE_FIELDS}
     overlaps = 0
     missing_yahoo = 0
     invalid_yahoo = 0
@@ -115,6 +116,12 @@ def compare_asset_history(
                 valid = False
                 break
             values[field] = (etoro_value - yahoo_value) / yahoo_value * 100.0
+            observations[field].append({
+                "date": day.isoformat(),
+                "etoro": etoro_value,
+                "yahoo": yahoo_value,
+                "signed_difference_pct": values[field],
+            })
         if not valid:
             invalid_yahoo += 1
             continue
@@ -130,6 +137,11 @@ def compare_asset_history(
             "median_absolute_pct": _percentile(absolute, 0.50),
             "p95_absolute_pct": _percentile(absolute, 0.95),
             "max_absolute_pct": max(absolute) if absolute else None,
+            "largest_absolute_differences": sorted(
+                observations[field],
+                key=lambda item: abs(item["signed_difference_pct"]),
+                reverse=True,
+            )[:5],
         }
     return {
         "status": "COMPARISON_ONLY_NOT_VALIDATION" if overlaps else "NO_OVERLAP",
