@@ -27,10 +27,14 @@ def _metrics(trades, fee_pct):
     gross = []
     fees = []
     adjusted = []
+    fee_burden_r = []
+    stop_distance_pct = []
     for trade in trades:
         quantity = _positive(trade, "quantity")
         entry = _positive(trade, "entry")
         exit_price = _positive(trade, "exit_price")
+        stop = _positive(trade, "stop")
+        planned_risk = _positive(trade, "planned_gross_stop_risk_usd")
         pnl = float(trade["realized_pnl_usd"])
         if not math.isfinite(pnl):
             raise ValueError("non-finite realized_pnl_usd")
@@ -38,11 +42,16 @@ def _metrics(trades, fee_pct):
         gross.append(pnl)
         fees.append(fee)
         adjusted.append(pnl - fee)
+        fee_burden_r.append(fee / planned_risk)
+        stop_distance_pct.append(abs(entry - stop) / entry * 100.0)
     gross_total = sum(gross)
     fee_total = sum(fees)
     adjusted_total = sum(adjusted)
     wins = sum(value for value in adjusted if value > 0)
     losses = sum(value for value in adjusted if value < 0)
+    sorted_fee_r = sorted(fee_burden_r)
+    sorted_stop_pct = sorted(stop_distance_pct)
+    percentile_index = lambda values, p: values[min(int(p * len(values)), len(values) - 1)] if values else None
     return {
         "trades": len(trades),
         "gross_pnl_usd": round(gross_total, 2),
@@ -52,6 +61,11 @@ def _metrics(trades, fee_pct):
         "fee_only_adjusted_win_rate_pct": round(100 * sum(value > 0 for value in adjusted) / len(adjusted), 2) if adjusted else None,
         "fee_only_adjusted_profit_factor": round(wins / abs(losses), 4) if losses < 0 else None,
         "fee_to_gross_pnl_multiple": round(fee_total / gross_total, 4) if gross_total > 0 else None,
+        "mean_fee_burden_R": round(sum(fee_burden_r) / len(fee_burden_r), 4) if fee_burden_r else None,
+        "median_fee_burden_R": round((sorted_fee_r[(len(sorted_fee_r)-1)//2] + sorted_fee_r[len(sorted_fee_r)//2]) / 2, 4) if sorted_fee_r else None,
+        "p90_fee_burden_R": round(percentile_index(sorted_fee_r, 0.90), 4) if sorted_fee_r else None,
+        "median_stop_distance_pct": round((sorted_stop_pct[(len(sorted_stop_pct)-1)//2] + sorted_stop_pct[len(sorted_stop_pct)//2]) / 2, 4) if sorted_stop_pct else None,
+        "p90_stop_distance_pct": round(percentile_index(sorted_stop_pct, 0.90), 4) if sorted_stop_pct else None,
     }
 
 

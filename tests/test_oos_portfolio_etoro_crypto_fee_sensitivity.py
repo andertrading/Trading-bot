@@ -16,10 +16,14 @@ class OOSPortfolioCryptoFeeSensitivityTests(unittest.TestCase):
             "entry": 100,
             "exit_price": 110,
             "realized_pnl_usd": 20,
+            "stop": 95,
+            "planned_gross_stop_risk_usd": 10,
         }
         result = _metrics([trade], 1.0)
         self.assertEqual(result["fee_only_cost_usd"], 4.2)
         self.assertEqual(result["fee_only_adjusted_pnl_on_fixed_allocations_usd"], 15.8)
+        self.assertEqual(result["median_fee_burden_R"], 0.42)
+        self.assertEqual(result["median_stop_distance_pct"], 5.0)
 
     def test_audit_rejects_net_validated_or_cost_included_source(self):
         payload = {

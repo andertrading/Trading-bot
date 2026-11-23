@@ -29,6 +29,17 @@ Using each accepted trade's actual hypothetical quantity, entry, exit price and 
 
 Even at 0.10% per side, the fee-only cost is approximately 16.4 times the entire gross portfolio profit. At 1.00%, it is approximately 164.3 times gross profit.
 
+## Cost relative to the planned stop risk
+
+The accepted trades also show why the fee burden is so large: the median stop distance is only **0.5688%** of entry price (90th percentile: 0.9604%). Comparing each trade's round-trip fee with its planned gross stop-risk amount gives:
+
+| Fee per side | Mean fee burden | Median fee burden | 90th percentile |
+|---:|---:|---:|---:|
+| 1.00% | 3.9488R | 3.5201R | 6.2553R |
+| 0.10% | 0.3949R | 0.3520R | 0.6255R |
+
+This is a direct fee-to-risk comparison on the accepted hypothetical quantities. It does not add spread or slippage. At the 1.00% rate, the median round-trip fee is more than three and a half times the trade's planned stop loss. Even at 0.10% per side, the median fee consumes about 0.35R before any market spread or execution slippage.
+
 ## Breakdown at 1.00% per side
 
 | Asset | Accepted trades | Gross P&L | Fee-only cost | Adjusted P&L |
