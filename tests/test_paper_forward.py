@@ -416,6 +416,47 @@ class PaperForwardTests(unittest.TestCase):
         self.assertAlmostEqual(summary["expectancy_r_net"], -0.05)
         self.assertFalse(summary["net_performance_validated"])
 
+    def test_summary_separates_m15_and_daily_performance(self):
+        state = new_paper_state()
+        state["trades"] = {
+            "intraday": {
+                "status": "CLOSED",
+                "timeframe": "15m",
+                "gross_pnl_usd": 12.0,
+                "result_r": 0.6,
+                "cost_mode": "GROSS_DIAGNOSTIC",
+                "exit_timestamp": "2026-11-22T10:30:00+00:00",
+            },
+            "daily": {
+                "status": "CLOSED",
+                "timeframe": "1d",
+                "gross_pnl_usd": -8.0,
+                "result_r": -0.4,
+                "cost_mode": "GROSS_DIAGNOSTIC",
+                "exit_timestamp": "2026-11-23T16:00:00+00:00",
+            },
+        }
+        state["realized_gross_pnl_usd"] = 4.0
+        state["equity_usd"] = 1004.0
+        summary = paper_summary(state)
+
+        self.assertEqual(set(summary["by_timeframe"]), {"15m", "1d"})
+        self.assertEqual(summary["by_timeframe"]["15m"]["closed_trades"], 1)
+        self.assertEqual(summary["by_timeframe"]["1d"]["closed_trades"], 1)
+        self.assertAlmostEqual(
+            summary["by_timeframe"]["15m"]["gross_pnl_usd"], 12.0
+        )
+        self.assertAlmostEqual(
+            summary["by_timeframe"]["1d"]["gross_pnl_usd"], -8.0
+        )
+        self.assertIsNone(
+            summary["by_timeframe"]["15m"]["net_pnl_usd"]
+        )
+        self.assertEqual(
+            summary["by_timeframe"]["15m"]["performance_status"],
+            "DESCRIPTIVE_ONLY_NOT_VALIDATED",
+        )
+
     def test_summary_reports_gross_only_and_never_claims_net_validation(self):
         process_signal_bar(self.state, signal(), bar(
             "2026-11-22T10:15:00+00:00", 99, 101, 98, 100
