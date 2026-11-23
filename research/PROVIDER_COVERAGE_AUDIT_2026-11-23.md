@@ -25,8 +25,8 @@ The 24-request coverage run returned **20/24 successful series**:
 
 The request used `outputsize=5000`.
 
-- US equities: 5,000 M15 bars per instrument, from 2026-02-13 14:00 through 2026-11-18 15:45 UTC; daily results ranged from 4,124 to 5,000 bars, with the oldest returned dates between 2007-01-05 and 2010-06-29.
-- Crypto: 5,000 M15 bars per instrument, from 2026-09-27 22:30 through 2026-11-19 00:15 UTC; daily results ranged from 2,292 to 3,371 bars, with the oldest returned dates between 2017-08-28 and 2020-08-11.
+- US equities: 5,000 M15 bars per instrument, from 2026-02-13 14:00 through 2026-11-18 15:45 as returned (the coverage request did not explicitly set a timezone); daily results ranged from 4,124 to 5,000 bars, with the oldest returned dates between 2007-01-05 and 2010-06-29.
+- Crypto: 5,000 M15 bars per instrument, from 2026-09-27 22:30 through 2026-11-19 00:15 as returned (the coverage request did not explicitly set a timezone); daily results ranged from 2,292 to 3,371 bars, with the oldest returned dates between 2017-08-28 and 2020-08-11.
 
 These are provider availability observations from that run, not proof that every returned bar is complete, continuous, correctly adjusted, or equivalent to eToro's executable prices.
 
