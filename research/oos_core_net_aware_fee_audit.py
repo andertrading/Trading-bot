@@ -74,10 +74,8 @@ def audit_core_net_aware_oos(zip_path):
             raise ValueError("expected 20 core strategy/timeframe fee-scenario rows")
         if set(selected["status"]) != {"COMPARABLE_BOUNDS_ONLY"}:
             raise ValueError("unexpected core net-aware calendar status")
-        if selected["costs_included"].astype(bool).any() is not True:
-            # All selected rows must explicitly include the assumed cost scenario.
-            if not selected["costs_included"].astype(bool).all():
-                raise ValueError("selected rows do not all include assumed costs")
+        if not selected["costs_included"].astype(bool).all():
+            raise ValueError("selected rows do not all include assumed costs")
 
         traded = selected[selected["trades_considered"] > 0]
         no_trade = selected[selected["trades_considered"] == 0]
