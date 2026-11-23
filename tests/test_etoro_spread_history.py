@@ -1,5 +1,5 @@
 import unittest
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from etoro_spread_history import (
     build_spread_history_report,
@@ -94,7 +94,7 @@ class EtoroSpreadHistoryTests(unittest.TestCase):
     def test_30_sessions_are_reviewable_but_not_auto_approved(self):
         reports = []
         for day in range(1, 31):
-            date = datetime(2026, 10, 1, tzinfo=timezone.utc) + __import__("datetime").timedelta(days=day)
+            date = datetime(2026, 10, 1, tzinfo=timezone.utc) + timedelta(days=day)
             timestamp = date.replace(hour=15).isoformat()
             reports.append((day, evidence(timestamp, 4.0 + day / 10)))
         report = build_spread_history_report(
