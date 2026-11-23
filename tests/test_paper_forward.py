@@ -370,6 +370,52 @@ class PaperForwardTests(unittest.TestCase):
             summaries[0]["max_drawdown_pct_equity_close_to_close"], 0.0
         )
 
+    def test_net_performance_metrics_expose_gross_positive_but_net_negative_results(self):
+        timestamp = "2026-11-22T10:30:00+00:00"
+        state = new_paper_state()
+        state["trades"] = {
+            "net-loss": {
+                "status": "CLOSED",
+                "gross_pnl_usd": -50.0,
+                "result_r": -1.0,
+                "cost_mode": "VERIFIED_REGISTRY",
+                "costs_usd": 5.0,
+                "net_pnl_usd": -55.0,
+                "result_r_net": -1.1,
+                "risk_budget_usd": 50.0,
+                "exit_timestamp": timestamp,
+            },
+            "net-win": {
+                "status": "CLOSED",
+                "gross_pnl_usd": 60.0,
+                "result_r": 1.2,
+                "cost_mode": "VERIFIED_REGISTRY",
+                "costs_usd": 10.0,
+                "net_pnl_usd": 50.0,
+                "result_r_net": 1.0,
+                "risk_budget_usd": 50.0,
+                "exit_timestamp": timestamp,
+            },
+        }
+        state["realized_gross_pnl_usd"] = 10.0
+        state["realized_costs_usd"] = 15.0
+        state["realized_net_pnl_usd"] = -5.0
+        state["equity_usd"] = 995.0
+        state["equity_history"] = [
+            {"timestamp": None, "equity_usd": 1000.0},
+            {"timestamp": timestamp, "equity_usd": 995.0},
+        ]
+
+        summary = paper_summary(state)
+        self.assertTrue(summary["costs_included"])
+        self.assertEqual(summary["net_closed_trades"], 2)
+        self.assertAlmostEqual(summary["return_pct_gross"], 1.0)
+        self.assertAlmostEqual(summary["return_pct_net"], -0.5)
+        self.assertAlmostEqual(summary["win_rate_pct_net"], 50.0)
+        self.assertAlmostEqual(summary["profit_factor_net"], 50.0 / 55.0)
+        self.assertAlmostEqual(summary["expectancy_r_net"], -0.05)
+        self.assertFalse(summary["net_performance_validated"])
+
     def test_summary_reports_gross_only_and_never_claims_net_validation(self):
         process_signal_bar(self.state, signal(), bar(
             "2026-11-22T10:15:00+00:00", 99, 101, 98, 100
