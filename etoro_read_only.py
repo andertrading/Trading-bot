@@ -1141,7 +1141,8 @@ class EtoroReadOnlyClient:
         }
         candle_pattern = (
             r"^/api/v1/market-data/instruments/[1-9][0-9]*/history/"
-            r"candles/(asc|desc)/(1m|5m|10m|15m|30m|1h|4h|1d|1w)/"
+            r"candles/(asc|desc)/(OneMinute|FiveMinutes|TenMinutes|FifteenMinutes|"
+            r"ThirtyMinutes|OneHour|FourHours|OneDay|OneWeek)/"
             r"([1-9][0-9]{0,2}|1000)$"
         )
         is_candle_path = (
@@ -1420,13 +1421,23 @@ class EtoroReadOnlyClient:
             raise ValueError("instrument_id debe ser un entero positivo")
         if direction not in {"asc", "desc"}:
             raise ValueError("direction debe ser asc o desc")
-        if interval not in {"1m", "5m", "10m", "15m", "30m", "1h", "4h", "1d", "1w"}:
+        interval_map = {
+            "1m": "OneMinute", "5m": "FiveMinutes", "10m": "TenMinutes",
+            "15m": "FifteenMinutes", "30m": "ThirtyMinutes",
+            "1h": "OneHour", "4h": "FourHours", "1d": "OneDay", "1w": "OneWeek",
+            "OneMinute": "OneMinute", "FiveMinutes": "FiveMinutes",
+            "TenMinutes": "TenMinutes", "FifteenMinutes": "FifteenMinutes",
+            "ThirtyMinutes": "ThirtyMinutes", "OneHour": "OneHour",
+            "FourHours": "FourHours", "OneDay": "OneDay", "OneWeek": "OneWeek",
+        }
+        if interval not in interval_map:
             raise ValueError("intervalo de velas no permitido")
+        api_interval = interval_map[interval]
         if isinstance(count, bool) or not isinstance(count, int) or not 1 <= count <= 1000:
             raise ValueError("count debe estar entre 1 y 1000")
         path = (
             f"/api/v1/market-data/instruments/{instrument_id}/history/"
-            f"candles/{direction}/{interval}/{count}"
+            f"candles/{direction}/{api_interval}/{count}"
         )
         return self._request("GET", path)
 
