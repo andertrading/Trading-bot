@@ -346,6 +346,54 @@ class TestBacktestV3(unittest.TestCase):
             backtest_v3.DOWNLOAD_ERRORS[("AAPL", "1d")],
         )
 
+    def test_snapshot_metadata_persists_volume_quality_provenance(self):
+        data = self.make_data()
+        data.attrs.update({
+            "volume_quality": "contains_zero_bars",
+            "volume_column_present": True,
+            "volume_zero_count_before_normalization": 3,
+            "volume_positive_count_before_normalization": 97,
+            "volume_invalid_count_before_normalization": 0,
+        })
+
+        metadata = backtest_v3._snapshot_metadata(
+            "BTC",
+            "BTC/USD",
+            "15m",
+            data,
+            backtest_v3.Path("snapshot.csv"),
+            "sha256",
+            "coinbase_exchange",
+        )
+
+        self.assertEqual(metadata["volume_quality"], "contains_zero_bars")
+        self.assertTrue(metadata["volume_column_present"])
+        self.assertEqual(
+            metadata["volume_zero_count_before_normalization"], 3
+        )
+        self.assertEqual(
+            metadata["volume_positive_count_before_normalization"], 97
+        )
+        self.assertEqual(
+            metadata["volume_invalid_count_before_normalization"], 0
+        )
+
+    def test_snapshot_metadata_marks_unrecorded_volume_provenance(self):
+        data = self.make_data()
+
+        metadata = backtest_v3._snapshot_metadata(
+            "AAPL",
+            "AAPL",
+            "15m",
+            data,
+            backtest_v3.Path("snapshot.csv"),
+            "sha256",
+            "twelvedata",
+        )
+
+        self.assertEqual(metadata["volume_quality"], "not_recorded")
+        self.assertIsNone(metadata["volume_column_present"])
+
     def test_snapshot_metadata_records_provider_and_adjustment_policy(self):
         data = self.make_data()
         metadata = backtest_v3._snapshot_metadata(
