@@ -170,6 +170,21 @@ def compare_asset_history(
         overlaps += 1
         for field, value in values.items():
             differences[field].append(value)
+        daily_outliers.append({
+            "date": day.isoformat(),
+            "max_absolute_difference_pct": max(abs(value) for value in values.values()),
+            "difference_pct_by_field": values,
+            "etoro_ohlc": etoro_ohlc,
+            "yahoo_ohlc": yahoo_ohlc,
+            "etoro_range_pct": (
+                (etoro_ohlc["high"] - etoro_ohlc["low"])
+                / ((etoro_ohlc["high"] + etoro_ohlc["low"]) / 2) * 100
+            ),
+            "yahoo_range_pct": (
+                (yahoo_ohlc["high"] - yahoo_ohlc["low"])
+                / ((yahoo_ohlc["high"] + yahoo_ohlc["low"]) / 2) * 100
+            ),
+        })
 
     metrics = {}
     for field, values in differences.items():
