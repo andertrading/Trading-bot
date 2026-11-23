@@ -824,6 +824,12 @@ def paper_summary(state: dict) -> dict:
         "max_drawdown_pct_net_close_to_close": max_drawdown_pct_net_close_to_close,
         "max_drawdown_pct_equity": max_drawdown_pct_equity,
         "max_drawdown_pct_equity_close_to_close": max_drawdown_pct_equity,
+        "drawdown_scope": "REALIZED_CLOSED_TRADES_ONLY",
+        "open_trade_unrealized_pnl_included": False,
+        "drawdown_scope_note": (
+            "Drawdown uses realized closed-trade equity only; unrealized "
+            "P&L on open trades is excluded."
+        ),
         "open_risk_usd": _open_risk(state),
         "realized_costs_usd": float(state.get("realized_costs_usd", 0.0)),
         "realized_net_pnl_usd": float(state.get("realized_net_pnl_usd", 0.0)),
