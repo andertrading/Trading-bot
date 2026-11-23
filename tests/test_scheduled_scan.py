@@ -26,8 +26,8 @@ class MemoryStore:
     def update(self, signal):
         self.state["signals"][signal["signal_id"]] = copy.deepcopy(signal)
 
-    def update_paper_state(self, paper_state):
-        self.state["paper_forward"] = copy.deepcopy(paper_state)
+    def update_paper_state(self, paper_state, *, ledger_key="paper_forward"):
+        self.state[ledger_key] = copy.deepcopy(paper_state)
 
     def prune(self, **kwargs):
         return 0
@@ -148,6 +148,10 @@ class ScheduledScanTests(unittest.TestCase):
         self.assertEqual(result["paper_bars_processed"], 1)
         self.assertEqual(result["paper_forward"]["open_trades"], 1)
         self.assertFalse(result["paper_forward"]["costs_included"])
+        verified = store.state["paper_forward_verified"]
+        self.assertEqual(verified["trades"]["paper-fill-1"]["status"], "REJECTED_COSTS_UNVERIFIED")
+        self.assertEqual(result["verified_paper_bars_processed"], 1)
+        self.assertFalse(result["paper_forward_verified"]["costs_included"])
 
     def test_replays_all_intermediate_completed_bars_for_open_and_exit(self):
         store = MemoryStore("url", "token")
@@ -217,6 +221,11 @@ class ScheduledScanTests(unittest.TestCase):
         self.assertEqual(trade["status"], "CLOSED")
         self.assertEqual(trade["exit_reason"], "TARGET")
         self.assertEqual(result["paper_bars_processed"], 2)
+        self.assertEqual(result["verified_paper_bars_processed"], 2)
+        self.assertEqual(
+            store.state["paper_forward_verified"]["trades"]["paper-replay-1"]["status"],
+            "REJECTED_COSTS_UNVERIFIED",
+        )
 
     def test_missing_signal_risk_is_not_replaced_with_default_paper_risk(self):
         store = MemoryStore("url", "token")
@@ -261,6 +270,10 @@ class ScheduledScanTests(unittest.TestCase):
         trade = store.state["paper_forward"]["trades"]["paper-no-risk"]
         self.assertEqual(trade["status"], "REJECTED_INVALID_RISK_POLICY")
         self.assertEqual(store.state["paper_forward"]["open_risk_usd"], 0.0)
+        self.assertEqual(
+            store.state["paper_forward_verified"]["trades"]["paper-no-risk"]["status"],
+            "REJECTED_INVALID_RISK_POLICY",
+        )
 
     def test_same_candle_does_not_create_duplicate_signal(self):
         store = MemoryStore("url", "token")
