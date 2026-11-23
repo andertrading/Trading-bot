@@ -1,6 +1,12 @@
 name: eToro Historical Market Candles (Read-Only)
 
 on:
+  push:
+    branches:
+      - main
+    paths:
+      - etoro_historical_candles.py
+      - .github/workflows/etoro_historical_candles.yml
   schedule:
     - cron: "15 0 * * 0"
   workflow_dispatch:
@@ -17,8 +23,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
-      ETORO_API_KEY: \${{ secrets.ETORO_API_KEY }}
-      ETORO_USER_KEY: \${{ secrets.ETORO_USER_KEY }}
+      ETORO_API_KEY: ${{ secrets.ETORO_API_KEY }}
+      ETORO_USER_KEY: ${{ secrets.ETORO_USER_KEY }}
       ETORO_HISTORICAL_EVIDENCE_OUTPUT: artifacts/etoro_historical_candles.json
     steps:
       - name: Checkout

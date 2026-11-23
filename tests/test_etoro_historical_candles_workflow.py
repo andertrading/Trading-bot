@@ -7,6 +7,13 @@ class EtoroHistoricalCandleWorkflowTests(unittest.TestCase):
         workflow = Path(".github/workflows/etoro_historical_candles.yml").read_text(
             encoding="utf-8"
         )
+        self.assertIn("push:", workflow)
+        self.assertIn("branches:", workflow)
+        self.assertIn("- main", workflow)
+        self.assertIn("etoro_historical_candles.py", workflow)
+        self.assertIn("ETORO_API_KEY: ${{ secrets.ETORO_API_KEY }}", workflow)
+        self.assertIn("python - <<'PY'", workflow)
+        self.assertIn("hashFiles('artifacts/etoro_historical_candles.json')", workflow)
         self.assertIn('cron: "15 0 * * 0"', workflow)
         self.assertIn("workflow_dispatch:", workflow)
         self.assertIn("permissions:\n  contents: read", workflow)
