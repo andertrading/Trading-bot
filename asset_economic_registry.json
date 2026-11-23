@@ -7,13 +7,15 @@
       "instrument": {
         "name": "iShares Core S&P 500 UCITS ETF",
         "type": "ETF",
-        "listing": "CSPX.L",
+        "listing": "CSPX.LSE",
         "currency": "USD",
         "calendar": "XLON",
         "isin": null,
         "confirmed": true,
         "source": "eToro Public API: exact instrument metadata; market-evidence run 45195086845",
-        "observed_at": "2026-11-23T14:31:42.571854+00:00"
+        "observed_at": "2026-11-23T14:31:42.571854+00:00",
+        "etoro_instrument_id": 3434,
+        "etoro_symbol": "CSPX.L"
       },
       "execution": {
         "type": "REAL",
@@ -85,13 +87,15 @@
       "instrument": {
         "name": "iShares NASDAQ 100 UCITS ETF usd",
         "type": "ETF",
-        "listing": "CNDX.L",
+        "listing": "CNDX.LSE",
         "currency": "USD",
         "calendar": "XLON",
         "isin": null,
         "confirmed": true,
         "source": "eToro Public API: exact instrument metadata; market-evidence run 45195086845",
-        "observed_at": "2026-11-23T14:31:42.571854+00:00"
+        "observed_at": "2026-11-23T14:31:42.571854+00:00",
+        "etoro_instrument_id": 8015,
+        "etoro_symbol": "CNDX.L"
       },
       "execution": {
         "type": "REAL",
@@ -169,7 +173,9 @@
         "isin": null,
         "confirmed": true,
         "source": "eToro Public API: exact instrument metadata; market-evidence run 45195086845",
-        "observed_at": "2026-11-23T14:31:42.571854+00:00"
+        "observed_at": "2026-11-23T14:31:42.571854+00:00",
+        "etoro_instrument_id": 1111,
+        "etoro_symbol": "TSLA"
       },
       "execution": {
         "type": "REAL",
@@ -248,7 +254,9 @@
         "isin": null,
         "confirmed": true,
         "source": "eToro Public API: exact instrument metadata; market-evidence run 45195086845",
-        "observed_at": "2026-11-23T14:31:42.571854+00:00"
+        "observed_at": "2026-11-23T14:31:42.571854+00:00",
+        "etoro_instrument_id": 1137,
+        "etoro_symbol": "NVDA"
       },
       "execution": {
         "type": "REAL",
@@ -327,7 +335,9 @@
         "isin": null,
         "confirmed": true,
         "source": "eToro Public API: exact instrument metadata; market-evidence run 45195086845",
-        "observed_at": "2026-11-23T14:31:42.571854+00:00"
+        "observed_at": "2026-11-23T14:31:42.571854+00:00",
+        "etoro_instrument_id": 1001,
+        "etoro_symbol": "AAPL"
       },
       "execution": {
         "type": "REAL",
@@ -406,7 +416,9 @@
         "isin": null,
         "confirmed": true,
         "source": "eToro Public API: exact instrument metadata; market-evidence run 45195086845",
-        "observed_at": "2026-11-23T14:31:42.571854+00:00"
+        "observed_at": "2026-11-23T14:31:42.571854+00:00",
+        "etoro_instrument_id": 1004,
+        "etoro_symbol": "MSFT"
       },
       "execution": {
         "type": "REAL",
@@ -485,7 +497,9 @@
         "isin": null,
         "confirmed": true,
         "source": "eToro Public API: exact instrument metadata; market-evidence run 45195086845",
-        "observed_at": "2026-11-23T14:31:42.571854+00:00"
+        "observed_at": "2026-11-23T14:31:42.571854+00:00",
+        "etoro_instrument_id": 1388,
+        "etoro_symbol": "TTWO"
       },
       "execution": {
         "type": "REAL",
@@ -558,13 +572,15 @@
       "instrument": {
         "name": "Bitcoin",
         "type": "CRYPTO",
-        "listing": "BTC",
+        "listing": "BTC-USD",
         "currency": "USD",
         "calendar": "24/7",
         "isin": null,
         "confirmed": true,
         "source": "eToro Public API: exact instrument metadata; market-evidence run 45195086845",
-        "observed_at": "2026-11-23T14:31:42.571854+00:00"
+        "observed_at": "2026-11-23T14:31:42.571854+00:00",
+        "etoro_instrument_id": 100000,
+        "etoro_symbol": "BTC"
       },
       "execution": {
         "type": "REAL",
@@ -636,13 +652,15 @@
       "instrument": {
         "name": "Ethereum",
         "type": "CRYPTO",
-        "listing": "ETH",
+        "listing": "ETH-USD",
         "currency": "USD",
         "calendar": "24/7",
         "isin": null,
         "confirmed": true,
         "source": "eToro Public API: exact instrument metadata; market-evidence run 45195086845",
-        "observed_at": "2026-11-23T14:31:42.571854+00:00"
+        "observed_at": "2026-11-23T14:31:42.571854+00:00",
+        "etoro_instrument_id": 100001,
+        "etoro_symbol": "ETH"
       },
       "execution": {
         "type": "REAL",
@@ -715,13 +733,15 @@
       "instrument": {
         "name": "Solana",
         "type": "CRYPTO",
-        "listing": "SOL",
+        "listing": "SOL-USD",
         "currency": "USD",
         "calendar": "24/7",
         "isin": null,
         "confirmed": true,
         "source": "eToro Public API: exact instrument metadata; market-evidence run 45195086845",
-        "observed_at": "2026-11-23T14:31:42.571854+00:00"
+        "observed_at": "2026-11-23T14:31:42.571854+00:00",
+        "etoro_instrument_id": 100063,
+        "etoro_symbol": "SOL"
       },
       "execution": {
         "type": "REAL",
@@ -794,13 +814,15 @@
       "instrument": {
         "name": "Stellar",
         "type": "CRYPTO",
-        "listing": "XLM",
+        "listing": "XLM-USD",
         "currency": "USD",
         "calendar": "24/7",
         "isin": null,
         "confirmed": true,
         "source": "eToro Public API: exact instrument metadata; market-evidence run 45195086845",
-        "observed_at": "2026-11-23T14:31:42.571854+00:00"
+        "observed_at": "2026-11-23T14:31:42.571854+00:00",
+        "etoro_instrument_id": 100020,
+        "etoro_symbol": "XLM"
       },
       "execution": {
         "type": "REAL",
@@ -873,13 +895,15 @@
       "instrument": {
         "name": "XRP",
         "type": "CRYPTO",
-        "listing": "XRP",
+        "listing": "XRP-USD",
         "currency": "USD",
         "calendar": "24/7",
         "isin": null,
         "confirmed": true,
         "source": "eToro Public API: exact instrument metadata; market-evidence run 45195086845",
-        "observed_at": "2026-11-23T14:31:42.571854+00:00"
+        "observed_at": "2026-11-23T14:31:42.571854+00:00",
+        "etoro_instrument_id": 100003,
+        "etoro_symbol": "XRP"
       },
       "execution": {
         "type": "REAL",
