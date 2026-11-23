@@ -1,0 +1,57 @@
+{
+  "mode": "RESEARCH_ONLY_OOS_ASSET_CONCENTRATION_DIAGNOSTIC",
+  "source": {
+    "workflow_run_id": 45244766224,
+    "artifact_id": 14852244870,
+    "artifact_sha256": "9e1d33001b7359e13e9540bd88a23057c394290f1eaa75134d788c5de406ffb6",
+    "series_count": 10,
+    "test_folds": 21,
+    "test_trades": 1252
+  },
+  "sample_warning": "Gross equal-weight candidate-trade R only; not a position-sized portfolio ledger. Costs incomplete; Coinbase OHLC not established as eToro executable prices.",
+  "by_asset": {
+    "BTC": {"trades": 297, "gross_total_R": 25.6929, "mean_R_per_trade": 0.086508, "median_R": -1.0, "win_rate_pct": 38.72, "gross_profit_factor": 1.1447},
+    "ETH": {"trades": 253, "gross_total_R": 29.015, "mean_R_per_trade": 0.114684, "median_R": -1.0, "win_rate_pct": 40.32, "gross_profit_factor": 1.195},
+    "SOL": {"trades": 256, "gross_total_R": -2.1495, "mean_R_per_trade": -0.008396, "median_R": -1.0, "win_rate_pct": 35.16, "gross_profit_factor": 0.9866},
+    "XLM": {"trades": 194, "gross_total_R": -27.849, "mean_R_per_trade": -0.143552, "median_R": -1.0, "win_rate_pct": 29.38, "gross_profit_factor": 0.7944},
+    "XRP": {"trades": 252, "gross_total_R": -19.8372, "mean_R_per_trade": -0.078719, "median_R": -1.0, "win_rate_pct": 32.14, "gross_profit_factor": 0.8802}
+  },
+  "by_timeframe": {
+    "15m": {"trades": 1247, "gross_total_R": 6.8635, "mean_R_per_trade": 0.005504, "median_R": -1.0, "win_rate_pct": 35.61, "gross_profit_factor": 1.0088},
+    "1d": {"trades": 5, "gross_total_R": -1.9913, "mean_R_per_trade": -0.39826, "median_R": -1.0, "win_rate_pct": 20.0, "gross_profit_factor": 0.5022}
+  },
+  "btc_eth_vs_other_assets": {
+    "BTC_ETH": {"trades": 550, "gross_total_R": 54.7079, "mean_R_per_trade": 0.099469, "median_R": -1.0, "win_rate_pct": 39.45, "gross_profit_factor": 1.1676},
+    "SOL_XLM_XRP": {"trades": 702, "gross_total_R": -49.8357, "mean_R_per_trade": -0.070991, "median_R": -1.0, "win_rate_pct": 32.48, "gross_profit_factor": 0.892}
+  },
+  "same_asset_cross_timeframe_overlap": {"overlapping_pairs": 19, "unique_trades_involved": 20},
+  "overlap_exclusion_sensitivity": {
+    "m15_member_trades_removed": 19,
+    "daily_member_trades_removed": 1,
+    "baseline": {"trades": 1252, "gross_total_R": 4.8722, "mean_R_per_trade": 0.003892, "median_R": -1.0, "win_rate_pct": 35.54, "gross_profit_factor": 1.0062},
+    "exclude_m15_member": {"trades": 1233, "gross_total_R": 0.7457, "mean_R_per_trade": 0.000605, "median_R": -1.0, "win_rate_pct": 35.44, "gross_profit_factor": 1.001},
+    "exclude_daily_member": {"trades": 1251, "gross_total_R": 5.8722, "mean_R_per_trade": 0.004694, "median_R": -1.0, "win_rate_pct": 35.57, "gross_profit_factor": 1.0075},
+    "warning": "Ex-post candidate-only filter, not portfolio replay."
+  },
+  "weekly_m15_exit_buckets": {
+    "active_exit_weeks": 26,
+    "weeks": {
+      "2025-W14": {"trades": 11, "gross_R": -0.7394}, "2025-W15": {"trades": 11, "gross_R": 8.2864},
+      "2025-W16": {"trades": 11, "gross_R": 1.0736}, "2025-W17": {"trades": 10, "gross_R": 4.6416},
+      "2025-W35": {"trades": 30, "gross_R": -2.4076}, "2025-W36": {"trades": 68, "gross_R": -22.9284},
+      "2025-W37": {"trades": 114, "gross_R": 23.5891}, "2025-W38": {"trades": 36, "gross_R": -7.7318},
+      "2025-W39": {"trades": 32, "gross_R": -1.8061}, "2025-W40": {"trades": 133, "gross_R": -4.5922},
+      "2025-W41": {"trades": 26, "gross_R": 5.6742}, "2025-W42": {"trades": 52, "gross_R": -11.7586},
+      "2025-W43": {"trades": 60, "gross_R": 7.6126}, "2026-W14": {"trades": 60, "gross_R": -8.6895},
+      "2026-W15": {"trades": 90, "gross_R": -1.5075}, "2026-W16": {"trades": 110, "gross_R": 13.1309},
+      "2026-W17": {"trades": 74, "gross_R": -6.6789}, "2026-W18": {"trades": 67, "gross_R": 13.8845},
+      "2026-W19": {"trades": 73, "gross_R": 10.7429}, "2026-W42": {"trades": 12, "gross_R": -5.8918},
+      "2026-W43": {"trades": 43, "gross_R": 6.0627}, "2026-W44": {"trades": 49, "gross_R": 0.8535},
+      "2026-W45": {"trades": 40, "gross_R": -4.1013}, "2026-W46": {"trades": 3, "gross_R": -3.0},
+      "2026-W47": {"trades": 23, "gross_R": -6.2434}, "2026-W48": {"trades": 9, "gross_R": -0.612}
+    },
+    "effective_sample_size": null,
+    "reason": "No validated synchronized position-sized portfolio return series; test windows discontinuous and cross-asset dependence material."
+  },
+  "approval": "NOT_APPROVED"
+}
