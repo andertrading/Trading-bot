@@ -549,6 +549,7 @@ def _normalise_dataframe(df):
         volume_positive_count = 0
         volume_invalid_count = 0
         volume_quality = "missing_column"
+        df["Volume"] = 0.0
 
     df = df[COLUMNS].copy()
 
