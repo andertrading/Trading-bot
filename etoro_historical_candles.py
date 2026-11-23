@@ -188,6 +188,8 @@ def normalize_candles(
             diagnostics["duplicate_timestamp_conflicts"].append({
                 "timestamp": key,
                 "additional": normalized_item,
+                "additional_source_fromDate": item.get("fromDate"),
+                "additional_source_fields": sorted(str(field) for field in item.keys()),
             })
             continue
         previous = by_timestamp.get(key)
@@ -198,6 +200,16 @@ def normalize_candles(
                     "timestamp": key,
                     "first": previous,
                     "conflicting": normalized_item,
+                    "first_source_fromDate": next(
+                        (
+                            prior.get("fromDate")
+                            for prior in items[:index]
+                            if _as_utc_timestamp(prior.get("fromDate")).isoformat() == key
+                        ),
+                        None,
+                    ),
+                    "conflicting_source_fromDate": item.get("fromDate"),
+                    "source_fields": sorted(str(field) for field in item.keys()),
                 })
                 by_timestamp.pop(key, None)
                 conflicted_timestamps.add(key)
