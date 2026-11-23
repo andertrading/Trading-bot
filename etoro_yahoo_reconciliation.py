@@ -54,7 +54,9 @@ def compare_asset_history(
     ticker_factory=None,
     captured_at: str | None = None,
 ) -> dict[str, Any]:
-    if etoro_history.get("history_usable") is not True:
+    strict_history = etoro_history.get("history_usable") is True
+    research_history = etoro_history.get("research_history_usable") is True
+    if not strict_history and not research_history:
         return {
             "status": "SKIPPED_ETORO_HISTORY_UNUSABLE",
             "ticker": ticker_symbol,
@@ -227,6 +229,14 @@ def compare_asset_history(
         }
     return {
         "status": "COMPARISON_ONLY_NOT_VALIDATION" if overlaps else "NO_OVERLAP",
+        "history_quality_scope": (
+            "STRICT_NO_CONFLICTS"
+            if strict_history
+            else "RESEARCH_ONLY_AMBIGUOUS_DATES_EXCLUDED"
+        ),
+        "excluded_conflict_timestamps": etoro_history.get(
+            "excluded_conflict_timestamps", []
+        ),
         "ticker": ticker_symbol,
         "etoro_bars": len(by_day),
         "excluded_incomplete_etoro_bars": excluded_incomplete_bars,

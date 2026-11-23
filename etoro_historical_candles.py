@@ -267,6 +267,7 @@ def collect_historical_candles(
 
     resolved = 0
     sufficient = 0
+    research_usable_count = 0
     failures = 0
     for asset, config in symbols.items():
         record = {
@@ -274,6 +275,7 @@ def collect_historical_candles(
             "instrument": None,
             "historical_candles": None,
             "errors": [],
+            "warnings": [],
         }
         report["assets"][asset] = record
         try:
@@ -307,12 +309,16 @@ def collect_historical_candles(
                 diagnostics=candle_diagnostics,
                 allow_conflicts=True,
             )
-            enough = (
-                len(candles) >= min_candles
-                and candle_diagnostics["conflicting_duplicate_timestamps"] == 0
-            )
-            if enough:
+            enough = len(candles) >= min_candles
+            conflicts_excluded = candle_diagnostics[
+                "conflicting_duplicate_timestamps"
+            ]
+            strict_usable = enough and conflicts_excluded == 0
+            research_usable = enough
+            if strict_usable:
                 sufficient += 1
+            if research_usable:
+                research_usable_count += 1
             record["historical_candles"] = {
                 "interval": interval,
                 "requested_count": count,
@@ -328,7 +334,17 @@ def collect_historical_candles(
                     "duplicate_timestamp_conflicts"
                 ],
                 "sufficient_history": enough,
-                "history_usable": enough,
+                "history_usable": strict_usable,
+                "research_history_usable": research_usable,
+                "research_history_policy": (
+                    "AMBIGUOUS_DUPLICATE_DATES_EXCLUDED"
+                    if conflicts_excluded else "NO_CONFLICTS"
+                ),
+                "excluded_conflict_timestamps": [
+                    item["timestamp"]
+                    for item in candle_diagnostics["duplicate_timestamp_conflicts"]
+                    if isinstance(item, Mapping) and item.get("timestamp")
+                ],
                 "first_timestamp": candles[0]["timestamp"] if candles else None,
                 "last_timestamp": candles[-1]["timestamp"] if candles else None,
                 "source": "eToro historical chart candles",
@@ -338,11 +354,11 @@ def collect_historical_candles(
                 "candles": candles,
             }
             if candle_diagnostics["conflicting_duplicate_timestamps"]:
-                record["errors"].append(
-                    "conflicting_duplicate_timestamps: "
+                record["warnings"] = [
+                    "ambiguous_daily_candles_excluded_from_research: "
                     + str(candle_diagnostics["conflicting_duplicate_timestamps"])
-                )
-            elif not enough:
+                ]
+            if not enough:
                 record["errors"].append(
                     f"insufficient_history: returned {len(candles)}; minimum {min_candles}"
                 )
@@ -357,6 +373,14 @@ def collect_historical_candles(
         "configured_assets": len(symbols),
         "resolved_instruments": resolved,
         "assets_with_sufficient_history": sufficient,
+        "assets_with_research_usable_history": research_usable_count,
+        "assets_with_excluded_conflict_dates": sum(
+            bool(
+                isinstance(record.get("historical_candles"), Mapping)
+                and record["historical_candles"].get("conflicting_duplicate_timestamps", 0)
+            )
+            for record in report["assets"].values()
+        ),
         "assets_with_errors": failures,
         "status": (
             "COMPLETE"

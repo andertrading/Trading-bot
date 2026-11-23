@@ -212,3 +212,14 @@ The forward spread audit currently samples the scheduled weekday 15:00 UTC snaps
 The eToro NVDA daily history spans the 2024-06-10 10:1 split. Its close was 120.6418 on 2024-06-07 and 121.5274 on 2024-06-10, so the captured series is on the post-split price scale across that event. This is consistent with Yahoo's split-adjusted history and rules out an obvious 10x discontinuity in this NVDA series. It is a spot check, not a full corporate-action audit and does not verify Twelve Data's separate adjustment pipeline.
 
 The eToro TSLA history begins 2022-10-25, after the 2022-08-25 3:1 split, so this capture cannot independently test TSLA's pre/post-split adjustment. Neither spot check changes the Twelve Data split-evidence gate in data_engine.py.
+
+
+### Historical candle capture — 23 November 2026
+
+The read-only daily candle capture resolved all 12 configured instruments. Seven histories pass the strict duplicate-free gate. Five crypto histories contain conflicting OHLC rows under the same UTC timestamp on daylight-saving transition dates: BTC, ETH, XLM and XRP have two conflicted dates each (2024-11-03 and 2025-11-02); SOL has those two plus 2026-11-01. The normalizer removes **both** rows for every conflicted timestamp rather than choosing either value.
+
+After excluding those ambiguous dates, the five crypto series retain 994–996 daily candles, above the 220-candle research minimum. The collector therefore exposes a separate `research_history_usable` flag while keeping strict `history_usable=false`. The exclusions are recorded per asset and the overall report remains PARTIAL. Research usability is not strict data approval.
+
+The initial Yahoo comparison was run before this research-only flag existed, so it compared only the seven strict histories. Median absolute daily close differences were approximately 0.13–0.16% for CSPX, CNDX and the five equities; 95th-percentile absolute close differences ranged from approximately 0.27% to 0.73%. Individual outliers reached 4–7% in some equities, and Yahoo returned one invalid OHLC row for CSPX and two for CNDX. These are diagnostic differences, not evidence that either provider is the executable-price truth. The comparison does not validate eToro's chart price basis, spread, FX, fees, slippage or execution parity.
+
+All eToro candle records continue to declare adjustment basis UNSPECIFIED, no historical bid/ask availability, and no confirmed execution-price basis. Do not use these chart candles as production execution prices or treat the research-only crypto series as strict-quality history.

@@ -130,16 +130,27 @@ class HistoricalCandleTests(unittest.TestCase):
     def test_collector_marks_conflicting_daily_history_unusable(self):
         data = history_response().data
         data["candles"][0]["candles"][1]["fromDate"] = "2026-11-22T00:00:00Z"
+        data["candles"][0]["candles"].append(
+            candle("2026-11-20T00:00:00Z", "97", "100", "96", "98")
+        )
         client = FakeClient(response=EtoroResponse(
             data=data, status_code=200, headers={}
         ))
         report = collect_historical_candles(
             client, symbols={"AAPL": {"etoro_symbol": "AAPL", "type": "STOCK"}},
-            now_utc=NOW, count=10, min_candles=2,
+            now_utc=NOW, count=10, min_candles=1,
         )
         history = report["assets"]["AAPL"]["historical_candles"]
         self.assertFalse(history["history_usable"])
+        self.assertTrue(history["research_history_usable"])
+        self.assertEqual(
+            history["research_history_policy"],
+            "AMBIGUOUS_DUPLICATE_DATES_EXCLUDED",
+        )
+        self.assertEqual(history["excluded_conflict_timestamps"], ["2026-11-22T00:00:00+00:00"])
         self.assertEqual(history["conflicting_duplicate_timestamps"], 1)
+        self.assertEqual(report["summary"]["assets_with_sufficient_history"], 0)
+        self.assertEqual(report["summary"]["assets_with_research_usable_history"], 1)
         self.assertEqual(report["summary"]["status"], "PARTIAL")
 
     def test_rejects_duplicate_timestamps(self):
