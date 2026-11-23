@@ -297,7 +297,9 @@ def run_scheduled_scan(timeframe: str) -> dict:
         timeframes=[timeframe],
         include_paper_bars=True,
         paper_assets=sorted(paper_assets),
-        paper_portfolio_state=paper_state,
+        # Operational candidate risk/cash checks must use the verified ledger;
+        # gross-only history remains a separate diagnostic stream.
+        paper_portfolio_state=verified_paper_state,
     )
     results = scan_result.get("results", [])
     by_asset = {
