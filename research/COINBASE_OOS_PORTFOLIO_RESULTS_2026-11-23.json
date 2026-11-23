@@ -1,0 +1,116 @@
+{
+  "report_date": "2026-11-23",
+  "mode": "RESEARCH_ONLY_OOS_PORTFOLIO_SIMULATION",
+  "portfolio_workflow_run_id": 45257891167,
+  "portfolio_artifact_id": 14859052638,
+  "portfolio_artifact_sha256": "a4886b52920572f67e9740c34db81b493a2d5761971f973645793d0edec36703",
+  "input_oos_workflow_run_id": 45244766224,
+  "source_validation": {
+    "provider": "coinbase_exchange_only",
+    "assets": [
+      "BTC",
+      "ETH",
+      "SOL",
+      "XLM",
+      "XRP"
+    ],
+    "timeframes": [
+      "15m",
+      "1d"
+    ],
+    "series_count": 10,
+    "test_folds": 21,
+    "test_trades": 1252,
+    "duplicate_trade_identities": 0,
+    "network_requests": 0,
+    "etoro_price_equivalence": "not_established",
+    "verified_transaction_costs": "not_complete"
+  },
+  "portfolio_policy": {
+    "capital_usd": 1000,
+    "maximum_risk_per_trade_pct": 1,
+    "maximum_aggregate_open_risk_pct": 3,
+    "cash_policy": "long_only_unleveraged_shared_cash",
+    "same_timestamp_policy": "entries allocated before exits",
+    "simultaneous_entry_policy": "proportional allocation"
+  },
+  "summary": {
+    "ending_equity_usd": 1055.35632132,
+    "gross_pnl_usd": 55.35632132,
+    "gross_return_pct": 5.535632,
+    "net_pnl_usd": null,
+    "net_return_pct": null,
+    "net_performance_validated": false,
+    "trades_considered": 1252,
+    "trades_accepted": 921,
+    "trades_rejected": 331,
+    "win_rate_pct": 36.3735,
+    "profit_factor": 1.034656,
+    "max_drawdown_usd": 66.89563883,
+    "max_drawdown_pct": 6.278279,
+    "drawdown_basis": "realized_exit_events_only",
+    "intratrade_drawdown_included": false,
+    "unrealized_pnl_included": false,
+    "peak_open_risk_usd": 15.80173619,
+    "peak_open_risk_pct_of_equity": 1.529529,
+    "risk_limit_breach_events": 0,
+    "verified_costs_complete_trades": 0,
+    "verified_costs_unpriced_trades": 921,
+    "verified_costs_total_usd": null,
+    "verified_net_pnl_on_gross_allocations_usd": null
+  },
+  "accepted_by_asset_timeframe": {
+    "BTC_15m": {
+      "accepted_trades": 239,
+      "gross_pnl_usd": 74.47478553,
+      "win_rate_pct": 40.167364,
+      "profit_factor_gross": 1.232248
+    },
+    "BTC_1d": {
+      "accepted_trades": 1,
+      "gross_pnl_usd": -2.69859119,
+      "win_rate_pct": 0,
+      "profit_factor_gross": 0
+    },
+    "ETH_15m": {
+      "accepted_trades": 183,
+      "gross_pnl_usd": 112.24239835,
+      "win_rate_pct": 42.622951,
+      "profit_factor_gross": 1.364823
+    },
+    "ETH_1d": {
+      "accepted_trades": 2,
+      "gross_pnl_usd": -8.12964027,
+      "win_rate_pct": 0,
+      "profit_factor_gross": 0
+    },
+    "SOL_15m": {
+      "accepted_trades": 178,
+      "gross_pnl_usd": 14.26260629,
+      "win_rate_pct": 35.955056,
+      "profit_factor_gross": 1.039949
+    },
+    "SOL_1d": {
+      "accepted_trades": 2,
+      "gross_pnl_usd": -0.00362556,
+      "win_rate_pct": 50,
+      "profit_factor_gross": 0.999332
+    },
+    "XLM_15m": {
+      "accepted_trades": 131,
+      "gross_pnl_usd": -77.75427685,
+      "win_rate_pct": 29.007634,
+      "profit_factor_gross": 0.704221
+    },
+    "XRP_15m": {
+      "accepted_trades": 185,
+      "gross_pnl_usd": -57.03733492,
+      "win_rate_pct": 31.351351,
+      "profit_factor_gross": 0.828616
+    }
+  },
+  "rejections_by_reason": {
+    "limite_de_riesgo_o_capital_disponible": 331
+  },
+  "decision": "NOT_APPROVED; gross-only diagnostic; costs and execution-price equivalence unverified"
+}
