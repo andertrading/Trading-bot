@@ -99,12 +99,15 @@ def _extract_candle_items(data: Any, instrument_id: int) -> list[Mapping[str, An
     ]
     if len(grouped) > 1:
         raise EtoroAPIError("La respuesta contiene grupos duplicados para el instrumento")
+    group_identity_confirmed = False
     if grouped:
+        group_identity_confirmed = True
         items = grouped[0].get("candles")
     elif len(groups) == 1 and isinstance(groups[0], Mapping) and "candles" in groups[0]:
         group_id = groups[0].get("instrumentId", groups[0].get("instrumentID"))
         if group_id is not None and group_id != instrument_id:
             raise EtoroAPIError("La respuesta de velas pertenece a otro instrumento")
+        group_identity_confirmed = group_id == instrument_id
         items = groups[0].get("candles")
     elif all(isinstance(item, Mapping) and "fromDate" in item for item in groups):
         items = groups
@@ -114,6 +117,11 @@ def _extract_candle_items(data: Any, instrument_id: int) -> list[Mapping[str, An
         raise EtoroAPIError("El grupo de velas no contiene una lista candles")
     if not all(isinstance(item, Mapping) for item in items):
         raise EtoroAPIError("La lista de velas contiene elementos inválidos")
+    if not group_identity_confirmed and any(
+        item.get("instrumentID", item.get("instrumentId")) is None
+        for item in items
+    ):
+        raise EtoroAPIError("No se pudo confirmar el instrumentId de cada vela")
     return items
 
 
