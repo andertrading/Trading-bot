@@ -54,7 +54,7 @@
     }
   },
   "cost_scope_status": {
-    "hypothetical_open_quote": "AVAILABLE_FOR_CONFIGURED_ASSETS_WHEN_RETURNED_BY_API",
+    "hypothetical_open_quote": "AVAILABLE_OPEN_ONLY_WHEN_RETURNED_BY_API",
     "hypothetical_close_quote": "UNAVAILABLE_ENDPOINT_DOES_NOT_CURRENTLY_SUPPORT_CLOSE_ACTION",
     "historical_spread": "UNPRICED",
     "execution_price_basis": "UNCONFIRMED",
