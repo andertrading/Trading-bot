@@ -2,13 +2,15 @@
 from __future__ import annotations
 
 import argparse
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 import json
 import os
 from pathlib import Path
 import re
 from typing import Any, Mapping
+
+import exchange_calendars
 
 from config import ASSETS
 from etoro_market_evidence import _instrument_type_matches
@@ -82,6 +84,71 @@ def _as_utc_timestamp(value: Any) -> datetime:
     if parsed.tzinfo is None or parsed.utcoffset() is None:
         raise EtoroAPIError("fromDate debe incluir zona horaria")
     return parsed.astimezone(timezone.utc)
+
+
+def _market_calendar_name(config: Mapping[str, Any]) -> str | None:
+    configured = config.get("market_calendar")
+    if isinstance(configured, str) and configured.strip():
+        return configured.strip().upper()
+    asset_type = str(config.get("type", "")).strip().upper()
+    return {
+        "STOCK": "XNYS",
+        "ETF": "XLON",
+        "CRYPTO": "24/7",
+    }.get(asset_type)
+
+
+def find_missing_expected_session_dates(
+    candles: list[Mapping[str, Any]],
+    market_calendar: str,
+) -> list[str]:
+    """Return expected market-session dates absent between adjacent daily bars.
+
+    Candle timestamps are interpreted by UTC calendar date, matching the
+    daily-gap convention used by backtest_v3.py. This is a continuity audit,
+    not proof that the OHLC values are adjusted or executable prices.
+    """
+    if not isinstance(market_calendar, str) or not market_calendar.strip():
+        raise ValueError("market_calendar must be a non-empty string")
+    if len(candles) < 2:
+        return []
+
+    dates = sorted({
+        _as_utc_timestamp(item.get("timestamp")).date()
+        for item in candles
+    })
+    if len(dates) < 2:
+        return []
+
+    calendar_name = market_calendar.strip().upper()
+    calendar = None
+    if calendar_name != "24/7":
+        try:
+            calendar = exchange_calendars.get_calendar(calendar_name)
+        except Exception as exc:
+            raise EtoroAPIError(
+                f"No se pudo cargar el calendario bursátil {calendar_name}: "
+                f"{type(exc).__name__}"
+            ) from None
+
+    missing: list[str] = []
+    for previous, current in zip(dates, dates[1:]):
+        candidate = previous + timedelta(days=1)
+        while candidate < current:
+            if calendar_name == "24/7":
+                is_session = True
+            else:
+                try:
+                    is_session = bool(calendar.is_session(candidate.isoformat()))
+                except Exception as exc:
+                    raise EtoroAPIError(
+                        f"No se pudo validar la sesión {candidate.isoformat()} "
+                        f"en {calendar_name}: {type(exc).__name__}"
+                    ) from None
+            if is_session:
+                missing.append(candidate.isoformat())
+            candidate += timedelta(days=1)
+    return missing
 
 
 def _extract_candle_items(data: Any, instrument_id: int) -> list[Mapping[str, Any]]:
@@ -315,6 +382,16 @@ def collect_historical_candles(
             ]
             strict_usable = enough and conflicts_excluded == 0
             research_usable = enough
+            calendar_name = _market_calendar_name(config)
+            missing_session_dates = (
+                find_missing_expected_session_dates(candles, calendar_name)
+                if calendar_name else None
+            )
+            continuous_usable = (
+                enough
+                and conflicts_excluded == 0
+                and missing_session_dates == []
+            )
             if strict_usable:
                 sufficient += 1
             if research_usable:
@@ -336,6 +413,22 @@ def collect_historical_candles(
                 "sufficient_history": enough,
                 "history_usable": strict_usable,
                 "research_history_usable": research_usable,
+                "continuous_history_usable": continuous_usable,
+                "market_calendar": calendar_name,
+                "missing_expected_session_count": (
+                    len(missing_session_dates)
+                    if missing_session_dates is not None else None
+                ),
+                "missing_expected_session_dates": missing_session_dates,
+                "session_coverage_status": (
+                    "NOT_EVALUATED_UNKNOWN_CALENDAR"
+                    if missing_session_dates is None
+                    else (
+                        "EXPECTED_SESSIONS_MISSING"
+                        if missing_session_dates
+                        else "NO_EXPECTED_SESSION_GAPS_DETECTED"
+                    )
+                ),
                 "research_history_policy": (
                     "AMBIGUOUS_DUPLICATE_DATES_EXCLUDED"
                     if conflicts_excluded else "NO_CONFLICTS"
@@ -354,10 +447,19 @@ def collect_historical_candles(
                 "candles": candles,
             }
             if candle_diagnostics["conflicting_duplicate_timestamps"]:
-                record["warnings"] = [
+                record["warnings"].append(
                     "ambiguous_daily_candles_excluded_from_research: "
                     + str(candle_diagnostics["conflicting_duplicate_timestamps"])
-                ]
+                )
+            if missing_session_dates:
+                record["warnings"].append(
+                    "expected_market_sessions_missing: "
+                    + str(len(missing_session_dates))
+                )
+            if missing_session_dates is None:
+                record["warnings"].append(
+                    "session_coverage_not_evaluated: market calendar unavailable"
+                )
             if not enough:
                 record["errors"].append(
                     f"insufficient_history: returned {len(candles)}; minimum {min_candles}"
@@ -381,10 +483,33 @@ def collect_historical_candles(
             )
             for record in report["assets"].values()
         ),
+        "assets_with_missing_expected_sessions": sum(
+            bool(
+                isinstance(record.get("historical_candles"), Mapping)
+                and record["historical_candles"].get("missing_expected_session_count", 0)
+            )
+            for record in report["assets"].values()
+        ),
+        "assets_with_continuous_history": sum(
+            bool(
+                isinstance(record.get("historical_candles"), Mapping)
+                and record["historical_candles"].get("continuous_history_usable")
+            )
+            for record in report["assets"].values()
+        ),
         "assets_with_errors": failures,
         "status": (
             "COMPLETE"
-            if failures == 0 and resolved == len(symbols) and sufficient == len(symbols)
+            if (
+                failures == 0
+                and resolved == len(symbols)
+                and sufficient == len(symbols)
+                and all(
+                    isinstance(record.get("historical_candles"), Mapping)
+                    and record["historical_candles"].get("continuous_history_usable")
+                    for record in report["assets"].values()
+                )
+            )
             else "PARTIAL"
         ),
     }
