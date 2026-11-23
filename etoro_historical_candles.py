@@ -133,6 +133,7 @@ def normalize_candles(
     count: int,
     now_utc: datetime,
     diagnostics: dict[str, Any] | None = None,
+    allow_conflicts: bool = False,
 ) -> list[dict[str, Any]]:
     items = _extract_candle_items(data, instrument_id)
     if len(items) > count:
@@ -140,7 +141,11 @@ def normalize_candles(
 
     diagnostics = diagnostics if diagnostics is not None else {}
     diagnostics.setdefault("identical_duplicate_rows_removed", 0)
+    diagnostics.setdefault("conflicting_duplicate_rows", 0)
+    diagnostics.setdefault("duplicate_timestamp_conflicts", [])
+    diagnostics["source_candle_count"] = len(items)
     by_timestamp: dict[str, dict[str, Any]] = {}
+    conflicted_timestamps: set[str] = set()
     for index, item in enumerate(items):
         candle_id = item.get("instrumentID", item.get("instrumentId"))
         if candle_id is not None and candle_id != instrument_id:
@@ -178,16 +183,35 @@ def normalize_candles(
             "volume": volume,
         }
         key = normalized_item["timestamp"]
+        if key in conflicted_timestamps:
+            diagnostics["conflicting_duplicate_rows"] += 1
+            diagnostics["duplicate_timestamp_conflicts"].append({
+                "timestamp": key,
+                "additional": normalized_item,
+            })
+            continue
         previous = by_timestamp.get(key)
         if previous is not None:
             if previous != normalized_item:
-                raise EtoroAPIError(
-                    f"Fecha de vela duplicada con valores distintos: {key}"
-                )
+                diagnostics["conflicting_duplicate_rows"] += 1
+                diagnostics["duplicate_timestamp_conflicts"].append({
+                    "timestamp": key,
+                    "first": previous,
+                    "conflicting": normalized_item,
+                })
+                by_timestamp.pop(key, None)
+                conflicted_timestamps.add(key)
+                continue
             diagnostics["identical_duplicate_rows_removed"] += 1
             continue
         by_timestamp[key] = normalized_item
 
+    diagnostics["conflicting_duplicate_timestamps"] = len(conflicted_timestamps)
+    if conflicted_timestamps and not allow_conflicts:
+        first = sorted(conflicted_timestamps)[0]
+        raise EtoroAPIError(
+            f"Fecha de vela duplicada con valores distintos: {first}"
+        )
     normalized = list(by_timestamp.values())
     normalized.sort(key=lambda item: item["timestamp"])
     return normalized
@@ -269,18 +293,30 @@ def collect_historical_candles(
                 count=count,
                 now_utc=now_utc,
                 diagnostics=candle_diagnostics,
+                allow_conflicts=True,
             )
-            enough = len(candles) >= min_candles
+            enough = (
+                len(candles) >= min_candles
+                and candle_diagnostics["conflicting_duplicate_timestamps"] == 0
+            )
             if enough:
                 sufficient += 1
             record["historical_candles"] = {
                 "interval": interval,
                 "requested_count": count,
+                "source_returned_count": candle_diagnostics["source_candle_count"],
                 "returned_count": len(candles),
                 "identical_duplicate_rows_removed": candle_diagnostics[
                     "identical_duplicate_rows_removed"
                 ],
+                "conflicting_duplicate_timestamps": candle_diagnostics[
+                    "conflicting_duplicate_timestamps"
+                ],
+                "duplicate_timestamp_conflicts": candle_diagnostics[
+                    "duplicate_timestamp_conflicts"
+                ],
                 "sufficient_history": enough,
+                "history_usable": enough,
                 "first_timestamp": candles[0]["timestamp"] if candles else None,
                 "last_timestamp": candles[-1]["timestamp"] if candles else None,
                 "source": "eToro historical chart candles",
@@ -289,7 +325,12 @@ def collect_historical_candles(
                 "price_adjustment_status": "UNSPECIFIED",
                 "candles": candles,
             }
-            if not enough:
+            if candle_diagnostics["conflicting_duplicate_timestamps"]:
+                record["errors"].append(
+                    "conflicting_duplicate_timestamps: "
+                    + str(candle_diagnostics["conflicting_duplicate_timestamps"])
+                )
+            elif not enough:
                 record["errors"].append(
                     f"insufficient_history: returned {len(candles)}; minimum {min_candles}"
                 )
