@@ -403,6 +403,27 @@ class PaperForwardVerifiedCostTests(unittest.TestCase):
             1000.0 - trade["cash_reserved_usd"],
         )
 
+    def test_verified_round_trip_cost_reserve_cannot_bypass_cash_cap(self):
+        item = signal("verified-cost-cash-cap")
+        item["asset"] = "AAPL"
+        item["stop"] = 99.9
+        process_signal_bar(
+            self.state, item,
+            bar("2026-11-22T10:15:00+00:00", 100, 101, 99.95, 100),
+            risk_fraction=0.01,
+            require_verified_costs=True,
+            economic_registry=self.registry,
+        )
+        trade = self.state["trades"]["verified-cost-cash-cap"]
+        self.assertEqual(trade["status"], "REJECTED_NO_LEVERAGE_CASH")
+        self.assertGreater(trade["cash_reservation_required_usd"], 1000.0)
+        self.assertGreater(
+            trade["notional_usd"] + trade["estimated_stop_costs_usd"],
+            1000.0,
+        )
+        self.assertEqual(trade["available_cash_before_entry_usd"], 1000.0)
+        self.assertEqual(self.state["open_risk_usd"], 0.0)
+
     def test_verified_cost_stop_close_books_net_pnl_once(self):
         item = signal("verified-cost-stop")
         item["asset"] = "AAPL"
