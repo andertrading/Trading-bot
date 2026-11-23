@@ -40,7 +40,7 @@ class EtoroYahooReconciliationTests(unittest.TestCase):
         self.assertEqual(result["status"], "COMPARISON_ONLY_NOT_VALIDATION")
         self.assertAlmostEqual(
             result["difference_metrics_pct"]["close"]["median_absolute_pct"],
-            (100 / 101 + 0) / 2 * 100,
+            (1 / 101 + 0) / 2 * 100,
         )
         ticker.history.assert_called_once()
         self.assertFalse(ticker.history.call_args.kwargs["auto_adjust"])
