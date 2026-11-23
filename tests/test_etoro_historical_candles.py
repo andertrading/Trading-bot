@@ -118,6 +118,14 @@ class HistoricalCandleTests(unittest.TestCase):
         self.assertEqual(normalized, [])
         self.assertEqual(diagnostics["conflicting_duplicate_timestamps"], 1)
         self.assertEqual(len(diagnostics["duplicate_timestamp_conflicts"]), 1)
+        conflict = diagnostics["duplicate_timestamp_conflicts"][0]
+        self.assertEqual(
+            conflict["first_source_fromDate"], "2026-11-22T00:00:00Z"
+        )
+        self.assertEqual(
+            conflict["conflicting_source_fromDate"], "2026-11-22T00:00:00Z"
+        )
+        self.assertIn("open", conflict["source_fields"])
 
     def test_collector_marks_conflicting_daily_history_unusable(self):
         data = history_response().data
