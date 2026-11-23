@@ -104,3 +104,6 @@ The reproducible implementation is research/coinbase_joint_block_bootstrap.py; i
     python research/coinbase_joint_block_bootstrap.py --input-dir /path/to/extracted-artifact --output joint_bootstrap.json
 
 This remains a gross trade-R uncertainty diagnostic, not a portfolio backtest. It does not model verified eToro prices or costs, position sizing, simultaneous capital constraints, or live execution. Only cross-asset dependence observed in overlapping test weeks is retained. No production, strategy, risk, sizing, alert, or automation settings were changed, and no provider/network requests were made.
+## Follow-up: shared portfolio simulation
+
+The OOS trade set has now also been evaluated through the shared virtual portfolio allocator. See [COINBASE_OOS_PORTFOLIO_SIMULATION_2026-11-23.md](COINBASE_OOS_PORTFOLIO_SIMULATION_2026-11-23.md) and its machine-readable summary.
