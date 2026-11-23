@@ -107,6 +107,33 @@ class HistoricalCandleTests(unittest.TestCase):
         self.assertEqual(len(normalized), 1)
         self.assertEqual(diagnostics["identical_duplicate_rows_removed"], 1)
 
+    def test_conflicting_duplicate_rows_are_excluded_and_reported_when_requested(self):
+        data = history_response().data
+        data["candles"][0]["candles"][1]["fromDate"] = "2026-11-22T00:00:00Z"
+        diagnostics = {}
+        normalized = normalize_candles(
+            data, 1001, count=10, now_utc=NOW,
+            diagnostics=diagnostics, allow_conflicts=True,
+        )
+        self.assertEqual(normalized, [])
+        self.assertEqual(diagnostics["conflicting_duplicate_timestamps"], 1)
+        self.assertEqual(len(diagnostics["duplicate_timestamp_conflicts"]), 1)
+
+    def test_collector_marks_conflicting_daily_history_unusable(self):
+        data = history_response().data
+        data["candles"][0]["candles"][1]["fromDate"] = "2026-11-22T00:00:00Z"
+        client = FakeClient(response=EtoroResponse(
+            data=data, status_code=200, headers={}
+        ))
+        report = collect_historical_candles(
+            client, symbols={"AAPL": {"etoro_symbol": "AAPL", "type": "STOCK"}},
+            now_utc=NOW, count=10, min_candles=2,
+        )
+        history = report["assets"]["AAPL"]["historical_candles"]
+        self.assertFalse(history["history_usable"])
+        self.assertEqual(history["conflicting_duplicate_timestamps"], 1)
+        self.assertEqual(report["summary"]["status"], "PARTIAL")
+
     def test_rejects_duplicate_timestamps(self):
         data = history_response().data
         data["candles"][0]["candles"][1]["fromDate"] = "2026-11-22T00:00:00Z"
