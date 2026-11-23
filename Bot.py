@@ -1648,7 +1648,7 @@ def analyze_asset(asset, timeframe, include_paper_bars=False):
         result["price_adjustment_verified_at"] = df.attrs.get(
             "price_adjustment_verified_at"
         )
-                result["mode"] = "PAPER_ONLY"
+        result["mode"] = "PAPER_ONLY"
         result["currency"] = ACCOUNT_CURRENCY
 
         # Guardamos únicamente los datos de candidatas.
