@@ -161,7 +161,7 @@ class HistoricalCandleTests(unittest.TestCase):
         response = EtoroResponse(data={"candles": []}, status_code=200, headers={})
         with patch("etoro_read_only.EtoroReadOnlyClient._request", return_value=response) as parent:
             allowed = client._request(
-                "GET", "/api/v1/market-data/instruments/1001/history/candles/desc/1d/1000"
+                "GET", "/api/v1/market-data/instruments/1001/history/candles/desc/OneDay/1000"
             )
             self.assertIs(allowed, response)
             parent.assert_called_once()
@@ -171,7 +171,7 @@ class HistoricalCandleTests(unittest.TestCase):
             client._request("GET", "/api/v1/trading/info/real/pnl")
         with self.assertRaises(EtoroAPIError):
             client._request(
-                "GET", "/api/v1/market-data/instruments/1001/history/candles/desc/1d/1001"
+                "GET", "/api/v1/market-data/instruments/1001/history/candles/desc/OneDay/1001"
             )
 
     def test_count_limits_are_enforced_before_network(self):
