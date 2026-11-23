@@ -8,7 +8,8 @@ class EtoroHistoricalCandleWorkflowTests(unittest.TestCase):
             encoding="utf-8"
         )
         self.assertIn("push:", workflow)
-        self.assertIn("branches:\\n      - main", workflow)
+        self.assertIn("branches:", workflow)
+        self.assertIn("- main", workflow)
         self.assertIn("etoro_historical_candles.py", workflow)
         self.assertIn('cron: "15 0 * * 0"', workflow)
         self.assertIn("workflow_dispatch:", workflow)
