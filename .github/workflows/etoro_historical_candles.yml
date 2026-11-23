@@ -49,6 +49,7 @@ jobs:
           print("eToro credentials are present; values are not displayed.")
           PY
       - name: Capture historical market candles only
+        continue-on-error: true
         run: python etoro_historical_candles.py --interval 1d --count 1000 --min-candles 220
       - name: Upload historical candle evidence
         if: always() && hashFiles('artifacts/etoro_historical_candles.json') != ''
@@ -73,3 +74,22 @@ jobs:
           path: artifacts/etoro_yahoo_reconciliation.json
           if-no-files-found: error
           retention-days: 90
+      - name: Evaluate historical capture status
+        if: always()
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          path = Path("artifacts/etoro_historical_candles.json")
+          if not path.is_file():
+              raise SystemExit("Historical candle report was not created.")
+          report = json.loads(path.read_text(encoding="utf-8"))
+          status = report.get("summary", {}).get("status")
+          if status == "COMPLETE":
+              print("All configured historical candle series passed collection checks.")
+          elif status == "PARTIAL":
+              print("::warning::Historical evidence is PARTIAL; conflicted/insufficient assets remain blocked.")
+          else:
+              raise SystemExit(f"Unexpected historical capture status: {status!r}")
+          PY
