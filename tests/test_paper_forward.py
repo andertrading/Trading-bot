@@ -416,11 +416,12 @@ class PaperForwardVerifiedCostTests(unittest.TestCase):
         )
         trade = self.state["trades"]["verified-cost-cash-cap"]
         self.assertEqual(trade["status"], "REJECTED_NO_LEVERAGE_CASH")
+        self.assertGreater(trade["cash_reservation_required_usd"], 1000.0)
         self.assertGreater(
-            trade.get("notional_usd", 0.0)
-            + trade.get("estimated_stop_costs_usd", 0.0),
+            trade["notional_usd"] + trade["estimated_stop_costs_usd"],
             1000.0,
         )
+        self.assertEqual(trade["available_cash_before_entry_usd"], 1000.0)
         self.assertEqual(self.state["open_risk_usd"], 0.0)
 
     def test_verified_cost_stop_close_books_net_pnl_once(self):
