@@ -1,0 +1,74 @@
+name: Coinbase segmented crypto research backtest
+
+on:
+  push:
+    branches:
+      - research/segmented-crypto-backtest-runner-20261123
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: coinbase-segmented-research-\${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  segmented-backtest:
+    name: Run each Coinbase contiguous segment independently
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Checkout research runner
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install project dependencies
+        run: python -m pip install --disable-pip-version-check -r requirements.txt
+
+      - name: Download previously retained Coinbase-only artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: coinbase-only-ohlcv-45233527066
+          github-token: \${{ secrets.GITHUB_TOKEN }}
+          repository: \${{ github.repository }}
+          run-id: 45233527066
+          path: data/coinbase_only
+
+      - name: Verify all ten snapshots and run segmented backtests
+        shell: bash
+        run: |
+          set +e
+          failed=0
+          mkdir -p research_results
+          for asset in BTC ETH SOL XLM XRP; do
+            for timeframe in 15m 1d; do
+              echo "Running $asset $timeframe"
+              python research/run_segmented_crypto_backtest.py \
+                --csv "data/coinbase_only/$asset"_"$timeframe".csv \
+                --manifest data/coinbase_only/manifest.json \
+                --asset "$asset" \
+                --ticker "$asset-USD" \
+                --interval "$timeframe" \
+                --output "research_results/$asset"_"$timeframe".json
+              status=$?
+              if [ "$status" -ne 0 ]; then
+                echo "FAILED: $asset $timeframe"
+                failed=1
+              fi
+            done
+          done
+          exit "$failed"
+
+      - name: Upload segmented research results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coinbase-segmented-backtests-\${{ github.run_id }}
+          path: research_results/
+          if-no-files-found: warn
+          retention-days: 90
