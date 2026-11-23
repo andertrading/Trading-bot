@@ -206,3 +206,9 @@ The first aggregation found one available forward sample and zero assets with th
 
 
 The forward spread audit currently samples the scheduled weekday 15:00 UTC snapshot (manual captures can differ) and keeps one latest realtime observation per asset and UTC date. Its percentiles describe this fixed-time snapshot distribution, not continuous intraday or full-session spread behavior.
+
+### Split-adjustment spot check
+
+The eToro NVDA daily history spans the 2024-06-10 10:1 split. Its close was 120.6418 on 2024-06-07 and 121.5274 on 2024-06-10, so the captured series is on the post-split price scale across that event. This is consistent with Yahoo's split-adjusted history and rules out an obvious 10x discontinuity in this NVDA series. It is a spot check, not a full corporate-action audit and does not verify Twelve Data's separate adjustment pipeline.
+
+The eToro TSLA history begins 2022-10-25, after the 2022-08-25 3:1 split, so this capture cannot independently test TSLA's pre/post-split adjustment. Neither spot check changes the Twelve Data split-evidence gate in data_engine.py.
