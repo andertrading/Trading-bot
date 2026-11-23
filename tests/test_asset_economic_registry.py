@@ -30,13 +30,17 @@ class AssetEconomicRegistryTests(unittest.TestCase):
     def test_missing_evidence_fails_closed(self):
         result = classify_registry_asset("CSPX", self.registry)
         self.assertEqual(result["status"], "COSTS_UNVERIFIED")
-        self.assertIn("instrument_identity_evidence_missing", result["blockers"])
-        self.assertIn("execution_type_evidence_missing", result["blockers"])
+        self.assertNotIn("instrument_identity_evidence_missing", result["blockers"])
+        self.assertNotIn("execution_type_evidence_missing", result["blockers"])
         self.assertIn("round_trip_fee_evidence_missing", result["blockers"])
-        self.assertIn("observed_bid_ask_spread_evidence_missing", result["blockers"])
+        self.assertNotIn("observed_bid_ask_spread_evidence_missing", result["blockers"])
         self.assertIn("spread_treatment_unverified", result["blockers"])
         self.assertIn("historical_spread_model_not_validated", result["blockers"])
-        self.assertIn("minimum_order_rules_evidence_missing", result["blockers"])
+        self.assertNotIn("minimum_order_rules_evidence_missing", result["blockers"])
+        self.assertEqual(
+            self.registry["assets"]["CSPX"]["opening_cost_snapshot"]["scope"],
+            "HYPOTHETICAL_OPEN_ONLY",
+        )
 
     def test_confirmed_cfd_is_excluded_from_real_only_mvp(self):
         item = self.registry["assets"]["CSPX"]
