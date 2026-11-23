@@ -71,3 +71,11 @@ The scanner persists this verified ledger separately as paper_forward_verified; 
 
 As of the 2026-11-23 evidence review, the economic registry has **0/12 eligible assets**. This is intentional: the existing market snapshots confirm REAL LONG 1x eligibility and current spread observations, but do not yet establish complete round-trip fees, a historical conservative spread model, or historical-to-execution price-basis parity. The verified ledger therefore blocks all new entries. Synthetic registry fixtures in unit tests validate the sizing arithmetic and fail-closed behavior; they are not market evidence and do not approve any instrument.
 
+
+
+## Portfolio backtest cost diagnostics
+
+The portfolio allocator now preserves the actual exit price supplied by backtest_v3 and recomputes the verified registry cost at the portfolio-allocated quantity, rather than reusing the per-trade hypothetical quantity from the independent backtest. It checks that the actual exit price is consistent with result_R before reporting a cost-adjusted diagnostic.
+
+These verified net values are explicitly calculated on the **gross-sized portfolio allocation**. They do not alter gross allocation, risk/cash reservations, portfolio equity or drawdown; the result fields state that verified costs are not included in allocation and net performance is not validated. Missing exit prices, inconsistent exit/result_R values or incomplete registry evidence leave the verified net diagnostic unavailable. The default registry currently leaves all 12 assets unapproved, so no verified net portfolio result is available.
+
