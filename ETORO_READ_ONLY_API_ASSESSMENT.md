@@ -148,3 +148,11 @@ The quote-derived spread is a current snapshot, not a historical spread model. T
 
 Consequently, this capture materially improves instrument eligibility and opening-cost knowledge, but it does not by itself complete historical OHLC-to-execution price parity, closing costs, historical spread, or all-in net performance. The economic registry remains the admission-grade source for verified round-trip costing. Unknown close costs remain unknown.
 
+
+
+### Automated forward quote evidence collection
+
+Starting with the workflow update in PR #158, the read-only evidence collector is scheduled for weekdays at 15:00 UTC, which overlaps the regular London and US sessions across seasonal clock changes. The manual workflow-dispatch option remains available. Each run uploads its evidence JSON artifact with 90-day retention.
+
+This builds a timestamped **forward** sample of bid/ask observations and opening-cost what-if responses. It does not reconstruct historical spreads before the first capture, and a single current snapshot must never be substituted for a historical spread series. Market holidays and closed sessions can produce explicit skipped-cost records; they are not zero-cost observations.
+
