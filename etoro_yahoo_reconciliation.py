@@ -229,6 +229,14 @@ def compare_asset_history(
         }
     return {
         "status": "COMPARISON_ONLY_NOT_VALIDATION" if overlaps else "NO_OVERLAP",
+        "history_quality_scope": (
+            "STRICT_NO_CONFLICTS"
+            if strict_history
+            else "RESEARCH_ONLY_AMBIGUOUS_DATES_EXCLUDED"
+        ),
+        "excluded_conflict_timestamps": etoro_history.get(
+            "excluded_conflict_timestamps", []
+        ),
         "ticker": ticker_symbol,
         "etoro_bars": len(by_day),
         "excluded_incomplete_etoro_bars": excluded_incomplete_bars,
