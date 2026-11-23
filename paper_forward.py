@@ -328,6 +328,7 @@ def process_signal_bar(
                             float(state["initial_capital_usd"]),
                         )
                         risk_budget = capital_base * risk_fraction
+                        reserved = _open_risk(state)
                         cost_sizing = None
                         if require_verified_costs:
                             cost_sizing = calculate_verified_cost_aware_quantity(
