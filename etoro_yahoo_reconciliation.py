@@ -52,6 +52,7 @@ def compare_asset_history(
     *,
     ticker_symbol: str,
     ticker_factory=None,
+    captured_at: str | None = None,
 ) -> dict[str, Any]:
     if etoro_history.get("history_usable") is not True:
         return {
@@ -67,12 +68,30 @@ def compare_asset_history(
             "overlap_bars": 0,
         }
 
+    as_of_day = None
+    if captured_at:
+        captured = datetime.fromisoformat(
+            captured_at[:-1] + "+00:00" if captured_at.endswith("Z") else captured_at
+        )
+        if captured.tzinfo is not None:
+            as_of_day = captured.astimezone(timezone.utc).date()
     by_day = {}
+    excluded_incomplete_bars = 0
     for candle in candles:
         day = _parse_day(candle.get("timestamp"))
+        if as_of_day is not None and day >= as_of_day:
+            excluded_incomplete_bars += 1
+            continue
         if day in by_day:
             raise ValueError(f"{asset}: duplicate eToro date {day}")
         by_day[day] = candle
+    if not by_day:
+        return {
+            "status": "SKIPPED_NO_COMPLETED_ETORO_BARS",
+            "ticker": ticker_symbol,
+            "overlap_bars": 0,
+            "excluded_incomplete_bars": excluded_incomplete_bars,
+        }
     start = min(by_day)
     end = max(by_day) + timedelta(days=1)
     factory = ticker_factory or yf.Ticker
@@ -102,12 +121,16 @@ def compare_asset_history(
     overlaps = 0
     missing_yahoo = 0
     invalid_yahoo = 0
+    invalid_yahoo_ohlc = 0
+    invalid_yahoo_examples = []
     for day, candle in by_day.items():
         row = yahoo_by_day.get(day)
         if row is None:
             missing_yahoo += 1
             continue
         values = {}
+        yahoo_ohlc = {}
+        etoro_ohlc = {}
         valid = True
         for field in PRICE_FIELDS:
             yahoo_value = _finite_positive(row.get(field.capitalize()))
@@ -115,16 +138,34 @@ def compare_asset_history(
             if yahoo_value is None or etoro_value is None:
                 valid = False
                 break
+            yahoo_ohlc[field] = yahoo_value
+            etoro_ohlc[field] = etoro_value
             values[field] = (etoro_value - yahoo_value) / yahoo_value * 100.0
-            observations[field].append({
-                "date": day.isoformat(),
-                "etoro": etoro_value,
-                "yahoo": yahoo_value,
-                "signed_difference_pct": values[field],
-            })
         if not valid:
             invalid_yahoo += 1
             continue
+        if (
+            yahoo_ohlc["low"] > min(yahoo_ohlc["open"], yahoo_ohlc["close"])
+            or yahoo_ohlc["high"] < max(yahoo_ohlc["open"], yahoo_ohlc["close"])
+            or yahoo_ohlc["low"] > yahoo_ohlc["high"]
+        ):
+            invalid_yahoo_ohlc += 1
+            if len(invalid_yahoo_examples) < 10:
+                invalid_yahoo_examples.append({
+                    "date": day.isoformat(),
+                    "open": yahoo_ohlc["open"],
+                    "high": yahoo_ohlc["high"],
+                    "low": yahoo_ohlc["low"],
+                    "close": yahoo_ohlc["close"],
+                })
+            continue
+        for field, value in values.items():
+            observations[field].append({
+                "date": day.isoformat(),
+                "etoro": etoro_ohlc[field],
+                "yahoo": yahoo_ohlc[field],
+                "signed_difference_pct": value,
+            })
         overlaps += 1
         for field, value in values.items():
             differences[field].append(value)
@@ -147,9 +188,12 @@ def compare_asset_history(
         "status": "COMPARISON_ONLY_NOT_VALIDATION" if overlaps else "NO_OVERLAP",
         "ticker": ticker_symbol,
         "etoro_bars": len(by_day),
+        "excluded_incomplete_etoro_bars": excluded_incomplete_bars,
         "overlap_bars": overlaps,
         "missing_yahoo_dates": missing_yahoo,
         "invalid_comparison_bars": invalid_yahoo,
+        "invalid_yahoo_ohlc_bars": invalid_yahoo_ohlc,
+        "invalid_yahoo_ohlc_examples": invalid_yahoo_examples,
         "first_overlap_date": min(set(by_day) & set(yahoo_by_day)).isoformat()
         if set(by_day) & set(yahoo_by_day) else None,
         "last_overlap_date": max(set(by_day) & set(yahoo_by_day)).isoformat()
@@ -186,7 +230,11 @@ def build_report(
             continue
         try:
             results[asset] = compare_asset_history(
-                asset, history, ticker_symbol=ticker, ticker_factory=ticker_factory
+                asset,
+                history,
+                ticker_symbol=ticker,
+                ticker_factory=ticker_factory,
+                captured_at=etoro_report.get("captured_at"),
             )
         except Exception as exc:
             results[asset] = {
