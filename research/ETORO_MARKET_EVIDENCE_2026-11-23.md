@@ -50,6 +50,7 @@ The cross-check deliberately uses a one-cent absolute tolerance because the API 
 ### Follow-up required for the discrepancies
 
 - **CNDX:** quote-derived full-spread reference USD 0.4411 versus API `marketSpread` USD 0.08.
+- **TTWO:** quote-derived full-spread reference USD 0.6516 versus API `marketSpread` USD 0.64 (difference exceeds the one-cent tolerance).
 - **XLM:** quote-derived full-spread reference USD 0.0073 versus API `marketSpread` USD 0.09.
 - **BTC:** positive quoted spread (0.174 bps), but the cost response omitted `marketSpread`.
 
