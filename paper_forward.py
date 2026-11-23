@@ -148,6 +148,8 @@ def paper_portfolio_snapshot(
             "asset": str(trade.get("asset") or ""),
             "risk_usd": risk_usd,
             "notional_usd": notional_usd,
+            "cash_reserved_usd": trade_cash_reserved,
+            "estimated_cost_reserve_usd": max(0.0, trade_cash_reserved - notional_usd),
         })
 
     available_capital_usd = capital_base - cash_reserved_usd
