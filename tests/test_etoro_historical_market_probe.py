@@ -29,6 +29,10 @@ class HistoricalMarketProbeTests(unittest.TestCase):
         self.assertEqual(result[0]["close"], "103")
         self.assertEqual(result[0]["volume"], "0")
 
+    def test_empty_history_is_reported_as_empty_not_malformed(self):
+        response = EtoroResponse({"interval": "OneDay", "candles": []}, 200, {})
+        self.assertEqual(normalize_candle_history(response, 123, "OneDay"), [])
+
     def test_rejects_wrong_instrument_or_interval(self):
         response = EtoroResponse({
             "interval": "OneDay",
