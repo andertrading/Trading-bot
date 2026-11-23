@@ -106,6 +106,55 @@ class TestSegmentedCryptoBacktestRunner(unittest.TestCase):
         self.assertTrue(result["trade_segment_integrity"])
         self.assertTrue(result["all_segments_completed"])
 
+    def test_gap_free_runner_preserves_direct_engine_trade_output(self):
+        index = pd.date_range(
+            "2026-01-01", periods=225, freq="15min", tz="UTC"
+        )
+        data = make_ohlc(index)
+
+        direct = FakeBacktestModule()
+        direct.download_history = (
+            lambda _ticker, _interval, asset=None: data.copy()
+        )
+        direct_trades, error = direct.run_backtest(
+            "BTC", "BTC-USD", "15m"
+        )
+        self.assertIsNone(error)
+        direct_metrics = direct.calculate_metrics(direct_trades)
+
+        segmented = FakeBacktestModule()
+        result = run_segmented_backtest(
+            data,
+            "BTC",
+            "BTC-USD",
+            "15m",
+            backtest_module=segmented,
+        )
+
+        provenance_fields = {
+            "data_source",
+            "source_venue",
+            "price_adjustment_policy",
+            "research_price_basis",
+            "etoro_price_equivalence",
+            "segment_id",
+            "segment_start",
+            "segment_end",
+        }
+        normalized_segmented_trades = [
+            {
+                key: value
+                for key, value in trade.items()
+                if key not in provenance_fields
+            }
+            for trade in result["trades"]
+        ]
+
+        self.assertEqual(result["coverage"]["segment_count"], 1)
+        self.assertEqual(normalized_segmented_trades, direct_trades)
+        self.assertEqual(result["metrics"], direct_metrics)
+        self.assertEqual(result["network_requests"], 0)
+
     def test_short_segment_is_skipped_before_backtest(self):
         index = pd.date_range(
             "2026-01-01", periods=219, freq="15min", tz="UTC"
