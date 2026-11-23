@@ -254,3 +254,18 @@ The simulator remains a bar-based approximation: spread measurement and historic
 ## Decision
 
 Do **not** integrate estimated costs into portfolio P&L yet. First preserve the existing gross-only simulator, obtain instrument-specific evidence for fees/spreads/FX/execution-price mapping, and then implement cost-aware sizing and net accounting as one tested change. Splitting net P&L from risk sizing would give a misleading risk cap even if the arithmetic looked correct.
+
+
+## Implementation update — 2026-11-23
+
+The paper-forward path has since received two tested changes:
+
+- PR #152 adds calculate_verified_cost_aware_quantity(), reusing the verified registry unit-cost estimator. It reserves gross stop loss plus fixed and variable round-trip costs, converts quote currency to USD, and enforces verified minimum-order and fractional-quantity rules. Incomplete evidence fails closed.
+- PR #153 adds an opt-in require_verified_costs=True mode to paper_forward.process_signal_bar(). Entry sizing and the 3% aggregate-risk check use the cost-inclusive stop-risk reservation. At simulated close, the engine recalculates round-trip costs using the actual simulated exit price and debits them once from virtual paper equity. The existing gross-only diagnostic mode remains available and explicitly reports that costs are not included. Net calculations are still not labelled as validated performance.
+
+The 2026-11-23 eToro market-evidence capture has also populated the registry with timestamped instrument identity, account-specific REAL unleveraged LONG 1x capability, $10 minimum order, fractional quantity support, and current bid/ask snapshots for all 12 assets. The $100 what-if opening-cost components are preserved as raw opening-only evidence; they are not extrapolated to the close.
+
+**Current admission status remains 0/12 ELIGIBLE.** The remaining blockers are round-trip fee evidence, spread treatment and historical spread scope, and historical OHLC-to-executable-price mapping. Therefore the verified-cost paper-forward mode currently rejects all 12 configured assets unless a complete test registry is explicitly injected. This is intentional. Do not bypass it by promoting the current quote snapshot or opening-only what-if response into historical round-trip evidence.
+
+The portfolio allocator portfolio_backtest.simulate_portfolio() remains gross-only. Do not apply the paper-forward implementation to the portfolio allocator by subtracting per-trade hypothetical cost columns: it must eventually size using actual shared-portfolio quantities, calculate costs at actual simulated exit prices, and book net P&L once. That full portfolio integration remains deferred until the required historical execution-cost evidence is available.
+
