@@ -30,7 +30,7 @@ A defensible effective sample size is **not estimated**. The artifact does not c
 
 | Candidate stream diagnostic | Trades remaining | Gross total R | Mean R/trade | Gross PF |
 |---|---:|---:|---:|---:|
-| Baseline | 1,252 | +4.87 | +0.0039 | 1.009 |
+| Baseline | 1,252 | +4.87 | +0.0039 | 1.006 |
 | Remove M15 member of each same-asset M15/daily overlap | 1,233 | +0.75 | +0.0006 | 1.001 |
 | Remove daily member of each same-asset M15/daily overlap | 1,251 | +5.87 | +0.0047 | 1.007 |
 
