@@ -156,3 +156,17 @@ Starting with the workflow update in PR #158, the read-only evidence collector i
 
 This builds a timestamped **forward** sample of bid/ask observations and opening-cost what-if responses. It does not reconstruct historical spreads before the first capture, and a single current snapshot must never be substituted for a historical spread series. Market holidays and closed sessions can produce explicit skipped-cost records; they are not zero-cost observations.
 
+
+
+## eToro historical chart candles — additional market-only source
+
+The eToro Market Data API also exposes:
+
+GET /api/v1/market-data/instruments/{instrumentId}/history/candles/{direction}/{interval}/{candlesCount}
+
+The new weekly collector in etoro_historical_candles.py requests up to 1,000 daily candles for each configured instrument. Its endpoint allowlist contains only exact instrument search and this historical market-candle path. It does not call account, portfolio, positions, PnL, orders, or trade-history endpoints.
+
+The normalized report preserves timestamped OHLC and volume fields and checks instrument IDs, timezone-aware timestamps, duplicate bars, positive prices, and OHLC coherence. It explicitly labels the source as historical chart OHLC: bid/ask history, execution-price basis, and split/dividend adjustment status remain unspecified. Therefore this dataset can support eToro-vs-provider historical price reconciliation, but it cannot alone prove executable bid/ask prices or complete round-trip costs.
+
+The weekly workflow requests 12 instruments and up to 1,000 daily candles per instrument, well below the documented market-data request rate when run sequentially. Artifacts are retained for 90 days. This is read-only market data, not personal trading history.
+
