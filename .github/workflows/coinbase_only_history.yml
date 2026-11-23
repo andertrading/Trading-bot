@@ -1,0 +1,53 @@
+name: Coinbase-only historical OHLCV research capture
+
+on:
+  push:
+    branches:
+      - research/coinbase-only-market-history-20261123
+
+permissions:
+  contents: read
+
+concurrency:
+  group: coinbase-only-history-\${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  download:
+    name: Download and audit Coinbase-only OHLCV
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout isolated research branch
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install minimal dependencies
+        run: python -m pip install --disable-pip-version-check requests
+
+      - name: Validate capture script syntax
+        run: python -m py_compile research/download_coinbase_only_history.py
+
+      - name: Download 5 assets from Coinbase Exchange only
+        run: python research/download_coinbase_only_history.py
+
+      - name: Publish audit summary
+        if: always()
+        run: |
+          if [ -f artifacts/coinbase_only/audit_summary.md ]; then
+            cat artifacts/coinbase_only/audit_summary.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload raw OHLCV snapshots and manifest
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coinbase-only-ohlcv-\${{ github.run_id }}
+          path: artifacts/coinbase_only/
+          if-no-files-found: warn
+          retention-days: 90
+          compression-level: 6
