@@ -180,7 +180,7 @@ def build_spread_history_report(
         "mode": "READ_ONLY_FORWARD_SPREAD_HISTORY_AUDIT",
         "source": "eToro realtime bid/ask quote snapshots from GitHub Actions artifacts",
         "sampling_schedule_utc": (
-            "Weekdays at 15:00 UTC; manual captures may use other times"
+            "Weekdays at 15:17 UTC (GitHub Actions cron); manual captures may use other times"
         ),
         "sampling_scope": (
             "One latest realtime snapshot per asset and UTC date; not continuous "
