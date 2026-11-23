@@ -76,12 +76,12 @@ A separate code inspection of the current `main` branch identified an additional
 - Therefore, a candidate whose execution path does not cross a gap can still have indicator inputs whose lookback spans candles separated by several hours. That is not a valid continuous M15 indicator sequence.
 - `data_engine.py::_has_intraday_gaps` strictly rejects any non-15-minute interval for crypto in the live data validation path; this remains an important guard and must not be weakened.
 
-Follow-up issue [#197](https://github.com/andertrading/Trading-bot/issues/197) tracks a research-only contiguous-segment builder, independent indicator warm-up per segment, no trades crossing segment boundaries, and synthetic gap regression tests. Coinbase M15 remains excluded from continuous-history research until this is implemented and validated.
+Issue [#197](https://github.com/andertrading/Trading-bot/issues/197) has been completed and closed after PRs #199, #200, #202 and #203. The research-only pipeline now splits at every missing candle, resets indicators and warm-up per segment, blocks trades from crossing segment/fold boundaries, and includes synthetic gap-reset plus no-gap parity tests. This permits segmented research on Coinbase M15; it does **not** turn the capture into a complete uninterrupted 700-day series or approve the strategy.
 
 ## Decisions
 
 1. Coinbase-only daily crypto OHLCV is a credible **research candidate**, with valid non-zero Coinbase venue volume and low median daily close differences versus Twelve Data on exact timestamps. It is not approved as an eToro execution-price substitute.
-2. Coinbase M15 is **not a complete continuous 700-day history**: 242 expected bars are missing, including two common multi-hour gaps. The Twelve Data comparison shows small median exact-time close differences but material tails, especially XLM/XRP. M15 requires gap-aware segmentation and separate outlier review before research use.
+2. Coinbase M15 is **not a complete continuous 700-day history**: 242 expected bars are missing, including two common multi-hour gaps. The Twelve Data comparison shows small median exact-time close differences but material tails, especially XLM/XRP. Gap-aware segmentation and per-segment indicator resets are now implemented and tested for research use, but the large OHLC outliers still require separate investigation.
 3. Do not merge Coinbase, Twelve Data and eToro OHLCV into a single candle series. Do not splice Coinbase volume into Twelve Data/eToro price bars.
 4. Do not use Coinbase volume as a consolidated market-volume or eToro-volume proxy without an independently validated rationale.
 5. Keep production source routing, strategies, sizing, risk, alerts and execution unchanged. eToro price adjustment, bid/ask/spread and transaction-cost gates remain closed.
