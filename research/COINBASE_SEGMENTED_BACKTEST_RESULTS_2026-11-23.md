@@ -68,3 +68,12 @@ Coinbase Exchange spot OHLC is not eToro bid/ask or historical fill-price data. 
 3. These metrics do not establish a tradable edge; the M15 gross results are near break-even, and daily samples are too small.
 4. No strategy is approved from this run. No provider routing, production strategy, sizing, risk, alert, paper-portfolio or execution behavior changed.
 5. Keep all production gates closed pending out-of-sample validation, verified bid/ask/spread, price-basis reconciliation and complete transaction-cost evidence.
+
+
+## Follow-up: chronological OOS validation
+
+The initial metrics above are in-sample and must not be confused with the subsequent chronological validation. PR #202 added a 60/20/20 train/validation/test split independently within every contiguous segment. All ten Coinbase-only series completed with fold-boundary assertions and zero provider requests.
+
+The OOS results are documented separately in [COINBASE_OOS_WALKFORWARD_RESULTS_2026-11-23.md](COINBASE_OOS_WALKFORWARD_RESULTS_2026-11-23.md). The combined M15 test result was only +6.864 gross R across 1,247 trades, with a profit factor of 1.009 before verified costs and material divergence by asset. Daily test evidence comprised only five trades. No strategy is approved.
+
+The research gap-handling implementation issue [#197](https://github.com/andertrading/Trading-bot/issues/197) was closed after synthetic gap-reset and no-gap parity tests were merged. Production data continuity checks and all economic/strategy eligibility gates remain unchanged.
