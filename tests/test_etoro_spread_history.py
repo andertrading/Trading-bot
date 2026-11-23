@@ -90,7 +90,7 @@ class EtoroSpreadHistoryTests(unittest.TestCase):
         self.assertEqual(report["assets"]["BTC"]["sample_count"], 0)
         self.assertFalse(report["economic_registry_modified"])
         self.assertEqual(report["round_trip_cost_validation"], "NOT_VALIDATED")
-        self.assertIn("15:00 UTC", report["sampling_schedule_utc"])
+        self.assertIn("15:17 UTC", report["sampling_schedule_utc"])
         self.assertIn("not continuous", report["sampling_scope"])
 
     def test_30_sessions_are_reviewable_but_not_auto_approved(self):
