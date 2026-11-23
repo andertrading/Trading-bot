@@ -1,0 +1,115 @@
+{
+  "method": "synchronized_utc_calendar_week_circular_block_bootstrap",
+  "scope": "Coinbase-only M15 OOS test trades; gross R; all assets jointly resampled",
+  "cross_asset_dependence": "preserved within each sampled calendar week by aggregating all assets before resampling",
+  "time_dependence": "circular blocks sampled within each contiguous union of test-fold calendar weeks; blocks never cross disjoint data gaps",
+  "observed": {
+    "assets": [
+      "BTC",
+      "ETH",
+      "SOL",
+      "XLM",
+      "XRP"
+    ],
+    "test_folds": 16,
+    "test_trades": 1247,
+    "active_calendar_weeks": 26,
+    "observed_total_gross_R": 6.8635,
+    "observed_mean_gross_R_per_trade": 0.005504010425020048,
+    "windows": [
+      {
+        "start_week": "2025-03-31",
+        "end_week": "2025-04-21",
+        "weeks": 4,
+        "trades": 43,
+        "gross_R": 13.2622
+      },
+      {
+        "start_week": "2025-08-25",
+        "end_week": "2025-10-20",
+        "weeks": 9,
+        "trades": 551,
+        "gross_R": -14.3488
+      },
+      {
+        "start_week": "2026-03-30",
+        "end_week": "2026-05-04",
+        "weeks": 6,
+        "trades": 474,
+        "gross_R": 20.8824
+      },
+      {
+        "start_week": "2026-10-12",
+        "end_week": "2026-11-23",
+        "weeks": 7,
+        "trades": 179,
+        "gross_R": -12.9323
+      }
+    ]
+  },
+  "bootstrap": [
+    {
+      "block_length_weeks": 1,
+      "replicates": 20000,
+      "seed": 20261123,
+      "total_gross_R_95pct_interval": [
+        -80.584055,
+        96.8446575
+      ],
+      "mean_gross_R_per_trade_95pct_interval": [
+        -0.06873423634977303,
+        0.07356398389425178
+      ],
+      "positive_total_gross_R_replicates_pct": 55.74,
+      "median_resampled_trade_count": 1240,
+      "resampled_trade_count_95pct_interval": [
+        1016,
+        1497
+      ]
+    },
+    {
+      "block_length_weeks": 2,
+      "replicates": 20000,
+      "seed": 20261123,
+      "total_gross_R_95pct_interval": [
+        -56.5791525,
+        68.752335
+      ],
+      "mean_gross_R_per_trade_95pct_interval": [
+        -0.04941752679504167,
+        0.053011829467942605
+      ],
+      "positive_total_gross_R_replicates_pct": 58.59,
+      "median_resampled_trade_count": 1245,
+      "resampled_trade_count_95pct_interval": [
+        1039,
+        1464
+      ]
+    },
+    {
+      "block_length_weeks": 4,
+      "replicates": 20000,
+      "seed": 20261123,
+      "total_gross_R_95pct_interval": [
+        -44.85733,
+        57.5349825
+      ],
+      "mean_gross_R_per_trade_95pct_interval": [
+        -0.03789653791742772,
+        0.04363929517787719
+      ],
+      "positive_total_gross_R_replicates_pct": 60.64,
+      "median_resampled_trade_count": 1247,
+      "resampled_trade_count_95pct_interval": [
+        1080,
+        1417
+      ]
+    }
+  ],
+  "limitations": [
+    "This is a trade-R uncertainty diagnostic, not portfolio P&L or a portfolio simulation.",
+    "It does not model verified eToro execution prices, transaction costs, simultaneous capital constraints, or position sizing.",
+    "The historical OOS partition is fixed; the bootstrap does not replace repeated walk-forward tests or independent future evidence.",
+    "Only observed cross-asset dependence in overlapping test weeks is retained."
+  ]
+}
