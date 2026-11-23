@@ -269,3 +269,13 @@ The 2026-11-23 eToro market-evidence capture has also populated the registry wit
 
 The portfolio allocator portfolio_backtest.simulate_portfolio() remains gross-only. Do not apply the paper-forward implementation to the portfolio allocator by subtracting per-trade hypothetical cost columns: it must eventually size using actual shared-portfolio quantities, calculate costs at actual simulated exit prices, and book net P&L once. That full portfolio integration remains deferred until the required historical execution-cost evidence is available.
 
+
+
+### Scheduled-scan integration update — 2026-11-23
+
+- PR #156 adds a second persisted ledger, paper_forward_verified, alongside the existing paper_forward gross diagnostic ledger. Both process the same completed bars independently. The verified ledger always calls the paper engine with require_verified_costs=True; with the present registry it rejects new entries rather than assuming zero costs.
+- PR #157 changes the scheduled scanner's portfolio risk/cash status input to the verified ledger. Gross-only diagnostic positions cannot influence operational portfolio admission.
+- PR #158 schedules the allowlisted eToro market-evidence capture for weekdays at 15:00 UTC and retains each JSON artifact for 90 days. This is forward evidence collection only; it does not backfill historical spreads.
+
+The production-alert and automatic-execution gates remain unchanged. The separate verified ledger is a research/paper control, not authorization to place orders. The portfolio-level historical backtest remains gross-only until it can be integrated using actual allocated quantity, actual simulated exit price, and complete time-aligned round-trip cost evidence.
+
