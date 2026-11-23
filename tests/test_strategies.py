@@ -368,6 +368,23 @@ class TestStrategies(unittest.TestCase):
             msg=str(result),
         )
 
+    def test_all_zero_volume_does_not_receive_optional_volume_score(self):
+        close = pd.Series([100.0 + index * 0.05 for index in range(MIN_BARS)])
+        data = pd.DataFrame({
+            "Open": close,
+            "High": close + 0.01,
+            "Low": close - 0.01,
+            "Close": close,
+            "Volume": 0.0,
+        })
+
+        result = evaluate_signal("AAPL", data, "1d")
+
+        self.assertEqual(result["action"], "BUY CANDIDATE", msg=str(result))
+        self.assertNotIn("Volumen superior a la media", result["reasons"])
+        self.assertFalse(result["validated"])
+        self.assertFalse(result["tradable"])
+
     def test_low_volume_does_not_add_volume_score(self):
         data = make_valid_data()
 
