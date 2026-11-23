@@ -2,8 +2,8 @@ name: eToro Read-Only Market Evidence
 
 on:
   schedule:
-    # 15:00 UTC overlaps London and US regular sessions throughout the year.
-    - cron: "0 15 * * 1-5"
+    # 15:17 UTC overlaps London and US regular sessions; avoid the top-of-hour schedule peak.
+    - cron: "17 15 * * 1-5"
   workflow_dispatch:
 
 permissions:
