@@ -405,6 +405,10 @@ def process_signal_bar(
                                     "cash_reserved_usd": cash_reserved,
                                     "risk_budget_usd": risk_budget,
                                     "risk_reserved_usd": risk_to_reserve,
+                                    "gross_stop_risk_usd": (
+                                        float(cost_sizing["gross_stop_risk_usd"])
+                                        if cost_sizing else risk_budget
+                                    ),
                                     "risk_fraction": risk_fraction,
                                     "risk_capital_base_usd": capital_base,
                                     "costs_usd": None, "net_pnl_usd": None,
