@@ -409,7 +409,7 @@ class PaperForwardVerifiedCostTests(unittest.TestCase):
         item["stop"] = 99.9
         process_signal_bar(
             self.state, item,
-            bar("2026-11-22T10:15:00+00:00", 99.9, 101, 99.95, 100),
+            bar("2026-11-22T10:15:00+00:00", 100, 101, 99.95, 100),
             risk_fraction=0.01,
             require_verified_costs=True,
             economic_registry=self.registry,
