@@ -7,6 +7,9 @@ class EtoroHistoricalCandleWorkflowTests(unittest.TestCase):
         workflow = Path(".github/workflows/etoro_historical_candles.yml").read_text(
             encoding="utf-8"
         )
+        self.assertIn("push:", workflow)
+        self.assertIn("branches:\\n      - main", workflow)
+        self.assertIn("etoro_historical_candles.py", workflow)
         self.assertIn('cron: "15 0 * * 0"', workflow)
         self.assertIn("workflow_dispatch:", workflow)
         self.assertIn("permissions:\n  contents: read", workflow)
