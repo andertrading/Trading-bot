@@ -1,5 +1,8 @@
+import copy
 import unittest
+from datetime import datetime, timezone
 
+from asset_economic_registry import load_registry
 from portfolio_backtest import simulate_portfolio
 
 
@@ -15,8 +18,9 @@ class TestPortfolioBacktest(unittest.TestCase):
         stop=90.0,
         score=80,
         result_R=1.0,
+        exit_price=None,
     ):
-        return {
+        trade = {
             "asset": asset,
             "timeframe": timeframe,
             "entry_time": entry_time,
@@ -26,6 +30,45 @@ class TestPortfolioBacktest(unittest.TestCase):
             "score": score,
             "result_R": result_R,
         }
+        if exit_price is not None:
+            trade["exit"] = exit_price
+        return trade
+
+    def verified_test_registry(self):
+        registry = copy.deepcopy(load_registry())
+        now = datetime.now(timezone.utc).isoformat()
+        item = registry["assets"]["AAPL"]
+        item["fees"] = {
+            "confirmed": True,
+            "source": "synthetic unit-test evidence only",
+            "observed_at": now,
+            "entry": {"model": "FIXED", "value": 1.0, "unit": "USD"},
+            "exit": {"model": "FIXED", "value": 1.0, "unit": "USD"},
+        }
+        item["spread"].update({
+            "bid_ask_bps": 10.0,
+            "treatment": "SEPARATE_FROM_PRICES",
+            "evidence_scope": "HISTORICAL_CONSERVATIVE_MODEL",
+            "confirmed": True,
+            "source": "synthetic unit-test evidence only",
+            "observed_at": now,
+        })
+        item["price_basis"] = {
+            "historical_basis": "synthetic raw OHLC test basis",
+            "execution_basis": "synthetic bid/ask test basis",
+            "mapping_rule": "synthetic explicit test mapping",
+            "confirmed": True,
+            "source": "synthetic unit-test evidence only",
+            "observed_at": now,
+        }
+        item["minimum_order"].update({
+            "minimum_notional": 10.0,
+            "fractional_allowed": True,
+            "confirmed": True,
+            "source": "synthetic unit-test evidence only",
+            "observed_at": now,
+        })
+        return registry
 
     def test_simultaneous_entries_share_portfolio_risk_proportionally(self):
         trades = [
@@ -255,6 +298,51 @@ class TestPortfolioBacktest(unittest.TestCase):
         self.assertEqual(
             result["summary"]["trades_exceeding_planned_gross_stop_risk"], 0
         )
+
+    def test_reports_verified_costs_at_actual_portfolio_allocated_quantity(self):
+        trade = self.make_trade(
+            asset="AAPL", entry=100.0, stop=90.0, score=80,
+            result_R=1.0, exit_price=110.0,
+        )
+        result = simulate_portfolio(
+            [trade], capital_usd=1000.0,
+            economic_registry=self.verified_test_registry(),
+        )
+        row = result["trades"][0]
+        self.assertAlmostEqual(row["quantity"], 0.5)
+        self.assertAlmostEqual(row["verified_costs_total_usd"], 2.0525)
+        self.assertAlmostEqual(row["verified_net_pnl_usd"], 2.9475)
+        self.assertAlmostEqual(result["summary"]["verified_net_pnl_usd"], 2.9475)
+        self.assertIsNone(result["summary"]["net_pnl_usd"])
+        self.assertFalse(result["summary"]["verified_net_costs_included_in_allocation"])
+        self.assertFalse(result["summary"]["verified_net_performance_validated"])
+        self.assertAlmostEqual(result["summary"]["ending_equity_usd"], 1005.0)
+
+    def test_missing_registry_evidence_keeps_verified_portfolio_net_unpriced(self):
+        trade = self.make_trade(
+            asset="AAPL", entry=100.0, stop=90.0, score=80,
+            result_R=1.0, exit_price=110.0,
+        )
+        result = simulate_portfolio([trade], capital_usd=1000.0)
+        row = result["trades"][0]
+        self.assertEqual(row["verified_costs_status"], "COSTS_UNVERIFIED")
+        self.assertIsNone(row["verified_net_pnl_usd"])
+        self.assertIsNone(result["summary"]["verified_net_pnl_usd"])
+        self.assertFalse(result["summary"]["costs_included"])
+
+    def test_exit_price_must_match_backtest_result_r_for_cost_diagnostics(self):
+        trade = self.make_trade(
+            asset="AAPL", entry=100.0, stop=90.0, score=80,
+            result_R=1.0, exit_price=120.0,
+        )
+        result = simulate_portfolio(
+            [trade], capital_usd=1000.0,
+            economic_registry=self.verified_test_registry(),
+        )
+        row = result["trades"][0]
+        self.assertEqual(row["verified_costs_status"], "EXIT_PRICE_RESULT_R_MISMATCH")
+        self.assertIsNone(row["verified_costs_total_usd"])
+        self.assertIsNone(result["summary"]["verified_net_pnl_usd"])
 
     def test_empty_portfolio_does_not_claim_net_performance(self):
         result = simulate_portfolio([], capital_usd=1000.0)
