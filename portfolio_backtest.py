@@ -162,8 +162,6 @@ def simulate_portfolio(
                     not _finite(exit_price) or exit_price <= 0
                 ):
                     raise ValueError("precio de salida inválido")
-                if not all(_finite(v) for v in (entry, stop, score, result_r)):
-                    raise ValueError("valor no finito")
                 if entry <= 0 or stop <= 0 or stop >= entry:
                     raise ValueError("niveles long inválidos")
                 if exit_time < entry_time:
