@@ -17,12 +17,13 @@ def _week_start(value: str | pd.Timestamp) -> pd.Timestamp:
     return stamp - pd.Timedelta(days=stamp.weekday())
 
 
-def _merge_week_ranges(ranges):
+def _merge_test_intervals(ranges):
+    """Merge overlapping test folds, but never bridge a real time gap."""
     merged = []
     for start, end in sorted(ranges):
         if end < start:
             raise ValueError("test fold end precedes its start")
-        if not merged or start > merged[-1][1] + pd.Timedelta(days=7):
+        if not merged or start > merged[-1][1]:
             merged.append([start, end])
         else:
             merged[-1][1] = max(merged[-1][1], end)
@@ -77,23 +78,24 @@ def load_m15_test_windows(input_dir: str | Path):
                 raise ValueError("trade result_R must be finite")
             exit_time = pd.Timestamp(trade["exit_time"]).tz_convert("UTC")
             trades.append({"asset": asset, "segment_id": key[1],
-                           "exit_week": _week_start(exit_time), "result_R": result_r})
+                           "exit_week": _week_start(exit_time), "exit_time": exit_time,
+                           "result_R": result_r})
     if len(assets) < 2 or not trades:
         raise ValueError("need at least two assets and one M15 test trade")
 
-    weekly_ranges = [(_week_start(start), _week_start(end))
-                     for start, end in folds_by_key.values()]
     windows = []
-    for start_week, end_week in _merge_week_ranges(weekly_ranges):
+    for start_time, end_time in _merge_test_intervals(list(folds_by_key.values())):
+        start_week, end_week = _week_start(start_time), _week_start(end_time)
         weeks = pd.date_range(start_week, end_week, freq="W-MON", tz="UTC")
         week_map = {week: i for i, week in enumerate(weeks)}
         weekly_r = np.zeros(len(weeks), dtype=float)
         weekly_n = np.zeros(len(weeks), dtype=int)
         for trade in trades:
-            index = week_map.get(trade["exit_week"])
-            if index is not None:
-                weekly_r[index] += trade["result_R"]
-                weekly_n[index] += 1
+            if start_time <= trade["exit_time"] <= end_time:
+                index = week_map.get(trade["exit_week"])
+                if index is not None:
+                    weekly_r[index] += trade["result_R"]
+                    weekly_n[index] += 1
         windows.append({"start_week": start_week.date().isoformat(),
                         "end_week": end_week.date().isoformat(),
                         "weekly_r": weekly_r, "weekly_trade_count": weekly_n})
