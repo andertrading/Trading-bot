@@ -204,3 +204,5 @@ The weekday market-evidence workflow continues to collect timestamped realtime b
 
 The first aggregation found one available forward sample and zero assets with the minimum 30 distinct dates. The report remains FORWARD_SAMPLE_COLLECTION; at 30 or 60 samples it will only become ready for manual review, never automatic approval. It does not modify asset_economic_registry.json, infer round-trip fees, or access account/position/order data.
 
+
+The forward spread audit currently samples the scheduled weekday 15:00 UTC snapshot (manual captures can differ) and keeps one latest realtime observation per asset and UTC date. Its percentiles describe this fixed-time snapshot distribution, not continuous intraday or full-session spread behavior.
