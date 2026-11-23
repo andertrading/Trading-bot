@@ -64,3 +64,17 @@ No changes to production strategy selection, asset routing, risk limits, sizing,
 - Workflow run: [45245218562](https://github.com/andertrading/Trading-bot/actions/runs/45244766224)
 - Artifact: [coinbase-oos-walkforward-45244766224](https://github.com/andertrading/Trading-bot/actions/runs/45244766224/artifacts/14852528494)
 - Artifact SHA-256: `01d097d31b547d3bc75e42da35f8f602b4b1e65315428a573e800e899f6990ae`
+
+
+## Exploratory uncertainty check — M15 test partition
+
+A calendar-week block bootstrap was applied to the 1,247 M15 test trades. Weekly P&L/trade-count blocks were sampled with replacement **within each of the 16 asset/contiguous-segment test samples**, preserving each segment's number of calendar weeks and retaining zero-trade weeks. The fixed seed was `20261123`; 20,000 replicates were used.
+
+- Observed combined test result: **+6.864 gross R**, 1,247 trades, **+0.00550 R/trade**.
+- One-week block bootstrap 95% interval for total R: **−74.45 to +90.59 R**.
+- One-week block bootstrap 95% interval for mean R/trade: **−0.06435 to +0.06559 R/trade**.
+- Two-week circular-block sensitivity: mean R/trade 95% interval **−0.04878 to +0.06235 R/trade**.
+- Four-week circular-block sensitivity: mean R/trade 95% interval **−0.04129 to +0.05465 R/trade**.
+- In the one-week bootstrap, 55.7% of replicates had positive aggregate gross R.
+
+All mean-return intervals include zero. This reinforces that the small positive aggregate test result is not a demonstrated edge. The bootstrap is exploratory rather than a formal inferential guarantee: it uses a single historical test partition, weekly blocks, and independently resamples each segment; it does not model cross-asset dependence, execution costs, or portfolio capital constraints. No daily bootstrap is reported because the daily test sample has only five trades.
