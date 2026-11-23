@@ -135,6 +135,40 @@ class EtoroYahooReconciliationTests(unittest.TestCase):
         )
         self.assertEqual(result["status"], "SKIPPED_ETORO_HISTORY_UNUSABLE")
 
+    def test_compares_research_history_only_after_conflicted_dates_excluded(self):
+        etoro = {
+            "history_usable": False,
+            "research_history_usable": True,
+            "research_history_policy": "AMBIGUOUS_DUPLICATE_DATES_EXCLUDED",
+            "excluded_conflict_timestamps": ["2025-11-02T00:00:00+00:00"],
+            "candles": [
+                {
+                    "timestamp": "2026-11-20T00:00:00+00:00",
+                    "open": "100", "high": "103", "low": "99", "close": "102",
+                },
+            ],
+        }
+        frame = pd.DataFrame(
+            {"Open": [100.0], "High": [103.0], "Low": [99.0], "Close": [102.0]},
+            index=pd.to_datetime(["2026-11-20"]),
+        )
+        ticker = Mock()
+        ticker.history.return_value = frame
+        result = compare_asset_history(
+            "BTC", etoro, ticker_symbol="BTC-USD",
+            ticker_factory=lambda symbol: ticker,
+        )
+        self.assertEqual(result["status"], "COMPARISON_ONLY_NOT_VALIDATION")
+        self.assertEqual(
+            result["history_quality_scope"],
+            "RESEARCH_ONLY_AMBIGUOUS_DATES_EXCLUDED",
+        )
+        self.assertEqual(
+            result["excluded_conflict_timestamps"],
+            ["2025-11-02T00:00:00+00:00"],
+        )
+        self.assertEqual(result["overlap_bars"], 1)
+
     def test_report_never_claims_price_basis_or_execution_validation(self):
         source = {
             "captured_at": "2026-11-23T15:00:00+00:00",
