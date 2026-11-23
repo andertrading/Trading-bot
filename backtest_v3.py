@@ -305,6 +305,17 @@ def _snapshot_metadata(
             "price_adjustment_verified_at"
         ),
         "price_source_detail": data.attrs.get("price_source_detail"),
+        "volume_quality": data.attrs.get("volume_quality", "not_recorded"),
+        "volume_column_present": data.attrs.get("volume_column_present"),
+        "volume_zero_count_before_normalization": data.attrs.get(
+            "volume_zero_count_before_normalization"
+        ),
+        "volume_positive_count_before_normalization": data.attrs.get(
+            "volume_positive_count_before_normalization"
+        ),
+        "volume_invalid_count_before_normalization": data.attrs.get(
+            "volume_invalid_count_before_normalization"
+        ),
         "ohlc_repair_count": int(data.attrs.get("ohlc_repair_count", 0) or 0),
         "ohlc_repair_source_ticker": data.attrs.get(
             "ohlc_repair_source_ticker"
