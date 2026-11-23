@@ -1,0 +1,47 @@
+name: Coinbase OOS Portfolio Simulation
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/coinbase_oos_portfolio.yml
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  simulate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Download retained Coinbase OOS artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: coinbase-oos-walkforward-45244766224
+          path: /tmp/coinbase-oos
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: 45244766224
+      - name: Run shared virtual portfolio simulation
+        run: |
+          python research/run_coinbase_oos_portfolio.py \
+            --input-dir /tmp/coinbase-oos \
+            --output coinbase_oos_portfolio_result.json \
+            --capital-usd 1000
+      - name: Upload research result
+        uses: actions/upload-artifact@v4
+        with:
+          name: coinbase-oos-portfolio-simulation-${{ github.run_id }}
+          path: coinbase_oos_portfolio_result.json
+          retention-days: 90
