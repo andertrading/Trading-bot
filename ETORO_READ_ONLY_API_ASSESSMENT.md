@@ -223,3 +223,12 @@ After excluding those ambiguous dates, the five crypto series retain 994–996 d
 The initial Yahoo comparison was run before this research-only flag existed, so it compared only the seven strict histories. Median absolute daily close differences were approximately 0.13–0.16% for CSPX, CNDX and the five equities; 95th-percentile absolute close differences ranged from approximately 0.27% to 0.73%. Individual outliers reached 4–7% in some equities, and Yahoo returned one invalid OHLC row for CSPX and two for CNDX. These are diagnostic differences, not evidence that either provider is the executable-price truth. The comparison does not validate eToro's chart price basis, spread, FX, fees, slippage or execution parity.
 
 All eToro candle records continue to declare adjustment basis UNSPECIFIED, no historical bid/ask availability, and no confirmed execution-price basis. Do not use these chart candles as production execution prices or treat the research-only crypto series as strict-quality history.
+
+
+### Follow-up capture after conflict-exclusion change — 23 November 2026, 16:33 UTC
+
+Run `45217670859` confirms the new separation works: 12/12 instruments resolved; 7/12 remain strictly duplicate-free; 12/12 have at least 220 clean rows for research after excluding both rows at every ambiguous timestamp; 5/12 have excluded conflict dates; zero collection errors. The overall strict status correctly remains PARTIAL. This capture found three conflict dates for BTC as well as SOL (2024-11-03, 2025-11-02 and 2026-11-01); ETH, XLM and XRP each have two (2024-11-03 and 2025-11-02). This supersedes the earlier BTC conflict count in the preceding spot-check note.
+
+The expanded secondary comparison now overlaps all 12 assets. Median absolute daily close difference / p95 absolute daily close difference versus Yahoo, in percent, is: CSPX 0.133 / 0.266; CNDX 0.161 / 0.332; TSLA 0.159 / 0.385; NVDA 0.164 / 0.447; AAPL 0.150 / 0.314; MSFT 0.152 / 0.318; TTWO 0.164 / 0.733; BTC 0.633 / 2.037; ETH 0.716 / 2.657; SOL 0.762 / 2.977; XLM 0.895 / 3.023; XRP 0.724 / 2.581. Largest absolute close discrepancies reach 4–7% in some equities and 4.5–11.4% in crypto. These figures are useful diagnostics only; they do not establish which provider is correct. The report remains `COMPARISON_ONLY_NOT_VALIDATION`, with price-basis and executable-price parity both NOT_VALIDATED.
+
+The 805-test main-branch CI after these changes passed. No Twelve Data/EODHD credits were consumed, no account portfolio/positions were accessed, and no order action was performed.
