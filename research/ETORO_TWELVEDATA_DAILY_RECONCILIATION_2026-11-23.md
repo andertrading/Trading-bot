@@ -63,6 +63,15 @@ The median absolute close difference increased for every asset when the Twelve D
 
 A simple ±1-day shift does not explain the differences. Same-date alignment is materially closer in this sample, but it does not prove identical candle boundaries or price construction.
 
+## eToro missing-session cross-check
+
+The eToro capture's expected-session gap list was cross-checked against the retained Twelve Data/EODHD daily dates:
+
+- Each of the five US equities (TSLA, NVDA, AAPL, MSFT, TTWO) has 11 missing expected sessions in the recent two-year window. **All 11 dates are present** in the corresponding Twelve Data daily snapshot for every one of the five equities.
+- CSPX and CNDX each have 10 missing expected sessions in that window. Four of those ten dates are present in the retained EODHD daily ETF snapshot; the remaining dates fall outside the available one-year EODHD range or cannot be cross-checked from the retained data.
+
+For the five US equities, this confirms that the eToro omissions are not ordinary exchange holidays: an independent daily provider has bars for every date the configured XNYS calendar expects and eToro omitted. It does not establish whether the cause is an eToro API sampling issue, source correction, or another feed-specific condition. For the ETFs, the shorter EODHD history prevents a complete independent check.
+
 ## OHLC field observations
 
 Median absolute differences for the Open field are higher than for High/Low on several instruments, particularly equities:
@@ -81,7 +90,7 @@ Largest same-date close discrepancies include TSLA 4.116% (2026-04-22), NVDA 4.1
 2. Crypto close discrepancies are larger, especially in the P95 tail.
 3. A one-day calendar shift worsens the median comparison for all ten instruments.
 4. Open/high/low parity is not established; eToro's adjustment basis is unspecified.
-5. The eToro histories also have independent continuity defects: the seven stock/ETF histories miss expected exchange sessions, and crypto research histories exclude conflicting DST-transition dates.
+5. The eToro histories also have independent continuity defects: the seven stock/ETF histories miss expected exchange sessions; all recent two-year gaps for the five US equities appear in the corresponding Twelve Data daily snapshots. Crypto research histories exclude conflicting DST-transition dates.
 6. The Twelve Data crypto snapshots have zero volume in the retained daily/M15 files, so this OHLC comparison does not validate crypto volume or any relative-volume strategy.
 7. Neither provider's chart OHLC can be treated as historical eToro executable bid/ask prices. No historical spread, slippage, FX, commission, or stop-fill model is validated by this comparison.
 
