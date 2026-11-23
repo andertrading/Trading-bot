@@ -63,6 +63,28 @@ class SignalLifecycleTests(unittest.TestCase):
         )
         self.assertEqual(signal["risk_reward"], 2.0)
 
+    def test_build_signal_snapshots_the_completed_signal_candle(self):
+        signal = build_signal_record(
+            candidate(
+                last_open=179.5,
+                last_high=181.0,
+                last_low=179.0,
+                last_price=180.5,
+                data_provider="synthetic-provider",
+                price_adjustment_policy="RAW",
+            ),
+            NOW,
+            30,
+        )
+        evidence = signal["signal_bar_evidence"]
+        self.assertEqual(evidence["timestamp"], "2026-11-21T11:45:00+00:00")
+        self.assertEqual(evidence["open"], 179.5)
+        self.assertEqual(evidence["high"], 181.0)
+        self.assertEqual(evidence["low"], 179.0)
+        self.assertEqual(evidence["close"], 180.5)
+        self.assertEqual(evidence["data_provider"], "synthetic-provider")
+        self.assertEqual(evidence["price_adjustment_policy"], "RAW")
+
     def test_build_signal_preserves_price_adjustment_verification_provenance(self):
         signal = build_signal_record(
             candidate(
