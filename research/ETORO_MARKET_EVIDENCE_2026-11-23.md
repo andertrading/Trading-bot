@@ -38,7 +38,7 @@ All spread values below are from the quote snapshot. `marketSpread` is the separ
 | NVDA | NVDA | 4.297 | 0.0430 | 0.04 | 1.00 | 1.04 | Within $0.01 |
 | AAPL | AAPL | 5.741 | 0.0574 | 0.06 | 1.00 | 1.06 | Within $0.01 |
 | MSFT | MSFT | 5.737 | 0.0574 | 0.06 | 1.00 | 1.06 | Within $0.01 |
-| TTWO | TTWO | 65.162 | 0.6516 | 0.64 | 1.00 | 1.64 | Within $0.01 |
+| TTWO | TTWO | 65.162 | 0.6516 | 0.64 | 1.00 | 1.64 | Divergence |
 | BTC | BTC | 0.174 | 0.0017 | Omitted | 0.99 | 0.99 | API component omitted |
 | ETH | ETH | 2.194 | 0.0219 | 0.02 | 0.99 | 1.01 | Within $0.01 |
 | SOL | SOL | 4.939 | 0.0494 | 0.04 | 0.99 | 1.03 | Within $0.01 |
