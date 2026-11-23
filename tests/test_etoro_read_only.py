@@ -99,8 +99,24 @@ class EtoroReadOnlyClientTests(unittest.TestCase):
         self.client.get_candles(123, "desc", "15m", 500)
         args, _ = self.session.request.call_args
         self.assertTrue(args[1].endswith(
-            "/api/v1/market-data/instruments/123/history/candles/desc/15m/500"
+            "/api/v1/market-data/instruments/123/history/candles/desc/FifteenMinutes/500"
         ))
+
+
+    def test_candle_interval_aliases_map_to_official_etoro_enums(self):
+        expected = {
+            "1m": "OneMinute", "5m": "FiveMinutes", "10m": "TenMinutes",
+            "15m": "FifteenMinutes", "30m": "ThirtyMinutes",
+            "1h": "OneHour", "4h": "FourHours", "1d": "OneDay", "1w": "OneWeek",
+        }
+        for alias, api_interval in expected.items():
+            with self.subTest(alias=alias):
+                self.session.request.return_value = FakeResponse(data={"candles": []})
+                self.client.get_candles(123, "desc", alias, 10)
+                args, _ = self.session.request.call_args
+                self.assertTrue(args[1].endswith(
+                    f"/api/v1/market-data/instruments/123/history/candles/desc/{api_interval}/10"
+                ))
 
     def test_candle_count_above_api_limit_is_rejected(self):
         with self.assertRaises(ValueError):

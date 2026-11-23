@@ -170,3 +170,7 @@ The normalized report preserves timestamped OHLC and volume fields and checks in
 
 The weekly workflow requests 12 instruments and up to 1,000 daily candles per instrument, well below the documented market-data request rate when run sequentially. Artifacts are retained for 90 days. This is read-only market data, not personal trading history.
 
+
+
+The API path requires the documented interval enum (for example, OneDay), not the shorthand 1d. The client accepts concise internal aliases and maps them to the official API enum before making the request. The candle endpoint documents a maximum of 1,000 candles per request and a shared market-data quota of 120 requests per 60 seconds.
+
