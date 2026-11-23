@@ -304,11 +304,28 @@ def collect_market_evidence(client: Any, *, symbols: Mapping[str, Mapping[str, A
         (item.get("quote") or {}).get("quote_type") == "last_session"
         for item in report["assets"].values()
     )
+    no_realtime_quote_skips = sum(
+        (item.get("hypothetical_open_cost") or {}).get("status")
+        == "SKIPPED_NO_REALTIME_QUOTE"
+        for item in report["assets"].values()
+    )
+    without_real_unleveraged_long = sum(
+        isinstance(item.get("eligibility"), Mapping)
+        and not item["eligibility"].get("supports_real_unleveraged_long", False)
+        for item in report["assets"].values()
+    )
+    missing_eligibility = sum(
+        item.get("instrument") is not None and item.get("eligibility") is None
+        for item in report["assets"].values()
+    )
     report["summary"] = {
         "configured_assets": len(report["assets"]), "resolved_instruments": len(resolved),
         "assets_with_errors": failures,
         "assets_with_last_session_quotes": last_session_quotes,
         "assets_with_market_closed_cost_skips": closed_market_skips,
+        "assets_with_no_realtime_quote_skips": no_realtime_quote_skips,
+        "assets_without_real_unleveraged_long": without_real_unleveraged_long,
+        "assets_with_missing_eligibility": missing_eligibility,
         "assets_with_validated_open_costs": validated_open_costs,
         "status": (
             "COMPLETE"
