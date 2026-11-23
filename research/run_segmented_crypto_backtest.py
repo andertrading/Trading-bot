@@ -251,6 +251,16 @@ def run_segmented_backtest(
             segment_trades = []
             for trade in trades:
                 enriched = dict(trade)
+                # The shared backtest engine normally labels trades with its
+                # configured live provider. This runner supplies Coinbase
+                # snapshots in memory, so override that provenance explicitly.
+                enriched["data_source"] = "coinbase_exchange_only"
+                enriched["source_venue"] = "Coinbase Exchange"
+                enriched["price_adjustment_policy"] = "not_applicable_crypto_spot"
+                enriched["research_price_basis"] = (
+                    "Coinbase Exchange spot OHLC; not eToro executable bid/ask"
+                )
+                enriched["etoro_price_equivalence"] = "not_established"
                 enriched["segment_id"] = segment_id
                 enriched["segment_start"] = start.isoformat()
                 enriched["segment_end"] = end.isoformat()
@@ -286,6 +296,13 @@ def run_segmented_backtest(
         "research_only": True,
         "production_changes": False,
         "network_requests": 0,
+        "execution_price_basis": (
+            "Coinbase Exchange spot OHLC; not eToro executable bid/ask"
+        ),
+        "cost_model_scope": (
+            "Existing eToro fee assumptions are scenario-only and unverified "
+            "for Coinbase venue data; verified cost-adjusted metrics must remain null"
+        ),
         "source_policy": {
             "cross_provider_repair": False,
             "synthetic_bars": False,
