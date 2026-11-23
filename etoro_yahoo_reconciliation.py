@@ -215,7 +215,7 @@ def main() -> int:
     report = build_report(source)
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\\n", encoding="utf-8")
+    output.write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     print(json.dumps(report["summary"], ensure_ascii=False))
     print(f"Informe guardado: {output}")
     return 0
