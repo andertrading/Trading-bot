@@ -556,13 +556,20 @@ class UpstashSignalStateStore:
                 payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True
             ))
 
-    def update_paper_state(self, paper_state: dict) -> None:
-        """Persist the isolated virtual portfolio alongside signal lifecycle state."""
+    def update_paper_state(
+        self,
+        paper_state: dict,
+        *,
+        ledger_key: str = "paper_forward",
+    ) -> None:
+        """Persist one isolated PAPER_ONLY ledger without overwriting another."""
+        if ledger_key not in {"paper_forward", "paper_forward_verified"}:
+            raise ValueError("unsupported paper ledger key")
         if not isinstance(paper_state, dict) or paper_state.get("execution_mode") != "PAPER_ONLY":
             raise ValueError("paper_state must be an isolated PAPER_ONLY state")
         with self._lock:
             payload = self.load()
-            payload["paper_forward"] = dict(paper_state)
+            payload[ledger_key] = dict(paper_state)
             self._set_raw(json.dumps(
                 payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True
             ))
