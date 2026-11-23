@@ -165,7 +165,8 @@ def download_series(asset: str, timeframe: str, start: datetime, end: datetime, 
 
     zero_volume = sum(row["volume"] == 0 for row in sorted_rows)
     positive_volume = sum(row["volume"] is not None and row["volume"] > 0 for row in sorted_rows)
-    invalid_volume = sum(row["volume"] is None for row in sorted_rows)
+    negative_volume = sum(row["volume"] is not None and row["volume"] < 0 for row in sorted_rows)
+    invalid_volume = sum(row["volume"] is None or row["volume"] < 0 for row in sorted_rows)
     invalid_ohlc = 0
     for row in sorted_rows:
         values = [row[k] for k in ("low", "high", "open", "close")]
@@ -207,6 +208,7 @@ def download_series(asset: str, timeframe: str, start: datetime, end: datetime, 
         "zero_volume_bars": zero_volume,
         "positive_volume_bars": positive_volume,
         "invalid_or_missing_volume_bars": invalid_volume,
+        "negative_volume_bars": negative_volume,
         "invalid_ohlc_bars": invalid_ohlc,
         "malformed_response_items": malformed_items,
         "raw_response_items": raw_items,
@@ -317,15 +319,15 @@ def main() -> int:
         "- Cross-provider repairs: none",
         "- Missing candles: reported, never filled",
         "",
-        "| Asset | Timeframe | Expected | Received | Missing | Zero volume | Positive volume | Invalid volume | Complete grid |",
-        "|---|---:|---:|---:|---:|---:|---:|---:|---|",
+        "| Asset | Timeframe | Expected | Received | Missing | Zero volume | Positive volume | Invalid volume | Negative volume | Complete grid |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---|",
     ]
     for item in results:
         summary_lines.append(
             f"| {item['asset']} | {item['timeframe']} | {item['expected_bars']} | "
             f"{item['received_bars']} | {item['missing_bars']} | {item['zero_volume_bars']} | "
             f"{item['positive_volume_bars']} | {item['invalid_or_missing_volume_bars']} | "
-            f"{'yes' if item['complete_expected_grid'] else 'no'} |"
+            f"{item['negative_volume_bars']} | {'yes' if item['complete_expected_grid'] else 'no'} |"
         )
     summary_lines += ["", "## Failures", ""]
     summary_lines += [f"- {x}" for x in failures] if failures else ["- None"]
@@ -337,6 +339,7 @@ def main() -> int:
         "logical_requests": logical_requests,
         "http_attempts": request_attempts,
         "failures": failures,
+        "series": results,
         "output": str(OUTPUT_DIR),
     }, indent=2))
 
