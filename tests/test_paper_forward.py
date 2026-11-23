@@ -1,6 +1,10 @@
+import copy
 import unittest
+from datetime import datetime, timezone
 
+from asset_economic_registry import load_registry
 from paper_forward import (
+    calculate_verified_cost_aware_quantity,
     new_paper_state,
     paper_summary,
     paper_portfolio_snapshot,
@@ -305,6 +309,132 @@ class PaperForwardTests(unittest.TestCase):
         self.assertFalse(summary["costs_included"])
         self.assertFalse(summary["net_performance_validated"])
         self.assertAlmostEqual(summary["realized_gross_pnl_usd"], 5.0)
+
+
+
+def verified_test_registry(*, fractional=True, minimum_notional=10.0):
+    registry = copy.deepcopy(load_registry())
+    now = datetime.now(timezone.utc).isoformat()
+    item = registry["assets"]["AAPL"]
+    item["fees"] = {
+        "confirmed": True,
+        "source": "synthetic unit-test evidence only",
+        "observed_at": now,
+        "entry": {"model": "FIXED", "value": 1.0, "unit": "USD"},
+        "exit": {"model": "FIXED", "value": 1.0, "unit": "USD"},
+    }
+    item["spread"].update({
+        "bid_ask_bps": 10.0,
+        "treatment": "SEPARATE_FROM_PRICES",
+        "evidence_scope": "HISTORICAL_CONSERVATIVE_MODEL",
+        "confirmed": True,
+        "source": "synthetic unit-test evidence only",
+        "observed_at": now,
+    })
+    item["price_basis"] = {
+        "historical_basis": "synthetic raw OHLC test basis",
+        "execution_basis": "synthetic bid/ask test basis",
+        "mapping_rule": "synthetic explicit test mapping",
+        "confirmed": True,
+        "source": "synthetic unit-test evidence only",
+        "observed_at": now,
+    }
+    item["minimum_order"].update({
+        "minimum_notional": minimum_notional,
+        "fractional_allowed": fractional,
+        "confirmed": True,
+        "source": "synthetic unit-test evidence only",
+        "observed_at": now,
+    })
+    return registry
+
+
+class PaperForwardVerifiedCostTests(unittest.TestCase):
+    def setUp(self):
+        self.state = new_paper_state()
+        self.registry = verified_test_registry()
+
+    def test_verified_cost_sizing_includes_fixed_and_variable_round_trip_costs(self):
+        result = calculate_verified_cost_aware_quantity(
+            "AAPL", 100.0, 95.0, 10.0, registry=self.registry
+        )
+        self.assertTrue(result["valid"])
+        self.assertTrue(result["complete"])
+        self.assertAlmostEqual(result["reserved_stop_risk_usd"], 10.0)
+        self.assertLessEqual(result["reserved_stop_risk_usd"], 10.0 + 1e-8)
+        self.assertGreater(result["estimated_round_trip_costs_usd"], 2.0)
+
+    def test_missing_live_registry_evidence_blocks_cost_aware_entry(self):
+        item = signal("blocked-costs")
+        item["asset"] = "AAPL"
+        process_signal_bar(
+            self.state, item,
+            bar("2026-11-22T10:15:00+00:00", 99, 101, 98, 100),
+            risk_fraction=0.01,
+            require_verified_costs=True,
+        )
+        trade = self.state["trades"]["blocked-costs"]
+        self.assertEqual(trade["status"], "REJECTED_COSTS_UNVERIFIED")
+        self.assertIsNone(trade.get("quantity"))
+        self.assertEqual(self.state["open_risk_usd"], 0.0)
+
+    def test_verified_cost_entry_reserves_cash_for_round_trip_costs(self):
+        item = signal("verified-cost-cash")
+        item["asset"] = "AAPL"
+        process_signal_bar(
+            self.state, item,
+            bar("2026-11-22T10:15:00+00:00", 99, 101, 98, 100),
+            risk_fraction=0.01,
+            require_verified_costs=True,
+            economic_registry=self.registry,
+        )
+        trade = self.state["trades"]["verified-cost-cash"]
+        self.assertEqual(trade["status"], "OPEN")
+        self.assertEqual(trade["cost_mode"], "VERIFIED_REGISTRY")
+        self.assertGreater(trade["cash_reserved_usd"], trade["notional_usd"])
+        snapshot = paper_portfolio_snapshot(self.state)
+        self.assertAlmostEqual(snapshot["cash_reserved_usd"], trade["cash_reserved_usd"])
+        self.assertAlmostEqual(
+            snapshot["estimated_cost_reserve_usd"],
+            trade["estimated_stop_costs_usd"],
+        )
+        self.assertAlmostEqual(
+            snapshot["available_capital_usd"],
+            1000.0 - trade["cash_reserved_usd"],
+        )
+
+    def test_verified_cost_stop_close_books_net_pnl_once(self):
+        item = signal("verified-cost-stop")
+        item["asset"] = "AAPL"
+        process_signal_bar(
+            self.state, item,
+            bar("2026-11-22T10:15:00+00:00", 99, 101, 98, 100),
+            risk_fraction=0.01,
+            require_verified_costs=True,
+            economic_registry=self.registry,
+        )
+        trade = self.state["trades"]["verified-cost-stop"]
+        process_signal_bar(
+            self.state, item,
+            bar("2026-11-22T10:30:00+00:00", 95, 96, 94, 95),
+            risk_fraction=0.01,
+            require_verified_costs=True,
+            economic_registry=self.registry,
+        )
+        self.assertEqual(trade["status"], "CLOSED")
+        self.assertAlmostEqual(trade["gross_pnl_usd"], -trade["gross_stop_risk_usd"])
+        self.assertAlmostEqual(
+            trade["net_pnl_usd"],
+            trade["gross_pnl_usd"] - trade["costs_usd"],
+        )
+        self.assertAlmostEqual(
+            self.state["equity_usd"],
+            1000.0 + trade["net_pnl_usd"],
+        )
+        self.assertEqual(self.state["costs_status"], "VERIFIED_NET_COSTS_INCLUDED")
+        summary = paper_summary(self.state)
+        self.assertTrue(summary["costs_included"])
+        self.assertFalse(summary["net_performance_validated"])
 
 
 if __name__ == "__main__":
