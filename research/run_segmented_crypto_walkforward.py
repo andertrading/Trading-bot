@@ -119,6 +119,27 @@ def run_oos_fold(
             "evaluation_rows": end_index - start_index + 1,
             "trades": trades,
             "metrics": metrics,
+            # Preserve the engine's per-candidate diagnostics before its
+            # module-level state is restored in the finally block. These
+            # explain why candidates were executed, rejected, or skipped.
+            "signal_diagnostics": [
+                dict(item)
+                for item in getattr(backtest_module, "SIGNAL_DIAGNOSTICS", [])
+                if isinstance(item, dict)
+            ],
+            "rr_rejections": [
+                dict(item)
+                for item in getattr(backtest_module, "RR_REJECTIONS", [])
+                if isinstance(item, dict)
+            ],
+            "excluded_ohlc_candles": [
+                dict(item)
+                for item in getattr(backtest_module, "EXCLUDED_OHLC_CANDLES", [])
+                if isinstance(item, dict)
+            ],
+            "download_errors": dict(
+                getattr(backtest_module, "DOWNLOAD_ERRORS", {})
+            ),
             "network_requests": 0,
             "all_trades_inside_fold": all(
                 pd.Timestamp(t["signal_time"]) >= start_time
