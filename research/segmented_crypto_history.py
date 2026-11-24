@@ -10,6 +10,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
+import numpy as np
 import pandas as pd
 
 
@@ -17,8 +18,6 @@ _INTERVALS = {
     "15m": pd.Timedelta(minutes=15),
     "1d": pd.Timedelta(days=1),
 }
-
-
 
 
 def _refresh_segment_volume_provenance(
@@ -64,7 +63,7 @@ def _refresh_segment_volume_provenance(
         return
 
     values = pd.to_numeric(segment["Volume"], errors="coerce").to_numpy(dtype=float)
-    finite = pd.Series(values).map(lambda value: bool(pd.notna(value) and value != float("inf") and value != float("-inf"))).to_numpy()
+    finite = np.isfinite(values)
     invalid = int((~finite).sum() + ((values < 0) & finite).sum())
     positive = int(((values > 0) & finite).sum())
     zero = int(((values == 0) & finite).sum())
