@@ -41,6 +41,7 @@ R values are gross and rounded to two decimals. Shadow trades selected are those
 2. **Keep the main-trend gate.** Its apparent validation benefit reverses sharply in test. This is regime dependence, not robust evidence for removing the gate.
 3. **Do not lower the strategy-level RR gate yet.** The one-gate counterfactual is only modestly positive in combined gross R and the selected shadow cohort is negative in test. The daily sample is too small to infer anything.
 4. **The execution-level RR cutoff deserves a separate, future hypothesis test, not an immediate change.** The combined gross replay improves in both M15 periods, but the shadow cohort itself is negative in validation (-33.69R) and positive in test (+19.33R). The standalone non-overlap shadow sequence also changes sign between validation (-36.19R) and test (+36.39R). This instability, plus unverified costs, prevents approval.
+
 ### Execution RR threshold sensitivity (exploratory only)
 
 The engine recorded **5,173 M15 execution-RR rejections**. Their median actual entry RR was 1.9768; 73.8% were at or above 1.95 and 31.1% at or above 1.99. This confirms that the strict 2.00 cutoff rejects many near-threshold candidates, but does not by itself show that admitting them is profitable.
@@ -57,7 +58,7 @@ A sensitivity replay admitted only rejected candidates meeting each lower actual
 
 These are exploratory gross deltas, not an optimized threshold recommendation. At the 1.95 floor, the standalone non-overlap shadow cohort is -18.99R in validation and +48.63R in test; results also vary materially by asset. The combined deltas depend partly on which original trades are displaced by earlier shadow candidates. The test period has already been examined, and no verified costs are included. Therefore, no lower RR threshold is approved.
 
-5. **The ATR ceiling is not the binding opportunity filter here.** No volatility-rejected M15 candidate passed both the trend and score requirements when ATR alone was relaxed. Daily counterfactual counts are too small.
+**ATR ceiling.** No volatility-rejected M15 candidate passed both the trend and score requirements when ATR alone was relaxed. Daily counterfactual counts are too small.
 
 ## Limitations and decision
 
