@@ -5,6 +5,7 @@ import pandas as pd
 
 from research.run_segmented_crypto_walkforward import run_oos_fold
 from research.segmented_crypto_history import split_contiguous_segments
+from strategies import evaluate_signal_at as evaluate_strategy_signal
 
 
 class FakeBacktestModule:
@@ -29,6 +30,31 @@ class FakeBacktestModule:
         return {"trades": len(trades)}
 
 
+
+
+class StrategyCheckingBacktestModule(FakeBacktestModule):
+    def __init__(self):
+        super().__init__()
+        self.signal_result = None
+        # FakeBacktestModule installs an instance-level no-op evaluator;
+        # replace it with the real strategy adapter for this integration test.
+        self.evaluate_signal_at = self._evaluate
+
+    @staticmethod
+    def _evaluate(data, asset, timeframe, index):
+        return evaluate_strategy_signal(asset, data, timeframe)
+
+    def run_backtest(self, asset, ticker, interval):
+        self.received = self.download_history(ticker, interval, asset=asset)
+        self.signal_result = self.evaluate_signal_at(
+            self.received,
+            asset,
+            interval,
+            len(self.received) - 1,
+        )
+        return [], None
+
+
 def make_segment():
     index = pd.date_range("2026-01-01", periods=500, freq="15min", tz="UTC")
     volume = np.full(500, 10.0)
@@ -40,6 +66,16 @@ def make_segment():
             "Low": 99.0,
             "Close": 100.5,
             "Volume": volume,
+            "EMA20": 105.0,
+            "EMA50": 100.0,
+            "EMA200": 95.0,
+            "RSI": 55.0,
+            "MACD": 2.0,
+            "MACD_SIGNAL": 1.0,
+            "ATR": 2.0,
+            "ATR_PERCENT": 2.0,
+            "HIGH20": 109.0,
+            "relative_volume": 1.3,
         },
         index=index,
     )
@@ -81,6 +117,28 @@ class TestSegmentedCryptoWalkforwardProvenance(unittest.TestCase):
             len(fake.received),
         )
         self.assertTrue(result["all_trades_inside_fold"])
+
+    def test_validation_prefix_still_awards_volume_bonus_in_real_strategy(self):
+        segment = make_segment()
+        fake = StrategyCheckingBacktestModule()
+
+        run_oos_fold(
+            segment,
+            "BTC",
+            "BTC-USD",
+            "15m",
+            "validation",
+            300,
+            399,
+            fake,
+        )
+
+        self.assertEqual(fake.signal_result["action"], "BUY CANDIDATE")
+        self.assertIn(
+            "Volumen superior a la media",
+            fake.signal_result["reasons"],
+        )
+        self.assertGreater(fake.signal_result["score"], 0)
 
     def test_test_prefix_keeps_full_segment_volume_counts(self):
         segment = make_segment()
