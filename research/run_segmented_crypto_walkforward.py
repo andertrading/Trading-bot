@@ -19,6 +19,7 @@ if str(REPOSITORY_ROOT) not in sys.path:
     sys.path.insert(0, str(REPOSITORY_ROOT))
 
 import pandas as pd
+import strategies as strategy_rules
 
 from research.run_segmented_crypto_backtest import (
     load_coinbase_snapshot,
@@ -72,6 +73,46 @@ def run_oos_fold(
             return None
         return number if pd.notna(number) and number not in (float("inf"), float("-inf")) else None
 
+    def _diagnostic_gt(left, right):
+        left_number = _diagnostic_number(left)
+        right_number = _diagnostic_number(right)
+        if left_number is None or right_number is None:
+            return None
+        return left_number > right_number
+
+    def _diagnostic_between(value, lower, upper):
+        number = _diagnostic_number(value)
+        if number is None:
+            return None
+        return lower <= number <= upper
+
+    def _volume_provenance(frame):
+        attrs = getattr(frame, "attrs", {}) or {}
+        quality = attrs.get("volume_quality")
+        column_present = attrs.get("volume_column_present")
+        invalid_count = attrs.get("volume_invalid_count_before_normalization")
+        positive_count = attrs.get("volume_positive_count_before_normalization")
+        zero_count = attrs.get("volume_zero_count_before_normalization")
+        valid = (
+            quality in {"available", "contains_zero_bars"}
+            and column_present is True
+            and type(invalid_count) is int
+            and invalid_count == 0
+            and type(positive_count) is int
+            and positive_count > 0
+            and type(zero_count) is int
+            and zero_count >= 0
+            and zero_count + positive_count == len(frame)
+        )
+        return {
+            "quality": quality,
+            "column_present": column_present,
+            "invalid_count": invalid_count,
+            "positive_count": positive_count,
+            "zero_count": zero_count,
+            "valid": valid,
+        }
+
     # The full contiguous segment carries source-volume counts for its full
     # length. This fold receives only the causal prefix ending at end_index,
     # so rebase trusted counts to that exact prefix before the strategy score
@@ -97,6 +138,17 @@ def run_oos_fold(
         result = original_evaluate(*args, **kwargs)
         if isinstance(result, dict) and result.get("action") == "NO TRADE":
             row = frame.iloc[index]
+            volume = _volume_provenance(frame)
+            relative_volume = row.get(
+                "RELATIVE_VOLUME", row.get("relative_volume")
+            )
+            relative_volume_number = _diagnostic_number(relative_volume)
+            volume_bonus_eligible = (
+                volume["valid"]
+                and relative_volume_number is not None
+                and relative_volume_number >= 1.2
+            )
+            atr_percent = _diagnostic_number(row.get("ATR_PERCENT"))
             strategy_rejections.append({
                 "asset": asset,
                 "ticker": ticker,
@@ -113,11 +165,39 @@ def run_oos_fold(
                 "macd": _diagnostic_number(row.get("MACD")),
                 "macd_signal": _diagnostic_number(row.get("MACD_SIGNAL")),
                 "high20": _diagnostic_number(row.get("HIGH20")),
-                "relative_volume": _diagnostic_number(
-                    row.get("RELATIVE_VOLUME", row.get("relative_volume"))
-                ),
+                "relative_volume": relative_volume_number,
                 "atr": _diagnostic_number(row.get("ATR")),
-                "atr_percent": _diagnostic_number(row.get("ATR_PERCENT")),
+                "atr_percent": atr_percent,
+                "score_component_price_above_ema20": _diagnostic_gt(
+                    row.get("Close"), row.get("EMA20")
+                ),
+                "score_component_ema20_above_ema50": _diagnostic_gt(
+                    row.get("EMA20"), row.get("EMA50")
+                ),
+                "score_component_ema50_above_ema200": _diagnostic_gt(
+                    row.get("EMA50"), row.get("EMA200")
+                ),
+                "score_component_rsi_favorable": _diagnostic_between(
+                    row.get("RSI"), 50, 68
+                ),
+                "score_component_macd_bullish": _diagnostic_gt(
+                    row.get("MACD"), row.get("MACD_SIGNAL")
+                ),
+                "score_component_breakout_20": _diagnostic_gt(
+                    row.get("Close"), row.get("HIGH20")
+                ),
+                "volume_quality": volume["quality"],
+                "volume_column_present": volume["column_present"],
+                "volume_invalid_count": volume["invalid_count"],
+                "volume_positive_count": volume["positive_count"],
+                "volume_zero_count": volume["zero_count"],
+                "volume_provenance_valid": volume["valid"],
+                "volume_bonus_eligible": volume_bonus_eligible,
+                "atr_limit_percent": strategy_rules.MAX_ATR_PERCENT,
+                "atr_exceeds_limit": (
+                    None if atr_percent is None
+                    else atr_percent > strategy_rules.MAX_ATR_PERCENT
+                ),
             })
         return result
 
