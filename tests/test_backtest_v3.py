@@ -318,7 +318,9 @@ class TestBacktestV3(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmpdir:
             with patch.object(backtest_v3, "SNAPSHOT_DIR", backtest_v3.Path(tmpdir)):
+                backtest_v3.SNAPSHOT_MANIFEST.clear()
                 backtest_v3._save_snapshot("AAPL", "AAPL", "1d", data)
+                backtest_v3._write_snapshot_manifest()
                 with self.assertRaisesRegex(
                     ValueError,
                     "no tiene evidencia independiente válida",
@@ -358,7 +360,9 @@ class TestBacktestV3(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmpdir:
             with patch.object(backtest_v3, "SNAPSHOT_DIR", backtest_v3.Path(tmpdir)):
+                backtest_v3.SNAPSHOT_MANIFEST.clear()
                 backtest_v3._save_snapshot("AAPL", "AAPL", "15m", data)
+                backtest_v3._write_snapshot_manifest()
                 replayed = backtest_v3._load_snapshot("AAPL", "AAPL", "15m")
 
         self.assertEqual(replayed.attrs["volume_quality"], "all_zero")
@@ -371,6 +375,31 @@ class TestBacktestV3(unittest.TestCase):
             replayed.attrs["volume_positive_count_before_normalization"],
             0,
         )
+
+    def test_snapshot_replay_requires_central_manifest(self):
+        data = self.make_data()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.object(backtest_v3, "SNAPSHOT_DIR", backtest_v3.Path(tmpdir)):
+                backtest_v3.SNAPSHOT_MANIFEST.clear()
+                backtest_v3._save_snapshot("AAPL", "AAPL", "15m", data)
+                with self.assertRaisesRegex(FileNotFoundError, "manifiesto central"):
+                    backtest_v3._load_snapshot("AAPL", "AAPL", "15m")
+
+    def test_snapshot_replay_rejects_manifest_metadata_mismatch(self):
+        import json
+
+        data = self.make_data()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.object(backtest_v3, "SNAPSHOT_DIR", backtest_v3.Path(tmpdir)):
+                backtest_v3.SNAPSHOT_MANIFEST.clear()
+                metadata = backtest_v3._save_snapshot("AAPL", "AAPL", "15m", data)
+                altered = dict(metadata)
+                altered["sha256"] = "0" * 64
+                (backtest_v3.Path(tmpdir) / "manifest.json").write_text(
+                    json.dumps([altered]), encoding="utf-8"
+                )
+                with self.assertRaisesRegex(ValueError, "no coinciden exactamente"):
+                    backtest_v3._load_snapshot("AAPL", "AAPL", "15m")
 
     def test_snapshot_metadata_persists_volume_quality_provenance(self):
         data = self.make_data()
