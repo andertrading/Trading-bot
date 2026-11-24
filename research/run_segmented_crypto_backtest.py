@@ -132,6 +132,25 @@ def load_coinbase_snapshot(
         raise ValueError("CSV contains incoherent OHLC candles")
 
     volume = data["Volume"].to_numpy(dtype=float)
+    finite_volume = np.isfinite(volume)
+    observed_volume_counts = {
+        "zero_volume_bars": int(((volume == 0) & finite_volume).sum()),
+        "positive_volume_bars": int(((volume > 0) & finite_volume).sum()),
+        "invalid_or_missing_volume_bars": int((~finite_volume).sum()),
+        "negative_volume_bars": int(((volume < 0) & finite_volume).sum()),
+    }
+    for key, observed in observed_volume_counts.items():
+        declared = series.get(key)
+        if type(declared) is not int or declared != observed:
+            raise ValueError(
+                f"Coinbase manifest {key} does not match source CSV "
+                f"(manifest={declared!r}, actual={observed})"
+            )
+    expected_volume_units = (
+        f"{asset} base-asset units, as reported by Coinbase Exchange"
+    )
+    if series.get("volume_units") != expected_volume_units:
+        raise ValueError("Coinbase manifest volume_units is missing or inconsistent")
     if not np.isfinite(volume).all() or (volume <= 0).any():
         raise ValueError(
             "Coinbase research runner requires positive, finite source volume"

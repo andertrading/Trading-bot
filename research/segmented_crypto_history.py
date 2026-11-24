@@ -10,6 +10,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
+import numpy as np
 import pandas as pd
 
 
@@ -17,6 +18,68 @@ _INTERVALS = {
     "15m": pd.Timedelta(minutes=15),
     "1d": pd.Timedelta(days=1),
 }
+
+
+def _refresh_segment_volume_provenance(
+    segment: pd.DataFrame,
+    source_length: int,
+) -> None:
+    """Rebase trusted source-volume counts to this contiguous segment.
+
+    DataFrame.attrs are copied by pandas when slicing. Without rebasing,
+    counts from the full Coinbase series fail the strategy's per-frame
+    consistency check after a gap split, silently suppressing valid volume
+    evidence. Untrusted or incomplete metadata is never upgraded here.
+    """
+    attrs = segment.attrs
+    quality = attrs.get("volume_quality")
+    column_present = attrs.get("volume_column_present")
+    invalid_count = attrs.get("volume_invalid_count_before_normalization")
+    positive_count = attrs.get("volume_positive_count_before_normalization")
+    zero_count = attrs.get("volume_zero_count_before_normalization")
+
+    trusted_source = (
+        quality in {"available", "contains_zero_bars"}
+        and column_present is True
+        and type(invalid_count) is int
+        and invalid_count == 0
+        and type(positive_count) is int
+        and positive_count > 0
+        and type(zero_count) is int
+        and zero_count >= 0
+        and positive_count + zero_count == source_length
+        and (quality != "available" or zero_count == 0)
+        and (quality != "contains_zero_bars" or zero_count > 0)
+    )
+    if not trusted_source:
+        return
+
+    if "Volume" not in segment.columns:
+        attrs["volume_quality"] = "missing_column"
+        attrs["volume_column_present"] = False
+        attrs["volume_zero_count_before_normalization"] = 0
+        attrs["volume_positive_count_before_normalization"] = 0
+        attrs["volume_invalid_count_before_normalization"] = len(segment)
+        return
+
+    values = pd.to_numeric(segment["Volume"], errors="coerce").to_numpy(dtype=float)
+    finite = np.isfinite(values)
+    invalid = int((~finite).sum() + ((values < 0) & finite).sum())
+    positive = int(((values > 0) & finite).sum())
+    zero = int(((values == 0) & finite).sum())
+
+    attrs["volume_column_present"] = True
+    attrs["volume_zero_count_before_normalization"] = zero
+    attrs["volume_positive_count_before_normalization"] = positive
+    attrs["volume_invalid_count_before_normalization"] = invalid
+    if invalid:
+        attrs["volume_quality"] = "invalid_or_missing_values"
+    elif positive == 0:
+        attrs["volume_quality"] = "all_zero"
+    elif zero:
+        attrs["volume_quality"] = "contains_zero_bars"
+    else:
+        attrs["volume_quality"] = "available"
 
 
 def split_contiguous_segments(
@@ -65,10 +128,11 @@ def split_contiguous_segments(
             missing_bars += int(delta / expected) - 1
 
     boundaries.append(len(data))
-    segments = [
-        data.iloc[start:end].copy()
-        for start, end in zip(boundaries, boundaries[1:])
-    ]
+    segments = []
+    for start, end in zip(boundaries, boundaries[1:]):
+        segment = data.iloc[start:end].copy()
+        _refresh_segment_volume_provenance(segment, source_length=len(data))
+        segments.append(segment)
 
     metadata = {
         "interval": interval,

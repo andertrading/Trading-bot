@@ -37,6 +37,7 @@ class FakeBacktestModule:
         self.RR_REJECTIONS = []
         self.SIGNAL_DIAGNOSTICS = []
         self.segment_lengths = []
+        self.segment_volume_metadata = []
         self.original_download = lambda *args, **kwargs: (_ for _ in ()).throw(
             AssertionError("original download function must never be called")
         )
@@ -46,6 +47,7 @@ class FakeBacktestModule:
     def run_backtest(self, asset, ticker, interval):
         data = self.download_history(ticker, interval, asset=asset)
         self.segment_lengths.append(len(data))
+        self.segment_volume_metadata.append(dict(data.attrs))
         differences = data.index.to_series().diff().dropna()
         if not (differences == pd.Timedelta(minutes=15)).all():
             raise AssertionError("runner passed a segment containing a gap")
@@ -105,6 +107,33 @@ class TestSegmentedCryptoBacktestRunner(unittest.TestCase):
         self.assertIn("not eToro executable bid/ask", result["execution_price_basis"])
         self.assertTrue(result["trade_segment_integrity"])
         self.assertTrue(result["all_segments_completed"])
+
+    def test_runner_rebases_trusted_volume_provenance_per_segment(self):
+        first = pd.date_range("2026-01-01", periods=225, freq="15min", tz="UTC")
+        second = pd.date_range(first[-1] + pd.Timedelta(hours=1), periods=226, freq="15min")
+        data = make_ohlc(first.append(second))
+        data.iloc[230, data.columns.get_loc("Volume")] = 0.0
+        data.attrs.update({
+            "volume_quality": "contains_zero_bars",
+            "volume_column_present": True,
+            "volume_zero_count_before_normalization": 1,
+            "volume_positive_count_before_normalization": len(data) - 1,
+            "volume_invalid_count_before_normalization": 0,
+        })
+        fake = FakeBacktestModule()
+
+        run_segmented_backtest(data, "BTC", "BTC-USD", "15m", backtest_module=fake)
+
+        self.assertEqual(len(fake.segment_volume_metadata), 2)
+        first_meta, second_meta = fake.segment_volume_metadata
+        self.assertEqual(first_meta["volume_quality"], "available")
+        self.assertEqual(first_meta["volume_zero_count_before_normalization"], 0)
+        self.assertEqual(first_meta["volume_positive_count_before_normalization"], 225)
+        self.assertEqual(first_meta["volume_invalid_count_before_normalization"], 0)
+        self.assertEqual(second_meta["volume_quality"], "contains_zero_bars")
+        self.assertEqual(second_meta["volume_zero_count_before_normalization"], 1)
+        self.assertEqual(second_meta["volume_positive_count_before_normalization"], 225)
+        self.assertEqual(second_meta["volume_invalid_count_before_normalization"], 0)
 
     def test_gap_free_runner_preserves_direct_engine_trade_output(self):
         index = pd.date_range(
@@ -254,6 +283,11 @@ class TestSegmentedCryptoBacktestRunner(unittest.TestCase):
                         "expected_bars": 4,
                         "received_bars": 3,
                         "missing_bars": 1,
+                        "zero_volume_bars": 0,
+                        "positive_volume_bars": 3,
+                        "invalid_or_missing_volume_bars": 0,
+                        "negative_volume_bars": 0,
+                        "volume_units": "BTC base-asset units, as reported by Coinbase Exchange",
                         "missing_timestamps_csv": "artifacts/coinbase_only/BTC_15m_missing_timestamps.csv",
                     }
                 ],
@@ -277,6 +311,17 @@ class TestSegmentedCryptoBacktestRunner(unittest.TestCase):
             self.assertEqual(loaded.attrs["volume_zero_count_before_normalization"], 0)
             self.assertEqual(loaded.attrs["volume_positive_count_before_normalization"], 3)
             self.assertEqual(loaded.attrs["volume_invalid_count_before_normalization"], 0)
+
+            manifest["series"][0]["positive_volume_bars"] = 2
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "positive_volume_bars"):
+                load_coinbase_snapshot(csv_path, manifest_path, "BTC", "15m")
+
+            manifest["series"][0]["positive_volume_bars"] = 3
+            manifest["series"][0]["volume_units"] = "quote currency units"
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "volume_units"):
+                load_coinbase_snapshot(csv_path, manifest_path, "BTC", "15m")
 
     def test_loader_rejects_non_coinbase_source_policy(self):
         with tempfile.TemporaryDirectory() as directory:
