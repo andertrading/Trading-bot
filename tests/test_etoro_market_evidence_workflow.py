@@ -11,7 +11,12 @@ class EtoroMarketEvidenceWorkflowTests(unittest.TestCase):
         self.assertIn("workflow_dispatch:", workflow)
         self.assertIn("permissions:\n  contents: read", workflow)
         self.assertIn("retention-days: 90", workflow)
-        self.assertIn("python etoro_market_evidence.py --sample-amount-usd 100", workflow)
+        self.assertIn("        env:\n          ETORO_API_KEY:", workflow)
+        self.assertIn(
+            '"etoro_market_evidence.py", "--sample-amount-usd", "100"',
+            workflow,
+        )
+        self.assertIn("subprocess.run(", workflow)
 
 
 if __name__ == "__main__":
