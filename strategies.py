@@ -272,6 +272,7 @@ def evaluate_signal_at(data, asset, timeframe, index=-1):
         and volume_positive_count > 0
         and type(volume_zero_count) is int
         and volume_zero_count >= 0
+        and volume_zero_count + volume_positive_count == len(data)
     )
 
     relative_volume = row.get(
