@@ -473,6 +473,44 @@ def _normalise_dataframe(df):
 
     df = df.copy()
 
+    # Cached frames have already passed normalization. Preserve their
+    # source-volume provenance instead of reclassifying zero-filled values
+    # as genuine all-zero provider volume on a cache hit.
+    prior_volume_metadata = {
+        "volume_quality": df.attrs.get("volume_quality"),
+        "volume_column_present": df.attrs.get("volume_column_present"),
+        "volume_zero_count_before_normalization": df.attrs.get(
+            "volume_zero_count_before_normalization"
+        ),
+        "volume_positive_count_before_normalization": df.attrs.get(
+            "volume_positive_count_before_normalization"
+        ),
+        "volume_invalid_count_before_normalization": df.attrs.get(
+            "volume_invalid_count_before_normalization"
+        ),
+    }
+    valid_volume_qualities = {
+        "missing_column",
+        "all_zero",
+        "contains_zero_bars",
+        "invalid_or_missing_values",
+        "available",
+    }
+    has_prior_volume_metadata = (
+        prior_volume_metadata["volume_quality"] in valid_volume_qualities
+        and type(prior_volume_metadata["volume_column_present"]) is bool
+        and all(
+            isinstance(prior_volume_metadata[key], int)
+            and not isinstance(prior_volume_metadata[key], bool)
+            and prior_volume_metadata[key] >= 0
+            for key in (
+                "volume_zero_count_before_normalization",
+                "volume_positive_count_before_normalization",
+                "volume_invalid_count_before_normalization",
+            )
+        )
+    )
+
     if isinstance(df.columns, pd.MultiIndex):
         required_fields = {
             "Open",
@@ -550,6 +588,19 @@ def _normalise_dataframe(df):
         volume_invalid_count = 0
         volume_quality = "missing_column"
         df["Volume"] = 0.0
+
+    if has_prior_volume_metadata:
+        volume_quality = prior_volume_metadata["volume_quality"]
+        volume_column_present = prior_volume_metadata["volume_column_present"]
+        volume_zero_count = prior_volume_metadata[
+            "volume_zero_count_before_normalization"
+        ]
+        volume_positive_count = prior_volume_metadata[
+            "volume_positive_count_before_normalization"
+        ]
+        volume_invalid_count = prior_volume_metadata[
+            "volume_invalid_count_before_normalization"
+        ]
 
     df = df[COLUMNS].copy()
 
