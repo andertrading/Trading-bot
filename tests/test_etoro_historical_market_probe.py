@@ -6,6 +6,7 @@ from etoro_read_only import EtoroAPIError, EtoroResponse
 from etoro_historical_market_probe import (
     EtoroHistoricalMarketDataClient,
     normalize_candle_history,
+    run_probe,
 )
 
 
@@ -85,6 +86,45 @@ class HistoricalMarketProbeTests(unittest.TestCase):
         with self.assertRaises(EtoroAPIError):
             client._request("GET", "/api/v1/trading/info/real/pnl")
         self.assertEqual(session.request.call_count, 1)
+
+    def test_run_probe_preserves_successful_results_when_one_request_fails(self):
+        class PartiallyFailingClient:
+            def get_candle_history(self, instrument_id, interval, candles_count, direction):
+                if instrument_id == 123 and interval == "FifteenMinutes":
+                    raise EtoroAPIError("eToro devolvió HTTP 503")
+                return EtoroResponse({
+                    "interval": interval,
+                    "candles": [{
+                        "instrumentId": instrument_id,
+                        "candles": [candle(iid=instrument_id)],
+                    }],
+                }, 200, {})
+
+        result = run_probe(
+            PartiallyFailingClient(),
+            {"BTC": 123, "ETH": 124},
+            100,
+        )
+
+        self.assertEqual(result["status"], "PARTIAL")
+        self.assertEqual(len(result["errors"]), 1)
+        self.assertEqual(result["errors"][0]["asset"], "BTC")
+        self.assertEqual(
+            result["assets"]["BTC"]["intervals"]["FifteenMinutes"]["status"],
+            "ERROR",
+        )
+        self.assertEqual(
+            result["assets"]["BTC"]["intervals"]["OneDay"]["status"],
+            "DATA_RETURNED",
+        )
+        self.assertEqual(
+            result["assets"]["ETH"]["intervals"]["FifteenMinutes"]["status"],
+            "DATA_RETURNED",
+        )
+        self.assertEqual(
+            result["assets"]["ETH"]["intervals"]["OneDay"]["status"],
+            "DATA_RETURNED",
+        )
 
     def test_rejects_invalid_count_and_interval_before_network(self):
         session = Mock()
