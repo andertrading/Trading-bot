@@ -32,6 +32,20 @@ class FakeBacktestModule:
 
 
 
+class DiagnosticRecordingBacktestModule(FakeBacktestModule):
+    def run_backtest(self, asset, ticker, interval):
+        self.received = self.download_history(ticker, interval, asset=asset)
+        self.SIGNAL_DIAGNOSTICS.append({
+            "asset": asset,
+            "signal_status": "SKIPPED_OVERLAPPING_TRADE",
+            "score": 80,
+        })
+        self.RR_REJECTIONS.append({"asset": asset, "reason": "RR too low"})
+        self.EXCLUDED_OHLC_CANDLES.append({"asset": asset, "reason": "invalid OHLC"})
+        self.DOWNLOAD_ERRORS[(ticker, interval)] = "diagnostic fixture"
+        return [], None
+
+
 class StrategyCheckingBacktestModule(FakeBacktestModule):
     def __init__(self):
         super().__init__()
@@ -91,6 +105,41 @@ def make_segment():
 
 
 class TestSegmentedCryptoWalkforwardProvenance(unittest.TestCase):
+    def test_fold_preserves_candidate_and_rejection_diagnostics(self):
+        segment = make_segment()
+        fake = DiagnosticRecordingBacktestModule()
+
+        result = run_oos_fold(
+            segment,
+            "BTC",
+            "BTC-USD",
+            "15m",
+            "validation",
+            300,
+            399,
+            fake,
+        )
+
+        self.assertEqual(
+            result["signal_diagnostics"],
+            [{
+                "asset": "BTC",
+                "signal_status": "SKIPPED_OVERLAPPING_TRADE",
+                "score": 80,
+            }],
+        )
+        self.assertEqual(result["rr_rejections"][0]["reason"], "RR too low")
+        self.assertEqual(result["excluded_ohlc_candles"][0]["reason"], "invalid OHLC")
+        self.assertEqual(
+            result["download_errors"],
+            {("BTC-USD", "15m"): "diagnostic fixture"},
+        )
+        # run_oos_fold must still restore the module's original mutable state.
+        self.assertEqual(fake.SIGNAL_DIAGNOSTICS, [])
+        self.assertEqual(fake.RR_REJECTIONS, [])
+        self.assertEqual(fake.EXCLUDED_OHLC_CANDLES, [])
+        self.assertEqual(fake.DOWNLOAD_ERRORS, {})
+
     def test_validation_prefix_rebases_volume_counts_before_strategy(self):
         segment = make_segment()
         fake = FakeBacktestModule()
