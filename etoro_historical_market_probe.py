@@ -80,7 +80,11 @@ def normalize_candle_history(response: Any, instrument_id: int, expected_interva
             raise EtoroAPIError(f"Vela {index}: fromDate inválido") from None
         if parsed.tzinfo is None or parsed.utcoffset() != timezone.utc.utcoffset(parsed):
             raise EtoroAPIError(f"Vela {index}: timestamp sin UTC explícito")
-        if parsed in seen:
+        is_duplicate_timestamp = parsed in seen
+        # eToro daily history can contain two distinct bars with the same UTC
+        # date around DST transitions. Preserve both and flag them; intraday
+        # duplicates remain a hard validation error.
+        if is_duplicate_timestamp and expected_interval != "OneDay":
             raise EtoroAPIError(f"Vela duplicada: {timestamp}")
         seen.add(parsed)
         o = _number(item.get("open"), f"{index}.open")
@@ -91,7 +95,12 @@ def normalize_candle_history(response: Any, instrument_id: int, expected_interva
             raise EtoroAPIError(f"Vela {index}: OHLC inconsistente")
         volume_raw = item.get("volume")
         volume = None if volume_raw is None else _number(volume_raw, f"{index}.volume", allow_zero=True)
-        normalized.append({"timestamp": parsed.isoformat(), "open": str(o), "high": str(h), "low": str(low), "close": str(c), "volume": None if volume is None else str(volume)})
+        normalized.append({
+            "timestamp": parsed.isoformat(),
+            "timestamp_duplicate": is_duplicate_timestamp,
+            "open": str(o), "high": str(h), "low": str(low), "close": str(c),
+            "volume": None if volume is None else str(volume),
+        })
     timestamps = [datetime.fromisoformat(item["timestamp"]) for item in normalized]
     if timestamps != sorted(timestamps):
         raise EtoroAPIError("Las velas no están ordenadas cronológicamente")
@@ -129,6 +138,7 @@ def run_probe(client: EtoroHistoricalMarketDataClient, instruments: Mapping[str,
             "OHLCV history is not assumed to represent executable bid/ask prices.",
             "Corporate-action adjustment basis is not established by this probe.",
             "Volume may be zero or unavailable and is not presumed comparable.",
+            "eToro daily history may contain repeated UTC timestamps around daylight-saving transitions; such bars are preserved and flagged, not deduplicated.",
             "A successful response does not establish complete historical coverage.",
             "No account, portfolio, position, balance, PnL, order, or trade-history endpoint is called."
         ]
@@ -170,6 +180,8 @@ def run_probe(client: EtoroHistoricalMarketDataClient, instruments: Mapping[str,
                 "latest_timestamp": timestamps[-1] if timestamps else None,
                 "zero_volume_candles": sum(value == "0" for value in volumes),
                 "missing_volume_candles": sum(value is None for value in volumes),
+                "duplicate_timestamp_candles": sum(candle["timestamp_duplicate"] for candle in candles),
+                "duplicate_timestamps": sorted({candle["timestamp"] for candle in candles if candle["timestamp_duplicate"]}),
                 "candles": candles
             }
     if report["errors"]:
