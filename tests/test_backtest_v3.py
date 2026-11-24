@@ -222,6 +222,38 @@ class TestBacktestV3(unittest.TestCase):
         live_mock.assert_called_once_with("AAPL", "15m")
         self.assertEqual(backtest_v3._provider_for_asset("AAPL", "15m"), "twelvedata")
 
+    def test_live_download_preserves_volume_provenance_through_indicators(self):
+        data = self.make_data()
+        data.attrs.update({
+            "volume_quality": "available",
+            "volume_column_present": True,
+            "volume_zero_count_before_normalization": 0,
+            "volume_positive_count_before_normalization": len(data),
+            "volume_invalid_count_before_normalization": 0,
+        })
+
+        with (
+            patch.object(backtest_v3, "BACKTEST_DATA_MODE", "download"),
+            patch.object(backtest_v3, "download_data", return_value=data),
+            patch.object(backtest_v3, "_save_snapshot", return_value=None),
+        ):
+            downloaded = backtest_v3.download_history(
+                "AAPL", "15m", asset="AAPL"
+            )
+
+        self.assertIsNotNone(downloaded)
+        indicated = backtest_v3.add_indicators(downloaded)
+        self.assertEqual(indicated.attrs["volume_quality"], "available")
+        self.assertTrue(indicated.attrs["volume_column_present"])
+        self.assertEqual(
+            indicated.attrs["volume_positive_count_before_normalization"],
+            len(data),
+        )
+        self.assertEqual(
+            indicated.attrs["volume_invalid_count_before_normalization"],
+            0,
+        )
+
     def test_daily_backtest_history_is_capped_to_two_years(self):
         index = pd.date_range(
             "2010-01-01",
