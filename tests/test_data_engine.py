@@ -238,6 +238,41 @@ class TestDataNormalisation(unittest.TestCase):
             len(df),
         )
 
+    def test_re_normalization_preserves_missing_volume_provenance(self):
+        original = self.df.drop(columns=["volume"])
+
+        first_pass = engine._normalise_dataframe(original)
+        second_pass = engine._normalise_dataframe(first_pass)
+
+        self.assertIsNotNone(second_pass)
+        self.assertEqual(second_pass.attrs["volume_quality"], "missing_column")
+        self.assertFalse(second_pass.attrs["volume_column_present"])
+        self.assertEqual(
+            second_pass.attrs["volume_zero_count_before_normalization"],
+            len(original),
+        )
+        self.assertEqual(
+            second_pass.attrs["volume_positive_count_before_normalization"],
+            0,
+        )
+
+    def test_re_normalization_preserves_invalid_volume_provenance(self):
+        original = self.df.copy()
+        original.loc[self.index[1], "volume"] = np.inf
+
+        first_pass = engine._normalise_dataframe(original)
+        second_pass = engine._normalise_dataframe(first_pass)
+
+        self.assertIsNotNone(second_pass)
+        self.assertEqual(
+            second_pass.attrs["volume_quality"],
+            "invalid_or_missing_values",
+        )
+        self.assertEqual(
+            second_pass.attrs["volume_invalid_count_before_normalization"],
+            1,
+        )
+
     def test_marks_all_zero_volume_as_unusable_for_volume_research(self):
         df = self.df.copy()
         df["volume"] = 0
