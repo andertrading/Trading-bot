@@ -14,7 +14,7 @@ This is an evaluation of the manually dispatched shadow workflow, not a strategy
 - Artifact SHA-256: `a0a829d40dbf543d87c4c4bd010f4d58c0846def98618b48255c4ba67fff179a`.
 - Ten output JSON files: BTC, ETH, SOL, XLM and XRP, each at 1h and 4h.
 - All ten files report `network_requests = 0`, `research_only = true`, `production_changes = false`, `all_trades_inside_oos_fold = true`, and `verified_cost_adjusted_total_R = null`.
-- Total: 826 OOS trades: 533? No — 1h has 666 (423 validation, 243 test); 4h has 160 (110 validation, 50 test).
+- Total: 826 OOS trades: 1h has 666 (423 validation, 243 test); 4h has 160 (110 validation, 50 test).
 - Coinbase Exchange OHLC is not established as eToro executable bid/ask. No verified round-trip cost is available.
 
 ## Resampling and data quality
