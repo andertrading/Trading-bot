@@ -116,10 +116,11 @@ def run_probe(client: EtoroHistoricalMarketDataClient, instruments: Mapping[str,
     report = {
         "schema_version": 1, "captured_at_utc": datetime.now(timezone.utc).isoformat(),
         "source": "eToro Public API Market Data historical candles",
-        "mode": "READ_ONLY_MARKET_DATA_ONLY", "account_or_portfolio_data_accessed": False,
+        "mode": "READ_ONLY_MARKET_DATA_ONLY", "status": "COMPLETE",
+        "account_or_portfolio_data_accessed": False,
         "orders_or_trades_submitted": False, "provider_credits_used": False,
         "requested_candles_per_asset_interval": candles_count, "intervals": list(INTERVALS),
-        "assets": {}, "limitations": [
+        "assets": {}, "errors": [], "limitations": [
             "OHLCV history is not assumed to represent executable bid/ask prices.",
             "Corporate-action adjustment basis is not established by this probe.",
             "Volume may be zero or unavailable and is not presumed comparable.",
@@ -131,18 +132,43 @@ def run_probe(client: EtoroHistoricalMarketDataClient, instruments: Mapping[str,
         item = {"instrument_id": instrument_id, "intervals": {}}
         report["assets"][symbol] = item
         for interval in INTERVALS:
-            response = client.get_candle_history(instrument_id, interval, candles_count, "asc")
-            candles = normalize_candle_history(response, instrument_id, interval)
+            try:
+                response = client.get_candle_history(instrument_id, interval, candles_count, "asc")
+                candles = normalize_candle_history(response, instrument_id, interval)
+            except EtoroAPIError as exc:
+                error = {
+                    "asset": symbol,
+                    "instrument_id": instrument_id,
+                    "interval": interval,
+                    "error_type": type(exc).__name__,
+                    "message": str(exc)[:240],
+                }
+                report["errors"].append(error)
+                item["intervals"][interval] = {
+                    "status": "ERROR",
+                    "returned_candles": None,
+                    "earliest_timestamp": None,
+                    "latest_timestamp": None,
+                    "zero_volume_candles": None,
+                    "missing_volume_candles": None,
+                    "error_type": error["error_type"],
+                    "error": error["message"],
+                }
+                continue
+
             volumes = [candle["volume"] for candle in candles]
             timestamps = [candle["timestamp"] for candle in candles]
             item["intervals"][interval] = {
-                "status": "DATA_RETURNED" if candles else "EMPTY", "returned_candles": len(candles),
+                "status": "DATA_RETURNED" if candles else "EMPTY",
+                "returned_candles": len(candles),
                 "earliest_timestamp": timestamps[0] if timestamps else None,
                 "latest_timestamp": timestamps[-1] if timestamps else None,
                 "zero_volume_candles": sum(value == "0" for value in volumes),
                 "missing_volume_candles": sum(value is None for value in volumes),
                 "candles": candles
             }
+    if report["errors"]:
+        report["status"] = "PARTIAL"
     return report
 
 def main() -> int:
@@ -159,9 +185,9 @@ def main() -> int:
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
-    summary = {symbol: {interval: {key: value[key] for key in ("status", "returned_candles", "earliest_timestamp", "latest_timestamp")} for interval, value in item["intervals"].items()} for symbol, item in report["assets"].items()}
-    print(json.dumps({"output": str(output), "summary": summary}, indent=2))
-    return 0
+    summary = {symbol: {interval: {key: value.get(key) for key in ("status", "returned_candles", "earliest_timestamp", "latest_timestamp")} for interval, value in item["intervals"].items()} for symbol, item in report["assets"].items()}
+    print(json.dumps({"output": str(output), "status": report["status"], "errors": len(report["errors"]), "summary": summary}, indent=2))
+    return 1 if report["errors"] else 0
 
 if __name__ == "__main__":
     raise SystemExit(main())
