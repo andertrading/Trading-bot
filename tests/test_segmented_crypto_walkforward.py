@@ -36,8 +36,12 @@ class StrategyCheckingBacktestModule(FakeBacktestModule):
     def __init__(self):
         super().__init__()
         self.signal_result = None
+        # FakeBacktestModule installs an instance-level no-op evaluator;
+        # replace it with the real strategy adapter for this integration test.
+        self.evaluate_signal_at = self._evaluate
 
-    def evaluate_signal_at(self, data, asset, timeframe, index):
+    @staticmethod
+    def _evaluate(data, asset, timeframe, index):
         return evaluate_strategy_signal(asset, data, timeframe)
 
     def run_backtest(self, asset, ticker, interval):
