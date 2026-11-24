@@ -54,15 +54,29 @@ class HistoricalMarketProbeTests(unittest.TestCase):
         with self.assertRaises(EtoroAPIError):
             normalize_candle_history(response, 123, "OneDay")
 
-    def test_rejects_duplicate_and_nonchronological_timestamps(self):
+    def test_preserves_and_flags_duplicate_daily_timestamps(self):
         duplicate = EtoroResponse({
             "interval": "OneDay",
+            "candles": [{"instrumentId": 123, "candles": [
+                candle(stamp="2024-11-03T00:00:00Z", close=103),
+                candle(stamp="2024-11-03T00:00:00Z", close=104),
+            ]}],
+        }, 200, {})
+        result = normalize_candle_history(duplicate, 123, "OneDay")
+        self.assertEqual(len(result), 2)
+        self.assertFalse(result[0]["timestamp_duplicate"])
+        self.assertTrue(result[1]["timestamp_duplicate"])
+        self.assertEqual([item["close"] for item in result], ["103", "104"])
+
+    def test_rejects_duplicate_intraday_timestamps_and_nonchronological_timestamps(self):
+        duplicate = EtoroResponse({
+            "interval": "FifteenMinutes",
             "candles": [{"instrumentId": 123, "candles": [
                 candle(), candle(stamp="2026-11-20T10:00:00Z")
             ]}],
         }, 200, {})
         with self.assertRaises(EtoroAPIError):
-            normalize_candle_history(duplicate, 123, "OneDay")
+            normalize_candle_history(duplicate, 123, "FifteenMinutes")
         reverse = EtoroResponse({
             "interval": "OneDay",
             "candles": [{"instrumentId": 123, "candles": [
