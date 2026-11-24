@@ -184,6 +184,16 @@ class TestSegmentedCryptoWalkforwardProvenance(unittest.TestCase):
         )
         self.assertEqual(rejection["score"], 55)
         self.assertEqual(rejection["signal_time"], segment.index[399].isoformat())
+        self.assertFalse(rejection["score_component_price_above_ema20"])
+        self.assertTrue(rejection["score_component_ema20_above_ema50"])
+        self.assertTrue(rejection["score_component_ema50_above_ema200"])
+        self.assertTrue(rejection["score_component_rsi_favorable"])
+        self.assertTrue(rejection["score_component_macd_bullish"])
+        self.assertFalse(rejection["score_component_breakout_20"])
+        self.assertTrue(rejection["volume_provenance_valid"])
+        self.assertTrue(rejection["volume_bonus_eligible"])
+        self.assertEqual(rejection["atr_limit_percent"], 5.0)
+        self.assertFalse(rejection["atr_exceeds_limit"])
         self.assertEqual(fake.evaluate_signal_at.__name__, "<lambda>")
 
     def test_validation_prefix_rebases_volume_counts_before_strategy(self):
