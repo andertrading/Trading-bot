@@ -453,15 +453,24 @@ def normalize_realtime_quotes(
                 f"adelantada_segundos={-age_seconds:.3f}"
             )
         if age_seconds > max_age_seconds:
+            quote_age_context = (
+                f"timestamp={quote_time.isoformat()}, "
+                f"age_seconds={age_seconds:.3f}, "
+                f"max_age_seconds={max_age_seconds}"
+            )
             calendar_name = (asset_calendars or {}).get(instrument_id)
             if not calendar_name or calendar_name == "24/7":
-                raise EtoroAPIError(f"Cotización obsoleta para instrumento {instrument_id}")
+                raise EtoroAPIError(
+                    f"Cotización obsoleta para instrumento {instrument_id} "
+                    f"({quote_age_context}, calendar={calendar_name or 'unknown'})"
+                )
             market_is_open, last_session_open, last_session_close = (
                 _last_completed_exchange_session(calendar_name, now_utc)
             )
             if market_is_open:
                 raise EtoroAPIError(
-                    f"Cotización obsoleta con mercado abierto para instrumento {instrument_id}"
+                    f"Cotización obsoleta con mercado abierto para instrumento {instrument_id} "
+                    f"({quote_age_context}, calendar={calendar_name})"
                 )
             if (
                 quote_time < last_session_open
