@@ -20,6 +20,7 @@ class EtoroHistoricalCandleWorkflowTests(unittest.TestCase):
             "Capture historical market candles only\n        continue-on-error: true",
             workflow,
         )
+        self.assertIn("        env:\n          ETORO_API_KEY:", workflow)
         self.assertIn("Evaluate historical capture status", workflow)
         self.assertIn('status == "PARTIAL"', workflow)
         self.assertIn("::warning::", workflow)
@@ -28,7 +29,11 @@ class EtoroHistoricalCandleWorkflowTests(unittest.TestCase):
         self.assertIn('cron: "15 0 * * 0"', workflow)
         self.assertIn("workflow_dispatch:", workflow)
         self.assertIn("permissions:\n  contents: read", workflow)
-        self.assertIn("--interval 1d --count 1000 --min-candles 220", workflow)
+        self.assertIn(
+            '"etoro_historical_candles.py", "--interval", "1d", "--count", "1000", "--min-candles", "220"',
+            workflow,
+        )
+        self.assertIn("subprocess.run(", workflow)
         self.assertIn("retention-days: 90", workflow)
         self.assertNotIn("trading/execution", workflow)
 
