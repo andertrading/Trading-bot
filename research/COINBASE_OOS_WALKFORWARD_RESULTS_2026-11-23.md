@@ -107,3 +107,36 @@ This remains a gross trade-R uncertainty diagnostic, not a portfolio backtest. I
 ## Follow-up: shared portfolio simulation
 
 The OOS trade set has now also been evaluated through the shared virtual portfolio allocator. See [COINBASE_OOS_PORTFOLIO_SIMULATION_2026-11-23.md](COINBASE_OOS_PORTFOLIO_SIMULATION_2026-11-23.md) and its machine-readable summary.
+
+## Current-main reproducibility replay — 2026-11-24
+
+After the volume-provenance gate and the segment/fold-prefix fixes were merged, the retained Coinbase-only source artifact was replayed again using current `main` code. No market data was downloaded.
+
+- Current main commit used: `27889a59834be169c54303215f45be064f7daa5c`.
+- Walk-forward workflow run: [45483870105](https://github.com/andertrading/Trading-bot/actions/runs/45483870105).
+- Output artifact: [coinbase-oos-walkforward-45483870105](https://github.com/andertrading/Trading-bot/actions/runs/45483870105/artifacts/14963486171).
+- Output artifact ZIP SHA-256: `e75560036797b9b2c18a0ca6e6d2fbd89babaa5de7a36c7a2af8cbee2fa23bf8`.
+- Ten series were regenerated; all 21 test folds passed their boundary checks; every output reports zero network requests and null verified cost-adjusted results.
+
+### Reproduction comparison
+
+The final current-main replay matches the prior retained walk-forward artifact from run `45245448676` exactly on trade identity and key execution fields:
+
+- 1,609 validation trades: exact match.
+- 1,252 test trades: exact match across all 21 test folds.
+- Matching fields include asset, timeframe, signal/entry/exit timestamps, result R, score, entry, stop, target, and exit reason.
+
+An intermediate current-main replay (`45483176162`) exposed a defect: the validation fold's causal prefix retained full-segment volume counts, so valid volume evidence was rejected for validation only. PR #243 fixed the prefix rebasing. The intermediate run is superseded; the final run above is the reproducible result.
+
+### Final interpretation
+
+The replay confirms the previously reported gross results; it does not improve them:
+
+- M15: 1,247 test trades, +6.8635 R gross, +0.00550 R/trade, PF 1.0088.
+- Daily: 5 test trades, -1.9913 R gross; sample too small for a useful conclusion.
+- Combined: 1,252 test trades, +4.8722 R gross, PF 1.0062.
+- Complete verified costs: 0/1,252 trades. Net expectancy remains unknown and must not be treated as positive.
+
+The source remains Coinbase Exchange spot OHLC, not eToro executable bid/ask. This replay is research-only and does not approve a strategy for production.
+
+Post-merge main CI for the replay code: [run 45483845240](https://github.com/andertrading/Trading-bot/actions/runs/45483845240) — 16 root tests, 892 tests under `tests/`, and Bot.py startup/route smoke test passed.
