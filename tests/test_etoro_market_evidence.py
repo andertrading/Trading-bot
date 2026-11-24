@@ -77,7 +77,7 @@ class MarketEvidenceTests(unittest.TestCase):
         self.assertEqual(client.cost_payloads[0]["settlementType"], "real")
         self.assertEqual(client.cost_payloads[0]["leverage"], 1)
 
-    def test_market_spread_crosscheck_flags_divergence_without_changing_capture_status(self):
+    def test_open_only_market_spread_component_is_not_compared_to_full_quote_spread(self):
         client = FakeMarketEvidenceClient()
         report = collect_market_evidence(
             client,
@@ -85,11 +85,13 @@ class MarketEvidenceTests(unittest.TestCase):
             now_utc=datetime(2026, 11, 22, 12, 0, tzinfo=timezone.utc),
         )
         crosscheck = report["assets"]["AAPL"]["market_spread_crosscheck"]
-        self.assertEqual(crosscheck["status"], "DIVERGENCE")
+        self.assertEqual(crosscheck["status"], "OPEN_ONLY_COMPONENT_NOT_COMPARABLE")
         self.assertEqual(crosscheck["quote_full_spread_reference_usd"], "2")
+        self.assertEqual(crosscheck["quote_one_sided_half_spread_reference_usd"], "1")
         self.assertEqual(crosscheck["api_market_spread_usd"], "0.20")
-        self.assertEqual(crosscheck["difference_api_minus_quote_reference_usd"], "-1.80")
-        self.assertEqual(report["summary"]["assets_with_market_spread_cost_divergence"], 1)
+        self.assertIsNone(crosscheck["difference_api_minus_quote_reference_usd"])
+        self.assertEqual(report["summary"]["assets_with_market_spread_cost_divergence"], 0)
+        self.assertEqual(report["summary"]["assets_with_noncomparable_open_only_market_spread_components"], 1)
         self.assertEqual(report["summary"]["status"], "COMPLETE")
 
     def test_market_spread_crosscheck_flags_omitted_api_component(self):

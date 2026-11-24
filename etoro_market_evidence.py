@@ -79,7 +79,14 @@ def _real_unleveraged_long_config(item: EtoroInstrumentEligibility) -> Mapping[s
 
 def _market_spread_crosscheck(quote: Mapping[str, Any] | None,
                              open_cost: Mapping[str, Any] | None) -> dict[str, Any] | None:
-    """Compare quote-derived spread with eToro's open-cost component (diagnostic only)."""
+    """Retain quote and open-cost references without comparing unlike scopes.
+
+    The quote-derived value is the full bid/ask spread. The eToro what-if
+    component comes from an OPEN-only request; the retained API contract does
+    not define whether its marketSpread amount is a full spread, one-sided
+    crossing cost, or another broker calculation. A numeric divergence test
+    would therefore compare unproven semantics and is intentionally disabled.
+    """
     if not isinstance(quote, Mapping) or not isinstance(open_cost, Mapping):
         return None
     if open_cost.get("scope") != "HYPOTHETICAL_OPEN_ONLY":
@@ -89,20 +96,21 @@ def _market_spread_crosscheck(quote: Mapping[str, Any] | None,
     components = open_cost.get("cost_components_usd")
     if spread_bps is None or amount is None or not isinstance(components, Mapping):
         return None
-    quote_reference = Decimal(str(amount)) * Decimal(str(spread_bps)) / Decimal("10000")
+    quote_full_spread = Decimal(str(amount)) * Decimal(str(spread_bps)) / Decimal("10000")
     api_market_spread = components.get("marketSpread")
     result = {
         "reference_method": "sample_notional_usd * quote_spread_bps / 10000",
-        "reference_scope": "DIAGNOSTIC_ONLY_NOT_A_CONFIRMED_EXECUTION_COST",
-        "quote_full_spread_reference_usd": format(quote_reference, "f"),
+        "reference_scope": "FULL_BID_ASK_SPREAD_REFERENCE_NOT_A_CONFIRMED_EXECUTION_COST",
+        "quote_full_spread_reference_usd": format(quote_full_spread, "f"),
+        "quote_one_sided_half_spread_reference_usd": format(quote_full_spread / Decimal("2"), "f"),
         "api_market_spread_usd": str(api_market_spread) if api_market_spread is not None else None,
+        "api_market_spread_scope": "HYPOTHETICAL_OPEN_ONLY_SEMANTICS_NOT_CONFIRMED",
         "difference_api_minus_quote_reference_usd": None,
-        "status": "API_COMPONENT_OMITTED",
+        "status": (
+            "OPEN_ONLY_COMPONENT_NOT_COMPARABLE"
+            if api_market_spread is not None else "API_COMPONENT_OMITTED"
+        ),
     }
-    if api_market_spread is not None:
-        difference = Decimal(str(api_market_spread)) - quote_reference
-        result["difference_api_minus_quote_reference_usd"] = format(difference, "f")
-        result["status"] = "WITHIN_ONE_CENT" if abs(difference) <= Decimal("0.01") else "DIVERGENCE"
     return result
 
 def collect_market_evidence(client: Any, *, symbols: Mapping[str, Mapping[str, Any]] | None = None,
@@ -334,6 +342,7 @@ def collect_market_evidence(client: Any, *, symbols: Mapping[str, Mapping[str, A
     )
     spread_crosschecks = [item.get("market_spread_crosscheck") or {} for item in report["assets"].values()]
     spread_cost_divergences = sum(item.get("status") == "DIVERGENCE" for item in spread_crosschecks)
+    spread_cost_noncomparable = sum(item.get("status") == "OPEN_ONLY_COMPONENT_NOT_COMPARABLE" for item in spread_crosschecks)
     spread_cost_component_omissions = sum(item.get("status") == "API_COMPONENT_OMITTED" for item in spread_crosschecks)
     last_session_quotes = sum(
         (item.get("quote") or {}).get("quote_type") == "last_session"
@@ -363,6 +372,7 @@ def collect_market_evidence(client: Any, *, symbols: Mapping[str, Mapping[str, A
         "assets_with_missing_eligibility": missing_eligibility,
         "assets_with_validated_open_costs": validated_open_costs,
         "assets_with_market_spread_cost_divergence": spread_cost_divergences,
+        "assets_with_noncomparable_open_only_market_spread_components": spread_cost_noncomparable,
         "assets_with_omitted_market_spread_cost_component": spread_cost_component_omissions,
         "status": (
             "COMPLETE"
