@@ -104,7 +104,12 @@ def load_instrument_ids(registry_path: Path) -> dict[str, int]:
         raise ValueError("El registro económico no contiene assets")
     result = {}
     for symbol, item in assets.items():
-        iid = item.get("instrument", {}).get("etoro_instrument_id")
+        if not isinstance(item, Mapping):
+            raise ValueError(f"Registro de instrumento inválido para {symbol}")
+        instrument = item.get("instrument")
+        if not isinstance(instrument, Mapping) or instrument.get("confirmed") is not True:
+            raise ValueError(f"Metadatos de instrumento no confirmados para {symbol}")
+        iid = instrument.get("etoro_instrument_id")
         if isinstance(iid, bool) or not isinstance(iid, int) or iid <= 0:
             raise ValueError(f"instrumentId no confirmado para {symbol}")
         result[symbol] = iid
