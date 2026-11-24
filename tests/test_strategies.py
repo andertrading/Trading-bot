@@ -433,6 +433,20 @@ class TestStrategies(unittest.TestCase):
                     result.get("reasons", []),
                 )
 
+    def test_inconsistent_volume_provenance_counts_suppress_bonus(self):
+        data = make_valid_data()
+        data.attrs.update({
+            "volume_quality": "available",
+            "volume_column_present": True,
+            "volume_invalid_count_before_normalization": 0,
+            "volume_positive_count_before_normalization": MIN_BARS - 1,
+            "volume_zero_count_before_normalization": 0,
+        })
+
+        result = evaluate_signal_at("AAPL", data, "1d")
+
+        self.assertNotIn("Volumen superior a la media", result.get("reasons", []))
+
     def test_genuine_zero_volume_bars_can_still_qualify(self):
         data = make_valid_data()
         data.attrs.update({
