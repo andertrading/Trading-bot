@@ -12,6 +12,16 @@ Analysis of retained artifacts from [Actions run 45486134324](https://github.com
 
 This analysis uses only retained market-history artifacts. No account, portfolio, balance, holdings, positions, PnL, orders, or trade-history endpoint was accessed. No additional eToro or provider request was made for this audit.
 
+## Official API contract cross-check
+
+The current official eToro documentation confirms that the historical-candle endpoint returns OHLCV chart candles, accepts intervals from one minute through one week, and has a hard maximum of 1,000 candles per request. The documented response schema does not identify bid/ask sides or an execution-price basis. The API page also groups candle history and current market-rate retrieval into a shared 120-requests-per-60-seconds market-data quota.
+
+The separate current-rates endpoint is `GET /api/v2/market-data/rates`. It returns `bid`, `ask`, `date`, and `quoteType`, where `quoteType` is `realtime` or `delayed`; HTTP 206 means only a subset of requested instruments was returned. The existing read-only client rejects delayed v2 quotes and applies timestamp freshness validation. This is a current quote endpoint, not historical bid/ask history.
+
+Official references:
+- [Get instrument candle history](https://api-portal.etoro.com/api-reference/market-data/get-instrument-candle-history)
+- [Retrieve bid/ask rates for one or more instruments](https://api-portal.etoro.com/api-reference/market-data/retrieve-bidask-rates-for-one-or-more-instruments)
+
 ## Collection quality
 
 All 12 configured instruments resolved and no request-level errors were recorded, but the overall capture status is `PARTIAL`.
