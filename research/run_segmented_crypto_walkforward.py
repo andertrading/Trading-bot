@@ -23,7 +23,10 @@ import pandas as pd
 from research.run_segmented_crypto_backtest import (
     load_coinbase_snapshot,
 )
-from research.segmented_crypto_history import split_contiguous_segments
+from research.segmented_crypto_history import (
+    refresh_segment_volume_provenance,
+    split_contiguous_segments,
+)
 
 
 def run_oos_fold(
@@ -61,6 +64,16 @@ def run_oos_fold(
     start_time = segment.index[start_index]
     end_time = segment.index[end_index]
 
+    # The full contiguous segment carries source-volume counts for its full
+    # length. This fold receives only the causal prefix ending at end_index,
+    # so rebase trusted counts to that exact prefix before the strategy score
+    # gate evaluates provenance. Untrusted metadata remains untrusted.
+    history_prefix = segment.iloc[: end_index + 1].copy()
+    refresh_segment_volume_provenance(
+        history_prefix,
+        source_length=len(segment),
+    )
+
     def filtered_evaluator(*args, **kwargs):
         frame = kwargs.get("data")
         index = kwargs.get("index")
@@ -77,7 +90,7 @@ def run_oos_fold(
 
     try:
         backtest_module.download_history = (
-            lambda _ticker, _interval, asset=None: segment.iloc[: end_index + 1].copy()
+            lambda _ticker, _interval, asset=None: history_prefix.copy()
         )
         backtest_module.evaluate_signal_at = filtered_evaluator
         trades, error = backtest_module.run_backtest(asset, ticker, interval)
