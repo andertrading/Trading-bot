@@ -16,6 +16,8 @@ import pandas as pd
 
 _INTERVALS = {
     "15m": pd.Timedelta(minutes=15),
+    "1h": pd.Timedelta(hours=1),
+    "4h": pd.Timedelta(hours=4),
     "1d": pd.Timedelta(days=1),
 }
 
