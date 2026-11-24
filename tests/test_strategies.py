@@ -368,6 +368,99 @@ class TestStrategies(unittest.TestCase):
             msg=str(result),
         )
 
+    def test_volume_bonus_requires_explicit_valid_provenance(self):
+        data = make_valid_data()
+        data.attrs.update({
+            "volume_quality": "available",
+            "volume_column_present": True,
+            "volume_invalid_count_before_normalization": 0,
+            "volume_positive_count_before_normalization": MIN_BARS,
+            "volume_zero_count_before_normalization": 0,
+        })
+
+        result = evaluate_signal_at("AAPL", data, "1d")
+
+        self.assertIn("Volumen superior a la media", result["reasons"])
+
+    def test_partial_invalid_volume_provenance_suppresses_bonus(self):
+        data = make_valid_data()
+        data.attrs.update({
+            "volume_quality": "invalid_or_missing_values",
+            "volume_column_present": True,
+            "volume_invalid_count_before_normalization": 1,
+            "volume_positive_count_before_normalization": MIN_BARS - 1,
+            "volume_zero_count_before_normalization": 0,
+        })
+
+        result = evaluate_signal_at("AAPL", data, "1d")
+
+        self.assertEqual(result["action"], "BUY CANDIDATE", msg=str(result))
+        self.assertNotIn("Volumen superior a la media", result["reasons"])
+
+    def test_missing_or_untrusted_volume_provenance_suppresses_bonus(self):
+        metadata_cases = (
+            {},
+            {
+                "volume_quality": "unknown",
+                "volume_column_present": True,
+                "volume_invalid_count_before_normalization": 0,
+                "volume_positive_count_before_normalization": MIN_BARS,
+                "volume_zero_count_before_normalization": 0,
+            },
+            {
+                "volume_quality": "available",
+                "volume_column_present": False,
+                "volume_invalid_count_before_normalization": 0,
+                "volume_positive_count_before_normalization": MIN_BARS,
+                "volume_zero_count_before_normalization": 0,
+            },
+            {
+                "volume_quality": "available",
+                "volume_column_present": True,
+                "volume_invalid_count_before_normalization": True,
+                "volume_positive_count_before_normalization": MIN_BARS,
+                "volume_zero_count_before_normalization": 0,
+            },
+        )
+
+        for metadata in metadata_cases:
+            with self.subTest(metadata=metadata):
+                data = make_valid_data()
+                data.attrs.update(metadata)
+                result = evaluate_signal_at("AAPL", data, "1d")
+                self.assertNotIn(
+                    "Volumen superior a la media",
+                    result.get("reasons", []),
+                )
+
+    def test_inconsistent_volume_provenance_counts_suppress_bonus(self):
+        data = make_valid_data()
+        data.attrs.update({
+            "volume_quality": "available",
+            "volume_column_present": True,
+            "volume_invalid_count_before_normalization": 0,
+            "volume_positive_count_before_normalization": MIN_BARS - 1,
+            "volume_zero_count_before_normalization": 0,
+        })
+
+        result = evaluate_signal_at("AAPL", data, "1d")
+
+        self.assertNotIn("Volumen superior a la media", result.get("reasons", []))
+
+    def test_genuine_zero_volume_bars_can_still_qualify(self):
+        data = make_valid_data()
+        data.attrs.update({
+            "volume_quality": "contains_zero_bars",
+            "volume_column_present": True,
+            "volume_invalid_count_before_normalization": 0,
+            "volume_positive_count_before_normalization": MIN_BARS - 2,
+            "volume_zero_count_before_normalization": 2,
+        })
+
+        result = evaluate_signal_at("AAPL", data, "1d")
+
+        self.assertIn("Volumen superior a la media", result["reasons"])
+
     def test_all_zero_volume_does_not_receive_optional_volume_score(self):
         close = pd.Series([100.0 + index * 0.05 for index in range(MIN_BARS)])
         data = pd.DataFrame({
