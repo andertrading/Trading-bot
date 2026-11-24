@@ -20,7 +20,7 @@ _INTERVALS = {
 }
 
 
-def _refresh_segment_volume_provenance(
+def refresh_segment_volume_provenance(
     segment: pd.DataFrame,
     source_length: int,
 ) -> None:
@@ -131,7 +131,7 @@ def split_contiguous_segments(
     segments = []
     for start, end in zip(boundaries, boundaries[1:]):
         segment = data.iloc[start:end].copy()
-        _refresh_segment_volume_provenance(segment, source_length=len(data))
+        refresh_segment_volume_provenance(segment, source_length=len(data))
         segments.append(segment)
 
     metadata = {
