@@ -514,6 +514,41 @@ def _load_snapshot(asset, ticker, interval):
                 "El ajuste diario por splits de Twelve Data no tiene evidencia independiente válida"
             )
 
+    manifest_path = SNAPSHOT_DIR / "manifest.json"
+    if not manifest_path.is_file():
+        raise FileNotFoundError(
+            f"No existe el manifiesto central de snapshots: {manifest_path}"
+        )
+
+    with open(manifest_path, "r", encoding="utf-8") as file:
+        manifest = json.load(file)
+
+    if not isinstance(manifest, list):
+        raise ValueError(
+            f"El manifiesto central no contiene una lista: {manifest_path}"
+        )
+
+    matching_entries = [
+        item
+        for item in manifest
+        if isinstance(item, dict)
+        and item.get("asset") == asset
+        and item.get("ticker") == ticker
+        and item.get("timeframe") == interval
+    ]
+    if len(matching_entries) != 1:
+        raise ValueError(
+            "El manifiesto central debe contener exactamente una entrada "
+            f"para {asset} ({ticker}, {interval}); "
+            f"encontradas: {len(matching_entries)}"
+        )
+
+    if matching_entries[0] != metadata:
+        raise ValueError(
+            "Los metadatos del snapshot no coinciden exactamente con "
+            f"el manifiesto central: {asset} ({interval})"
+        )
+
     actual_hash = _sha256_file(csv_path)
 
     if actual_hash != metadata.get("sha256"):
