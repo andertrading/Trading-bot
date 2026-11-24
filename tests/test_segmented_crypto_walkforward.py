@@ -46,6 +46,26 @@ class DiagnosticRecordingBacktestModule(FakeBacktestModule):
         return [], None
 
 
+class StrategyRejectionBacktestModule(FakeBacktestModule):
+    def __init__(self):
+        super().__init__()
+        self.evaluate_signal_at = lambda data, asset, timeframe, index: {
+            "action": "NO TRADE",
+            "reason": "Tendencia principal no alcista",
+            "score": 55,
+        }
+
+    def run_backtest(self, asset, ticker, interval):
+        self.received = self.download_history(ticker, interval, asset=asset)
+        self.evaluate_signal_at(
+            self.received,
+            asset,
+            interval,
+            len(self.received) - 1,
+        )
+        return [], None
+
+
 class StrategyCheckingBacktestModule(FakeBacktestModule):
     def __init__(self):
         super().__init__()
@@ -139,6 +159,32 @@ class TestSegmentedCryptoWalkforwardProvenance(unittest.TestCase):
         self.assertEqual(fake.RR_REJECTIONS, [])
         self.assertEqual(fake.EXCLUDED_OHLC_CANDLES, [])
         self.assertEqual(fake.DOWNLOAD_ERRORS, {})
+
+    def test_fold_preserves_strategy_level_no_trade_rejections(self):
+        segment = make_segment()
+        fake = StrategyRejectionBacktestModule()
+
+        result = run_oos_fold(
+            segment,
+            "BTC",
+            "BTC-USD",
+            "15m",
+            "validation",
+            300,
+            399,
+            fake,
+        )
+
+        self.assertEqual(len(result["strategy_rejections"]), 1)
+        rejection = result["strategy_rejections"][0]
+        self.assertEqual(rejection["signal_status"], "STRATEGY_REJECTED")
+        self.assertEqual(
+            rejection["rejection_reason"],
+            "Tendencia principal no alcista",
+        )
+        self.assertEqual(rejection["score"], 55)
+        self.assertEqual(rejection["signal_time"], segment.index[399].isoformat())
+        self.assertEqual(fake.evaluate_signal_at.__name__, "<lambda>")
 
     def test_validation_prefix_rebases_volume_counts_before_strategy(self):
         segment = make_segment()
