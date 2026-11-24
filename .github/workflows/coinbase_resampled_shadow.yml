@@ -1,0 +1,119 @@
+name: Coinbase 1h/4h shadow walk-forward (retained data only)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: coinbase-resampled-shadow-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  resampled-shadow:
+    name: Offline 1h/4h walk-forward
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install research dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Download retained Coinbase-only artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: coinbase-only-ohlcv-45233527066
+          run-id: 45233527066
+          github-token: ${{ github.token }}
+          path: coinbase_data
+
+      - name: Verify retained source manifest
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          path = Path("coinbase_data/manifest.json")
+          if not path.is_file():
+              raise SystemExit("Retained Coinbase manifest is missing.")
+          manifest = json.loads(path.read_text(encoding="utf-8"))
+          policy = manifest.get("source_policy", {})
+          required = {
+              "coinbase_only": True,
+              "twelvedata_used": False,
+              "eodhd_used": False,
+              "cross_provider_gap_repair": False,
+              "synthetic_candles": False,
+              "missing_candles_filled": False,
+          }
+          failures = [key for key, value in required.items() if policy.get(key) is not value]
+          if failures:
+              raise SystemExit("Coinbase source policy failed: " + ", ".join(failures))
+          print("Retained Coinbase-only source manifest verified; no provider calls will be made.")
+          PY
+
+      - name: Run all assets on 1h and 4h
+        id: research
+        shell: bash
+        run: |
+          set +e
+          mkdir -p artifacts/coinbase_resampled
+          failures=0
+          for asset in BTC ETH SOL XLM XRP; do
+            for interval in 1h 4h; do
+              echo "Running $asset $interval"
+              python research/resampled_crypto_history.py \
+                --csv "coinbase_data/${asset}_15m.csv" \
+                --manifest "coinbase_data/manifest.json" \
+                --asset "$asset" \
+                --ticker "${asset}-USD" \
+                --interval "$interval" \
+                --output "artifacts/coinbase_resampled/${asset}_${interval}.json"
+              code=$?
+              if [ "$code" -ne 0 ]; then
+                echo "::error::$asset $interval research failed with exit code $code"
+                failures=$((failures + 1))
+              fi
+            done
+          done
+          echo "failures=$failures" >> "$GITHUB_OUTPUT"
+          python - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json
+          from pathlib import Path
+          print("# Coinbase 1h/4h shadow research")
+          print("")
+          print("- Source: retained Coinbase-only M15 artifact from run 45233527066")
+          print("- Network/provider requests: 0")
+          print("- Production changes: none")
+          print("- Net expectancy: unverified; gross results only")
+          print("")
+          print("| Asset | Timeframe | Trades | Validation trades | Test trades |")
+          print("|---|---:|---:|---:|---:|")
+          for path in sorted(Path("artifacts/coinbase_resampled").glob("*.json")):
+              report = json.loads(path.read_text(encoding="utf-8"))
+              folds = report.get("folds", [])
+              validation = sum(f.get("metrics", {}).get("trades", 0) for f in folds if f.get("fold") == "validation")
+              test = sum(f.get("metrics", {}).get("trades", 0) for f in folds if f.get("fold") == "test")
+              print(f"| {report.get('asset')} | {report.get('interval')} | {report.get('trade_count')} | {validation} | {test} |")
+          PY
+          exit "$failures"
+
+      - name: Upload 1h/4h shadow outputs
+        if: always() && hashFiles('artifacts/coinbase_resampled/*.json') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: coinbase-resampled-1h-4h-shadow-${{ github.run_id }}
+          path: artifacts/coinbase_resampled/
+          if-no-files-found: error
+          retention-days: 90
