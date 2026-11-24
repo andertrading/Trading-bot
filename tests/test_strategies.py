@@ -4,6 +4,7 @@ from unittest.mock import patch
 
 import pandas as pd
 
+from research.segmented_crypto_history import split_contiguous_segments
 from strategies import (
     MIN_BARS,
     MIN_SCORE,
@@ -367,6 +368,48 @@ class TestStrategies(unittest.TestCase):
             "BUY CANDIDATE",
             msg=str(result),
         )
+
+    def test_valid_volume_bonus_survives_gap_segmentation(self):
+        data = make_valid_data(rows=MIN_BARS * 2)
+        first = pd.date_range(
+            "2026-01-01", periods=MIN_BARS, freq="15min", tz="UTC"
+        )
+        second = pd.date_range(
+            first[-1] + pd.Timedelta(hours=1),
+            periods=MIN_BARS,
+            freq="15min",
+        )
+        data.index = first.append(second)
+        data["Volume"] = 10.0
+        data.iloc[MIN_BARS + 5, data.columns.get_loc("Volume")] = 0.0
+        data.attrs.update({
+            "volume_quality": "contains_zero_bars",
+            "volume_column_present": True,
+            "volume_zero_count_before_normalization": 1,
+            "volume_positive_count_before_normalization": len(data) - 1,
+            "volume_invalid_count_before_normalization": 0,
+        })
+
+        segments, _ = split_contiguous_segments(data, "15m")
+
+        self.assertEqual(len(segments), 2)
+        expected = [
+            ("available", 0, MIN_BARS),
+            ("contains_zero_bars", 1, MIN_BARS - 1),
+        ]
+        for segment, (quality, zero_count, positive_count) in zip(segments, expected):
+            with self.subTest(quality=quality):
+                self.assertEqual(segment.attrs["volume_quality"], quality)
+                self.assertEqual(
+                    segment.attrs["volume_zero_count_before_normalization"],
+                    zero_count,
+                )
+                self.assertEqual(
+                    segment.attrs["volume_positive_count_before_normalization"],
+                    positive_count,
+                )
+                result = evaluate_signal_at("AAPL", segment, "15m")
+                self.assertIn("Volumen superior a la media", result["reasons"])
 
     def test_volume_bonus_requires_explicit_valid_provenance(self):
         data = make_valid_data()
