@@ -132,11 +132,12 @@ def load_coinbase_snapshot(
         raise ValueError("CSV contains incoherent OHLC candles")
 
     volume = data["Volume"].to_numpy(dtype=float)
+    finite_volume = np.isfinite(volume)
     observed_volume_counts = {
-        "zero_volume_bars": int((volume == 0).sum()),
-        "positive_volume_bars": int((volume > 0).sum()),
-        "invalid_or_missing_volume_bars": int((~np.isfinite(volume)).sum()),
-        "negative_volume_bars": int((volume < 0).sum()),
+        "zero_volume_bars": int(((volume == 0) & finite_volume).sum()),
+        "positive_volume_bars": int(((volume > 0) & finite_volume).sum()),
+        "invalid_or_missing_volume_bars": int((~finite_volume).sum()),
+        "negative_volume_bars": int(((volume < 0) & finite_volume).sum()),
     }
     for key, observed in observed_volume_counts.items():
         declared = series.get(key)
