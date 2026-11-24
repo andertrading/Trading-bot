@@ -246,7 +246,33 @@ def evaluate_signal_at(data, asset, timeframe, index=-1):
         score += 10
         reasons.append("Ruptura de máximos de 20 velas")
 
-    # El volumen continúa siendo opcional.
+    # El volumen continúa siendo opcional. Solo puede mejorar la
+    # puntuación cuando el histórico conserva procedencia explícita y
+    # válida desde la normalización OHLCV. Un volumen zero-filled por
+    # ausencia o valores inválidos nunca debe generar este bonus.
+    volume_metadata = getattr(data, "attrs", {})
+    volume_quality = volume_metadata.get("volume_quality")
+    volume_column_present = volume_metadata.get("volume_column_present")
+    volume_invalid_count = volume_metadata.get(
+        "volume_invalid_count_before_normalization"
+    )
+    volume_positive_count = volume_metadata.get(
+        "volume_positive_count_before_normalization"
+    )
+    volume_zero_count = volume_metadata.get(
+        "volume_zero_count_before_normalization"
+    )
+
+    volume_provenance_valid = (
+        volume_quality in {"available", "contains_zero_bars"}
+        and volume_column_present is True
+        and type(volume_invalid_count) is int
+        and volume_invalid_count == 0
+        and type(volume_positive_count) is int
+        and volume_positive_count > 0
+        and type(volume_zero_count) is int
+        and volume_zero_count >= 0
+    )
 
     relative_volume = row.get(
         "RELATIVE_VOLUME",
@@ -254,7 +280,8 @@ def evaluate_signal_at(data, asset, timeframe, index=-1):
     )
 
     if (
-        _valid_number(relative_volume)
+        volume_provenance_valid
+        and _valid_number(relative_volume)
         and float(relative_volume) >= 1.2
     ):
         score += 10
