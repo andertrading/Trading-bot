@@ -173,6 +173,16 @@ def load_coinbase_snapshot(
 
     data.attrs["coinbase_manifest_series"] = series
     data.attrs["coinbase_source_policy"] = policy
+
+    # The loader has just validated that the source Volume column exists,
+    # every value is finite and strictly positive, and the series is from
+    # the Coinbase-only manifest. Translate that verified source evidence
+    # into the shared provenance contract used by strategy scoring.
+    data.attrs["volume_quality"] = "available"
+    data.attrs["volume_column_present"] = True
+    data.attrs["volume_zero_count_before_normalization"] = 0
+    data.attrs["volume_positive_count_before_normalization"] = int(len(data))
+    data.attrs["volume_invalid_count_before_normalization"] = 0
     return data, manifest
 
 

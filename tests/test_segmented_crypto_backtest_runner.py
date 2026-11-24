@@ -272,6 +272,11 @@ class TestSegmentedCryptoBacktestRunner(unittest.TestCase):
             self.assertEqual(loaded.index.tz, pd.Timestamp.now(tz="UTC").tz)
             self.assertEqual(loaded_manifest["github_run_id"], "test-run")
             self.assertEqual(loaded.attrs["coinbase_manifest_series"]["missing_bars"], 1)
+            self.assertEqual(loaded.attrs["volume_quality"], "available")
+            self.assertIs(loaded.attrs["volume_column_present"], True)
+            self.assertEqual(loaded.attrs["volume_zero_count_before_normalization"], 0)
+            self.assertEqual(loaded.attrs["volume_positive_count_before_normalization"], 3)
+            self.assertEqual(loaded.attrs["volume_invalid_count_before_normalization"], 0)
 
     def test_loader_rejects_non_coinbase_source_policy(self):
         with tempfile.TemporaryDirectory() as directory:
