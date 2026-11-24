@@ -64,9 +64,33 @@ class HistoricalMarketProbeTests(unittest.TestCase):
         }, 200, {})
         result = normalize_candle_history(duplicate, 123, "OneDay")
         self.assertEqual(len(result), 2)
-        self.assertFalse(result[0]["timestamp_duplicate"])
+        self.assertTrue(result[0]["timestamp_duplicate"])
         self.assertTrue(result[1]["timestamp_duplicate"])
         self.assertEqual([item["close"] for item in result], ["103", "104"])
+
+    def test_run_probe_counts_all_rows_in_duplicate_daily_groups(self):
+        class DuplicateDailyClient:
+            def get_candle_history(self, instrument_id, interval, candles_count, direction):
+                rows = [candle(iid=instrument_id)]
+                if interval == "OneDay":
+                    rows = [
+                        candle(iid=instrument_id, stamp="2024-11-03T00:00:00Z", close=103),
+                        candle(iid=instrument_id, stamp="2024-11-03T00:00:00Z", close=104),
+                        candle(iid=instrument_id, stamp="2024-11-04T00:00:00Z", close=105),
+                    ]
+                return EtoroResponse({
+                    "interval": interval,
+                    "candles": [{"instrumentId": instrument_id, "candles": rows}],
+                }, 200, {})
+
+        result = run_probe(DuplicateDailyClient(), {"BTC": 123}, 10)
+        daily = result["assets"]["BTC"]["intervals"]["OneDay"]
+        self.assertEqual(daily["duplicate_timestamp_candles"], 2)
+        self.assertEqual(daily["duplicate_timestamp_groups"], 1)
+        self.assertEqual(daily["duplicate_timestamps"], ["2024-11-03T00:00:00+00:00"])
+        self.assertTrue(daily["candles"][0]["timestamp_duplicate"])
+        self.assertTrue(daily["candles"][1]["timestamp_duplicate"])
+        self.assertFalse(daily["candles"][2]["timestamp_duplicate"])
 
     def test_rejects_duplicate_intraday_timestamps_and_nonchronological_timestamps(self):
         duplicate = EtoroResponse({

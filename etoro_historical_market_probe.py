@@ -101,6 +101,15 @@ def normalize_candle_history(response: Any, instrument_id: int, expected_interva
             "open": str(o), "high": str(h), "low": str(low), "close": str(c),
             "volume": None if volume is None else str(volume),
         })
+    # Flag every member of a repeated-timestamp group, not only the second
+    # and subsequent rows. Downstream consumers must not accidentally treat
+    # the first bar in an ambiguous daily group as a unique observation.
+    timestamp_counts = {}
+    for item in normalized:
+        timestamp_counts[item["timestamp"]] = timestamp_counts.get(item["timestamp"], 0) + 1
+    for item in normalized:
+        item["timestamp_duplicate"] = timestamp_counts[item["timestamp"]] > 1
+
     timestamps = [datetime.fromisoformat(item["timestamp"]) for item in normalized]
     if timestamps != sorted(timestamps):
         raise EtoroAPIError("Las velas no están ordenadas cronológicamente")
@@ -181,6 +190,7 @@ def run_probe(client: EtoroHistoricalMarketDataClient, instruments: Mapping[str,
                 "zero_volume_candles": sum(value == "0" for value in volumes),
                 "missing_volume_candles": sum(value is None for value in volumes),
                 "duplicate_timestamp_candles": sum(candle["timestamp_duplicate"] for candle in candles),
+                "duplicate_timestamp_groups": len({candle["timestamp"] for candle in candles if candle["timestamp_duplicate"]}),
                 "duplicate_timestamps": sorted({candle["timestamp"] for candle in candles if candle["timestamp_duplicate"]}),
                 "candles": candles
             }
