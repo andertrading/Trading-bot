@@ -1,10 +1,14 @@
+import json
+import tempfile
 import unittest
+from pathlib import Path
 from datetime import timezone
 from unittest.mock import Mock
 
 from etoro_read_only import EtoroAPIError, EtoroResponse
 from etoro_historical_market_probe import (
     EtoroHistoricalMarketDataClient,
+    load_instrument_ids,
     normalize_candle_history,
     run_probe,
 )
@@ -125,6 +129,44 @@ class HistoricalMarketProbeTests(unittest.TestCase):
             result["assets"]["ETH"]["intervals"]["OneDay"]["status"],
             "DATA_RETURNED",
         )
+
+    def test_loads_only_explicitly_confirmed_instrument_ids(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "registry.json"
+            path.write_text(json.dumps({
+                "assets": {
+                    "BTC": {"instrument": {"confirmed": True, "etoro_instrument_id": 123}},
+                    "ETH": {"instrument": {"confirmed": True, "etoro_instrument_id": 456}},
+                }
+            }), encoding="utf-8")
+            self.assertEqual(load_instrument_ids(path), {"BTC": 123, "ETH": 456})
+
+    def test_rejects_unconfirmed_or_malformed_instrument_metadata(self):
+        invalid_registries = [
+            {"assets": {"BTC": {"instrument": {"confirmed": False, "etoro_instrument_id": 123}}}},
+            {"assets": {"BTC": {"instrument": {"etoro_instrument_id": 123}}}},
+            {"assets": {"BTC": {"instrument": None}}},
+            {"assets": {"BTC": None}},
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "registry.json"
+            for payload in invalid_registries:
+                with self.subTest(payload=payload):
+                    path.write_text(json.dumps(payload), encoding="utf-8")
+                    with self.assertRaises(ValueError):
+                        load_instrument_ids(path)
+
+    def test_rejects_duplicate_confirmed_instrument_ids(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "registry.json"
+            path.write_text(json.dumps({
+                "assets": {
+                    "BTC": {"instrument": {"confirmed": True, "etoro_instrument_id": 123}},
+                    "ETH": {"instrument": {"confirmed": True, "etoro_instrument_id": 123}},
+                }
+            }), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "duplicados"):
+                load_instrument_ids(path)
 
     def test_rejects_invalid_count_and_interval_before_network(self):
         session = Mock()
