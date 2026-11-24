@@ -63,6 +63,14 @@ def run_oos_fold(
 
     start_time = segment.index[start_index]
     end_time = segment.index[end_index]
+    strategy_rejections: list[dict[str, Any]] = []
+
+    def _diagnostic_number(value):
+        try:
+            number = float(value)
+        except (TypeError, ValueError, OverflowError):
+            return None
+        return number if pd.notna(number) and number not in (float("inf"), float("-inf")) else None
 
     # The full contiguous segment carries source-volume counts for its full
     # length. This fold receives only the causal prefix ending at end_index,
@@ -86,7 +94,32 @@ def run_oos_fold(
         timestamp = frame.index[index]
         if timestamp < start_time or timestamp > end_time:
             return None
-        return original_evaluate(*args, **kwargs)
+        result = original_evaluate(*args, **kwargs)
+        if isinstance(result, dict) and result.get("action") == "NO TRADE":
+            row = frame.iloc[index]
+            strategy_rejections.append({
+                "asset": asset,
+                "ticker": ticker,
+                "timeframe": interval,
+                "signal_time": timestamp.isoformat(),
+                "signal_status": "STRATEGY_REJECTED",
+                "rejection_reason": result.get("reason"),
+                "score": _diagnostic_number(result.get("score")),
+                "signal_close": _diagnostic_number(row.get("Close")),
+                "ema20": _diagnostic_number(row.get("EMA20")),
+                "ema50": _diagnostic_number(row.get("EMA50")),
+                "ema200": _diagnostic_number(row.get("EMA200")),
+                "rsi": _diagnostic_number(row.get("RSI")),
+                "macd": _diagnostic_number(row.get("MACD")),
+                "macd_signal": _diagnostic_number(row.get("MACD_SIGNAL")),
+                "high20": _diagnostic_number(row.get("HIGH20")),
+                "relative_volume": _diagnostic_number(
+                    row.get("RELATIVE_VOLUME", row.get("relative_volume"))
+                ),
+                "atr": _diagnostic_number(row.get("ATR")),
+                "atr_percent": _diagnostic_number(row.get("ATR_PERCENT")),
+            })
+        return result
 
     try:
         backtest_module.download_history = (
@@ -127,6 +160,10 @@ def run_oos_fold(
                 for item in getattr(backtest_module, "SIGNAL_DIAGNOSTICS", [])
                 if isinstance(item, dict)
             ],
+            # Strategy-level NO TRADE outcomes are separate from execution
+            # diagnostics: the engine otherwise records only BUY CANDIDATE
+            # signals, hiding the dominant rejection reasons and regimes.
+            "strategy_rejections": strategy_rejections,
             "rr_rejections": [
                 dict(item)
                 for item in getattr(backtest_module, "RR_REJECTIONS", [])
