@@ -589,12 +589,15 @@ class RealtimeQuoteValidationTests(unittest.TestCase):
         with self.assertRaises(EtoroAPIError):
             normalize_realtime_quotes(EtoroResponse(data, 200, {}), [101], self.now)
 
-    def test_stale_and_future_quotes_are_rejected(self):
+    def test_stale_and_future_quotes_are_rejected_with_age_context(self):
         stale = {"results": [dict(
             self.response.data["results"][0],
             date="2026-11-21T11:59:00Z",
         )]}
-        with self.assertRaises(EtoroAPIError):
+        with self.assertRaisesRegex(
+            EtoroAPIError,
+            r"obsoleta.*timestamp=2026-11-21T11:59:00\+00:00.*age_seconds=60\.000.*max_age_seconds=30",
+        ):
             normalize_realtime_quotes(EtoroResponse(stale, 200, {}), [101], self.now)
 
         future = {"results": [dict(
@@ -647,7 +650,10 @@ class RealtimeQuoteValidationTests(unittest.TestCase):
                 "date": "2026-11-23T14:00:00Z",
             }]
         }, 200, {})
-        with self.assertRaisesRegex(EtoroAPIError, "mercado abierto"):
+        with self.assertRaisesRegex(
+            EtoroAPIError,
+            r"mercado abierto.*age_seconds=3637\.000.*max_age_seconds=30.*calendar=XNYS",
+        ):
             normalize_realtime_quotes(
                 response,
                 [101],
