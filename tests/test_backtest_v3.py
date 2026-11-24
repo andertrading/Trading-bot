@@ -407,6 +407,15 @@ class TestBacktestV3(unittest.TestCase):
             replayed.attrs["volume_positive_count_before_normalization"],
             0,
         )
+        replayed_indicators = backtest_v3.add_indicators(replayed)
+        self.assertEqual(
+            replayed_indicators.attrs["volume_quality"],
+            "all_zero",
+        )
+        self.assertEqual(
+            replayed_indicators.attrs["volume_zero_count_before_normalization"],
+            len(data),
+        )
 
     def test_snapshot_replay_requires_central_manifest(self):
         data = self.make_data()
