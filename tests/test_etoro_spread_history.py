@@ -1,9 +1,13 @@
+import json
 import unittest
 from datetime import datetime, timedelta, timezone
+from io import BytesIO
+import zipfile
 
 from etoro_spread_history import (
     build_spread_history_report,
     extract_realtime_samples,
+    fetch_artifact_reports,
 )
 
 
@@ -110,6 +114,89 @@ class EtoroSpreadHistoryTests(unittest.TestCase):
         self.assertIsNotNone(asset["p95_spread_bps"])
         self.assertEqual(report["historical_execution_price_basis"], "NOT_VALIDATED")
 
+
+
+    def test_artifact_fetch_includes_completed_partial_failure_runs(self):
+        now = datetime(2026, 11, 26, 16, 0, tzinfo=timezone.utc)
+        runs = [
+            {"id": 101, "head_branch": "main", "conclusion": "success",
+             "created_at": "2026-11-24T16:00:00+00:00"},
+            {"id": 102, "head_branch": "main", "conclusion": "failure",
+             "created_at": "2026-11-25T16:00:00+00:00"},
+            {"id": 103, "head_branch": "main", "conclusion": "cancelled",
+             "created_at": "2026-11-25T17:00:00+00:00"},
+            {"id": 104, "head_branch": "feature/test", "conclusion": "failure",
+             "created_at": "2026-11-25T18:00:00+00:00"},
+        ]
+        artifacts = [
+            {"id": 1001, "name": "etoro-market-evidence", "expired": False,
+             "workflow_run": {"id": 101}},
+            {"id": 1002, "name": "etoro-market-evidence", "expired": False,
+             "workflow_run": {"id": 102}},
+            {"id": 1003, "name": "etoro-market-evidence", "expired": False,
+             "workflow_run": {"id": 103}},
+            {"id": 1004, "name": "etoro-market-evidence", "expired": False,
+             "workflow_run": {"id": 104}},
+            {"id": 1005, "name": "other-artifact", "expired": False,
+             "workflow_run": {"id": 102}},
+        ]
+
+        def zip_report(report):
+            buffer = BytesIO()
+            with zipfile.ZipFile(buffer, "w") as archive:
+                archive.writestr(
+                    "etoro_market_evidence.json",
+                    json.dumps(report),
+                )
+            return buffer.getvalue()
+
+        reports_by_artifact = {
+            1001: zip_report(evidence("2026-11-24T16:00:00+00:00", 4.5)),
+            1002: zip_report(evidence("2026-11-25T16:00:00+00:00", 3.5)),
+            1003: zip_report(evidence("2026-11-25T17:00:00+00:00", 3.0)),
+            1004: zip_report(evidence("2026-11-25T18:00:00+00:00", 2.5)),
+        }
+
+        class FakeResponse:
+            def __init__(self, *, payload=None, content=b""):
+                self.payload = payload
+                self.content = content
+
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return self.payload
+
+        class FakeSession:
+            def get(self, url, *, headers, timeout):
+                if "/actions/workflows/" in url and "/runs?" in url:
+                    return FakeResponse(payload={"workflow_runs": runs})
+                if "/actions/artifacts?" in url:
+                    return FakeResponse(payload={"artifacts": artifacts})
+                if url.endswith("/zip"):
+                    artifact_id = int(url.rstrip("/").split("/")[-2])
+                    return FakeResponse(content=reports_by_artifact[artifact_id])
+                raise AssertionError("Unexpected URL: " + url)
+
+        reports, artifact_count, errors = fetch_artifact_reports(
+            "owner/repo",
+            "test-token",
+            now_utc=now,
+            session=FakeSession(),
+        )
+
+        self.assertEqual(artifact_count, 2)
+        self.assertEqual({run_id for run_id, _ in reports}, {101, 102})
+        self.assertEqual(errors, [])
+        failure_report = next(report for run_id, report in reports if run_id == 102)
+        samples = extract_realtime_samples(
+            failure_report,
+            run_id=102,
+            now_utc=now,
+        )
+        self.assertEqual(len(samples), 1)
+        self.assertEqual(samples[0]["spread_bps"], 3.5)
 
 if __name__ == "__main__":
     unittest.main()

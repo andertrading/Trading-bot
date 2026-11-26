@@ -259,7 +259,11 @@ def fetch_artifact_reports(
         if (
             not isinstance(run, Mapping)
             or run.get("head_branch") != "main"
-            or run.get("conclusion") != "success"
+            # Partial evidence captures intentionally exit non-zero after
+            # uploading their JSON artifact. Include completed failures too:
+            # downstream extraction independently accepts only fresh,
+            # timestamp-valid realtime quote samples from the artifact.
+            or run.get("conclusion") not in {"success", "failure"}
         ):
             continue
         created = _timestamp(run.get("created_at"))
