@@ -90,6 +90,28 @@ def _open_risk(state: dict) -> float:
 
 def _trade_cash_reserved(trade: dict, notional_usd: float) -> float:
     """Return a validated cash reserve, including legacy verified-cost trades."""
+    has_entry_evidence = any(
+        field in trade
+        for field in ("entry_fill_price", "quantity", "entry_timestamp")
+    )
+    if has_entry_evidence:
+        if "entry_fill_price" not in trade or "quantity" not in trade:
+            raise ValueError(
+                "open paper trade is missing quantity or entry fill price"
+            )
+        entry_price = _number(
+            trade["entry_fill_price"], "entry_fill_price"
+        )
+        quantity = _number(trade["quantity"], "quantity")
+        calculated_notional = entry_price * quantity
+        if not math.isfinite(calculated_notional):
+            raise ValueError("calculated paper trade notional is invalid")
+        tolerance = max(1e-8, abs(notional_usd) * 1e-8)
+        if abs(calculated_notional - notional_usd) > tolerance:
+            raise ValueError(
+                "paper trade notional does not match quantity multiplied by entry fill price"
+            )
+
     if "cash_reserved_usd" in trade:
         reserved = _number(trade["cash_reserved_usd"], "cash_reserved_usd")
     elif trade.get("cost_mode") == "VERIFIED_REGISTRY":
