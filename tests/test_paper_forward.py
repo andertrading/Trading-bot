@@ -192,6 +192,39 @@ class PaperForwardTests(unittest.TestCase):
         self.assertEqual(self.state["trades"]["s1"]["status"], "OPEN")
 
 
+    def test_snapshot_rejects_open_notional_mismatch(self):
+        process_signal_bar(
+            self.state,
+            signal("first"),
+            bar("2026-11-22T10:15:00+00:00", 99.5, 101, 99.5, 100),
+        )
+        trade = self.state["trades"]["first"]
+        trade["notional_usd"] *= 0.5
+
+        with self.assertRaisesRegex(ValueError, "notional does not match"):
+            paper_portfolio_snapshot(self.state)
+
+    def test_new_entry_rejects_existing_open_notional_mismatch(self):
+        process_signal_bar(
+            self.state,
+            signal("first"),
+            bar("2026-11-22T10:15:00+00:00", 99.5, 101, 99.5, 100),
+        )
+        self.state["trades"]["first"]["notional_usd"] *= 0.5
+
+        second = signal("second")
+        second.update({
+            "data_timestamp": "2026-11-22T10:15:00+00:00",
+            "generated_at": "2026-11-22T10:15:00+00:00",
+            "expires_at": "2026-11-22T11:15:00+00:00",
+        })
+        with self.assertRaisesRegex(ValueError, "notional does not match"):
+            process_signal_bar(
+                self.state,
+                second,
+                bar("2026-11-22T10:30:00+00:00", 99.5, 101, 99.5, 100),
+            )
+
     def test_aggregate_open_risk_cap_blocks_additional_paper_trade(self):
         first = signal("first")
         second = signal("second")
