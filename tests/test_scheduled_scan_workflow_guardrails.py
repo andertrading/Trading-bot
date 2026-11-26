@@ -38,8 +38,12 @@ class ScheduledScanWorkflowGuardrailsTests(unittest.TestCase):
             "vars.SIGNAL_AUTOMATION_ENABLED == 'true'",
             gate,
         )
-        self.assertIn("&&", gate)
-        self.assertIn("||", gate)
+        self.assertEqual(
+            gate,
+            "if: ${{ vars.MARKET_DATA_CREDITS_AUTHORIZED == 'true' && "
+            "(github.event_name == 'workflow_dispatch' || "
+            "vars.SIGNAL_AUTOMATION_ENABLED == 'true') }}",
+        )
 
     def test_manual_dispatch_does_not_bypass_credit_authorization(self):
         gate = next(
