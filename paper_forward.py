@@ -71,11 +71,21 @@ def _validate_state(state: dict) -> None:
 
 
 def _open_risk(state: dict) -> float:
-    return sum(
-        float(trade.get("risk_reserved_usd", 0.0))
-        for trade in state["trades"].values()
-        if trade.get("status") == "OPEN"
-    )
+    """Sum only strictly validated positive risk reservations."""
+    total = 0.0
+    for signal_id, trade in state["trades"].items():
+        if not isinstance(trade, dict):
+            raise ValueError(f"{signal_id} paper trade record is invalid")
+        if trade.get("status") != "OPEN":
+            continue
+        risk_usd = _number(
+            trade.get("risk_reserved_usd"),
+            f"{signal_id}.risk_reserved_usd",
+        )
+        total += risk_usd
+        if not math.isfinite(total):
+            raise ValueError("paper portfolio open risk total is invalid")
+    return total
 
 
 def _trade_cash_reserved(trade: dict, notional_usd: float) -> float:
