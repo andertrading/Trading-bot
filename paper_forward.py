@@ -282,6 +282,40 @@ def _levels(signal: dict) -> tuple[float, float, float]:
     return entry, stop, target
 
 
+def _refresh_costs_status(state: dict) -> None:
+    """Derive the portfolio cost label from every open and closed ledger row."""
+    trades = list(state["trades"].values())
+    closed = [trade for trade in trades if trade.get("status") == "CLOSED"]
+    opened = [trade for trade in trades if trade.get("status") == "OPEN"]
+
+    unresolved_close = any(
+        trade.get("cost_mode") == "VERIFIED_REGISTRY"
+        and (trade.get("costs_usd") is None or trade.get("net_pnl_usd") is None)
+        for trade in closed
+    )
+    closed_net_complete = bool(closed) and all(
+        trade.get("cost_mode") == "VERIFIED_REGISTRY"
+        and trade.get("costs_usd") is not None
+        and trade.get("net_pnl_usd") is not None
+        for trade in closed
+    )
+    has_unverified_open = any(
+        trade.get("cost_mode") != "VERIFIED_REGISTRY" for trade in opened
+    )
+    has_verified_open = any(
+        trade.get("cost_mode") == "VERIFIED_REGISTRY" for trade in opened
+    )
+
+    if unresolved_close:
+        state["costs_status"] = "UNRESOLVED_CLOSE_COSTS"
+    elif closed_net_complete and not has_unverified_open:
+        state["costs_status"] = "VERIFIED_NET_COSTS_INCLUDED"
+    elif has_verified_open and not closed and not has_unverified_open:
+        state["costs_status"] = "VERIFIED_COSTS_RESERVED_AT_STOP"
+    else:
+        state["costs_status"] = "NOT_INCLUDED_UNVERIFIED"
+
+
 def _finish_trade(
     state: dict,
     trade: dict,
@@ -311,11 +345,9 @@ def _finish_trade(
             net_pnl = pnl - costs
             state["realized_costs_usd"] = float(state.get("realized_costs_usd", 0.0)) + costs
             state["realized_net_pnl_usd"] = float(state.get("realized_net_pnl_usd", 0.0)) + net_pnl
-            state["costs_status"] = "VERIFIED_NET_COSTS_INCLUDED"
             state["equity_usd"] += net_pnl
         else:
             trade["costs_blockers"] = list(estimate.get("unpriced_costs", []))
-            state["costs_status"] = "UNRESOLVED_CLOSE_COSTS"
             # Do not book a gross gain as spendable equity when close costs
             # unexpectedly become unavailable. Gross losses remain conservative.
             state["equity_usd"] += min(pnl, 0.0)
@@ -339,6 +371,7 @@ def _finish_trade(
     })
     if exit_bar is not None:
         trade["exit_bar"] = dict(exit_bar)
+    _refresh_costs_status(state)
     state["realized_gross_pnl_usd"] += pnl
     state["peak_equity_usd"] = max(state["peak_equity_usd"], state["equity_usd"])
     state.setdefault("equity_history", []).append({
@@ -533,8 +566,7 @@ def process_signal_bar(
                                         if cost_sizing else None
                                     ),
                                 })
-                                if cost_sizing:
-                                    state["costs_status"] = "VERIFIED_COSTS_RESERVED_AT_STOP"
+                                _refresh_costs_status(state)
                                 # If target is touched after entry and stop is not,
                                 # the same candle can close at the target.
                                 if target_touched:
