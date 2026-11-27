@@ -9,6 +9,7 @@ from paper_forward import (
     paper_summary,
     paper_portfolio_snapshot,
     process_signal_bar,
+    _refresh_costs_status,
 )
 
 
@@ -36,6 +37,53 @@ def bar(ts, opening, high, low, close):
 class PaperForwardTests(unittest.TestCase):
     def setUp(self):
         self.state = new_paper_state()
+
+    def test_cost_status_does_not_claim_net_when_gross_trade_is_mixed_in(self):
+        self.state["trades"] = {
+            "gross": {
+                "status": "CLOSED",
+                "cost_mode": "GROSS_DIAGNOSTIC",
+                "gross_pnl_usd": 5.0,
+            },
+            "verified": {
+                "status": "CLOSED",
+                "cost_mode": "VERIFIED_REGISTRY",
+                "gross_pnl_usd": 5.0,
+                "costs_usd": 1.0,
+                "net_pnl_usd": 4.0,
+            },
+        }
+        self.state["costs_status"] = "VERIFIED_NET_COSTS_INCLUDED"
+
+        _refresh_costs_status(self.state)
+        snapshot = paper_portfolio_snapshot(self.state)
+
+        self.assertEqual(self.state["costs_status"], "NOT_INCLUDED_UNVERIFIED")
+        self.assertEqual(snapshot["portfolio_basis"], "PAPER_GROSS_CONSERVATIVE_CAPITAL")
+
+    def test_unresolved_close_costs_cannot_be_overwritten_by_later_verified_close(self):
+        self.state["trades"] = {
+            "unresolved": {
+                "status": "CLOSED",
+                "cost_mode": "VERIFIED_REGISTRY",
+                "gross_pnl_usd": -5.0,
+                "costs_usd": None,
+                "net_pnl_usd": None,
+            },
+            "verified": {
+                "status": "CLOSED",
+                "cost_mode": "VERIFIED_REGISTRY",
+                "gross_pnl_usd": 5.0,
+                "costs_usd": 1.0,
+                "net_pnl_usd": 4.0,
+            },
+        }
+
+        _refresh_costs_status(self.state)
+        snapshot = paper_portfolio_snapshot(self.state)
+
+        self.assertEqual(self.state["costs_status"], "UNRESOLVED_CLOSE_COSTS")
+        self.assertEqual(snapshot["portfolio_basis"], "PAPER_GROSS_CONSERVATIVE_CAPITAL")
 
     def test_initial_virtual_capital_is_separate_and_fixed(self):
         self.assertEqual(self.state["equity_usd"], 1000.0)
